@@ -1,0 +1,7 @@
+Flask==3.0.3
+Werkzeug==3.1.3
+requests==2.32.3
+mutagen==1.47.0
+yt-dlp
+Flask-SocketIO==5.3.6
+simple-websocket==1.0.0

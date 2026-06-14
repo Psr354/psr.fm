@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>psr.fm</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}">
+</head>
+<body>
+    <button id="mobile-menu-btn" class="mobile-menu-btn"><i class="fas fa-bars"></i></button>
+
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="logo"><h1>psr.fm</h1></div>
+            <nav class="nav-menu">
+                <button id="home-btn" class="nav-item active"><i class="fas fa-home"></i> Home</button>
+                <button id="search-btn" class="nav-item"><i class="fas fa-search"></i> Search</button>
+                <button id="global-download-btn" class="nav-item" style="margin-top: 12px; color: var(--accent-color);"><i class="fas fa-download"></i> Download Song</button>
+            </nav>
+            <div class="playlist-section">
+                <div class="playlist-header">
+                    <h3>Playlists</h3>
+                    <button id="create-playlist-btn" class="icon-btn"><i class="fas fa-plus"></i></button>
+                </div>
+                <ul id="playlist-list" class="playlist-items"></ul>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div id="dashboard-view" class="view active">
+                <h2>Good Evening</h2>
+                <div class="stats-grid" id="stats-grid"></div>
+                <div class="recent-songs"><h3 style="margin-bottom: 16px;">Recently Added</h3><div id="recent-songs-list" class="songs-list"></div></div>
+            <div class="top-songs-section" style="margin-top: 40px;">
+                <h3 style="margin-bottom: 16px; font-size: 20px;">🔥 Top Played (Most Plays)</h3>
+                <div id="top-songs-list" class="songs-list"></div>
+            </div>
+
+            <div class="top-songs-section" style="margin-top: 40px;">
+                <h3 style="margin-bottom: 16px; font-size: 20px;">⏱️ Top Listened (Longest Duration)</h3>
+                <div id="top-songs-duration-list" class="songs-list"></div>
+            </div>
+            </div>
+
+            <div id="playlist-view" class="view">
+                <div class="playlist-header-main">
+                    <div style="display:flex; align-items:center; gap:24px;">
+                        <div class="playlist-cover-wrapper" id="playlist-cover-wrapper"><img id="playlist-cover-img" src=""><div class="playlist-cover-overlay"><i class="fas fa-camera"></i><span>Change</span></div><input type="file" id="playlist-cover-input" accept="image/*" style="display:none;"></div>
+                        <div>
+                            <div style="display:flex; align-items:center; gap:12px;"><h2 id="playlist-title" style="font-size: 32px;">Playlist</h2><button id="rename-playlist-btn" class="icon-btn"><i class="fas fa-pen"></i></button></div>
+                            <p id="playlist-meta" style="color: var(--text-secondary); margin-top:8px;"></p>
+                        </div>
+                    </div>
+                    <button id="delete-playlist-btn" class="btn-danger"><i class="fas fa-trash"></i> Delete</button>
+                </div>
+                <div id="playlist-songs-list" class="songs-list"></div>
+            </div>
+
+            <div id="search-view" class="view">
+                <h2>Search</h2>
+                <div class="search-container"><input type="text" id="search-input" placeholder="Search..."></div>
+                <div id="search-results" class="songs-list"></div>
+            </div>
+        </main>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Modals -->
+    <div id="playlist-modal" class="modal">
+        <div class="modal-content">
+            <h3 id="modal-title">Create Playlist</h3>
+            <input type="text" id="playlist-name-input" placeholder="Name...">
+            <div class="modal-actions"><button id="cancel-modal-btn" class="btn-secondary">Cancel</button><button id="save-playlist-btn" class="btn-primary">Create</button></div>
+        </div>
+    </div>
+
+    <!-- Global Download Modal -->
+    <div id="global-download-modal" class="modal">
+        <div class="modal-content">
+            <h3>Download Song</h3>
+            <input type="text" id="global-url-input" placeholder="Paste YouTube URL...">
+            <p style="color: var(--text-secondary); font-size: 13px; margin-top: 12px;">Add to playlists:</p>
+            <div id="playlist-checkboxes" style="max-height: 200px; overflow-y: auto; margin-bottom: 16px; background: #0a0a0a; padding: 12px; border-radius: 6px;"></div>
+            <div class="modal-actions"><button id="cancel-global-download-btn" class="btn-secondary">Cancel</button><button id="save-global-download-btn" class="btn-primary">Download</button></div>
+        </div>
+    </div>
+
+    <!-- Player Bar -->
+    <div class="player-bar">
+        <div class="now-playing" id="now-playing-container">
+            <img id="player-art" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='56' height='56' viewBox='0 0 24 24' fill='%23282828'></svg>">
+            <div class="track-info"><div id="player-title" class="track-title">Select a song</div><div id="player-artist" class="track-artist">psr.fm</div></div>
+        </div>
+        <div class="player-controls">
+            <div class="control-buttons">
+                <button id="shuffle-btn" class="control-btn"><i class="fas fa-random"></i></button>
+                <button id="prev-btn" class="control-btn"><i class="fas fa-step-backward"></i></button>
+                <button id="play-pause-btn" class="control-btn play-btn"><i class="fas fa-play"></i></button>
+                <button id="next-btn" class="control-btn"><i class="fas fa-step-forward"></i></button>
+                <button id="repeat-btn" class="control-btn"><i class="fas fa-redo"></i></button>
+            </div>
+            <div class="progress-container">
+                <span id="current-time" class="time">0:00</span>
+                <div class="slider-container"><div class="slider-track"><div class="slider-fill" id="progress-fill"></div></div><input type="range" id="progress-bar" class="progress-bar" min="0" max="100" value="0" step="0.1"></div>
+                <span id="duration" class="time">0:00</span>
+            </div>
+        </div>
+        <div class="volume-control">
+            <button id="queue-btn" class="control-btn"><i class="fas fa-list"></i></button>
+            <i id="volume-icon" class="fas fa-volume-up"></i>
+            <div class="slider-container volume-slider"><div class="slider-track"><div class="slider-fill" id="volume-fill"></div></div><input type="range" id="volume-bar" class="volume-bar" min="0" max="100" value="100"></div>
+        </div>
+    </div>
+
+    <audio id="audio-player"></audio>
+    <div id="queue-popover" class="queue-popover"><h4>Up Next <span id="queue-mode"></span></h4><div id="queue-list" class="queue-list"></div></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>

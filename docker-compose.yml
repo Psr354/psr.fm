@@ -1,0 +1,18 @@
+ services:
+  psr_fm:
+    build: .
+    container_name: psr_fm_app
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./downloads:/app/downloads
+      - ./static:/app/static
+      - ./templates:/app/templates
+      - ./static/album_art:/app/static/album_art
+      - ./database.db:/app/database.db
+      - ./logs:/app/logs
+      - ./app.py:/app/app.py
+      - ./services:/app/services
+    restart: unless-stopped
+    environment:
+      - FLASK_ENV=production

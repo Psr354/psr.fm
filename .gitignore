@@ -1,0 +1,17 @@
+# Database & Data Pribadi
+database.db
+
+# File Media & Log 
+downloads/
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store

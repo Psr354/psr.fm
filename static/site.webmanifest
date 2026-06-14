@@ -1,0 +1,13 @@
+{
+  "name": "psr.fm",
+  "short_name": "psr.fm",
+  "description": "Personal Self-Hosted Music Streaming Server",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#1db954",
+  "icons": [
+    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
