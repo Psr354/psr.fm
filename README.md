@@ -192,22 +192,6 @@ docker compose up -d --build
 
 ---
 
-## ⚠️ Important
-
-Jangan commit file:
-
-```
-database.db
-downloads/
-logs/
-static/album_art/
-.env
-```
-
-Tambahkan ke `.gitignore`.
-
----
-
 ## 🤝 Contributing
 
 Pull request sangat diterima.
