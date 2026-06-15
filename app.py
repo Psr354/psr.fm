@@ -34,7 +34,8 @@ def get_db():
 @app.teardown_appcontext
 def close_connection(exception):
     db = g.pop('db', None)
-    if db is not None: db.close()
+    if db is not None:
+        db.close()
 
 @app.route('/')
 def index():
@@ -47,7 +48,8 @@ def index():
 def create_playlist():
     data = request.get_json()
     name = data.get('name')
-    if not name: return jsonify({'error': 'Name is required'}), 400
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
     folder_name = secure_filename(name) or str(uuid.uuid4())
     db = get_db()
     cursor = db.cursor()
@@ -66,7 +68,8 @@ def get_playlists():
 def rename_playlist(playlist_id):
     data = request.get_json()
     name = data.get('name')
-    if not name: return jsonify({'error': 'Name required'}), 400
+    if not name:
+        return jsonify({'error': 'Name required'}), 400
     db = get_db()
     db.execute('UPDATE playlists SET name = ? WHERE id = ?', (name, playlist_id))
     db.commit()
@@ -74,10 +77,12 @@ def rename_playlist(playlist_id):
 
 @app.route('/api/playlists/<int:playlist_id>/cover', methods=['POST'])
 def upload_cover(playlist_id):
-    if 'cover' not in request.files: return jsonify({'error': 'No file'}), 400
+    if 'cover' not in request.files:
+        return jsonify({'error': 'No file'}), 400
     file = request.files['cover']
     ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in ['.jpg', '.jpeg', '.png', '.webp']: ext = '.jpg'
+    if ext not in ['.jpg', '.jpeg', '.png', '.webp']:
+        ext = '.jpg'
     filename = f"pl_cover_{playlist_id}{ext}"
     save_path = os.path.join(ALBUM_ART_DIR, filename)
 
@@ -87,7 +92,8 @@ def upload_cover(playlist_id):
     old = cursor.fetchone()
     if old and old['cover_art']:
         old_path = os.path.join(ALBUM_ART_DIR, old['cover_art'])
-        if os.path.exists(old_path): os.remove(old_path)
+        if os.path.exists(old_path):
+            os.remove(old_path)
 
     file.save(save_path)
     db.execute('UPDATE playlists SET cover_art = ? WHERE id = ?', (filename, playlist_id))
@@ -97,7 +103,6 @@ def upload_cover(playlist_id):
 @app.route('/api/playlists/<int:playlist_id>', methods=['DELETE'])
 def delete_playlist(playlist_id):
     db = get_db()
-    # Hapus relasi playlist, tapi JANGAN hapus lagunya (karena mungkin ada di playlist lain)
     db.execute('DELETE FROM playlist_songs WHERE playlist_id = ?', (playlist_id,))
     db.execute('DELETE FROM playlists WHERE id = ?', (playlist_id,))
     db.commit()
@@ -111,16 +116,19 @@ def download_song():
     data = request.get_json()
     url = data.get('url')
     playlist_ids = data.get('playlist_ids', [])
-    if not url or not playlist_ids: return jsonify({'error': 'Missing data'}), 400
-    
+    if not url or not playlist_ids:
+        return jsonify({'error': 'Missing data'}), 400
+
     download_queue.put({'url': url, 'playlist_ids': playlist_ids})
     return jsonify({'status': 'processing', 'url': url})
 
 @app.route('/api/songs', methods=['GET'])
 def get_songs():
     playlist_id = request.args.get('playlist_id')
+    limit = request.args.get('limit', type=int)
     db = get_db()
     cursor = db.cursor()
+
     if playlist_id:
         cursor.execute('''
             SELECT s.* FROM songs s 
@@ -129,7 +137,11 @@ def get_songs():
             ORDER BY ps.added_at DESC
         ''', (playlist_id,))
     else:
-        cursor.execute('SELECT * FROM songs ORDER BY created_at DESC')
+        if limit:
+            cursor.execute('SELECT * FROM songs ORDER BY created_at DESC LIMIT ?', (limit,))
+        else:
+            cursor.execute('SELECT * FROM songs ORDER BY created_at DESC')
+
     return jsonify([dict(row) for row in cursor.fetchall()])
 
 @app.route('/api/songs/<int:song_id>', methods=['DELETE'])
@@ -138,16 +150,17 @@ def delete_song(song_id):
     cursor = db.cursor()
     cursor.execute('SELECT filename, album_art FROM songs WHERE id = ?', (song_id,))
     song = cursor.fetchone()
-    if not song: return jsonify({'error': 'Not found'}), 404
-    
-    # Hapus file fisik dari folder library
+    if not song:
+        return jsonify({'error': 'Not found'}), 404
+
     mp3 = os.path.join(LIBRARY_DIR, song['filename'])
-    if os.path.exists(mp3): os.remove(mp3)
+    if os.path.exists(mp3):
+        os.remove(mp3)
     if song['album_art']:
         art = os.path.join(ALBUM_ART_DIR, song['album_art'])
-        if os.path.exists(art): os.remove(art)
-        
-    # Hapus dari database (termasuk relasi dan log)
+        if os.path.exists(art):
+            os.remove(art)
+
     cursor.execute('DELETE FROM playlist_songs WHERE song_id = ?', (song_id,))
     cursor.execute('DELETE FROM listening_logs WHERE song_id = ?', (song_id,))
     cursor.execute('DELETE FROM songs WHERE id = ?', (song_id,))
@@ -194,23 +207,23 @@ def dashboard():
     cursor = db.cursor()
     cursor.execute('SELECT COUNT(*) as count FROM playlists')
     total_playlists = cursor.fetchone()['count']
-    
+
     cursor.execute('SELECT COUNT(*) as count FROM songs')
     total_songs = cursor.fetchone()['count']
-    
+
     cursor.execute('SELECT SUM(seconds_listened) as total_listened FROM listening_logs')
     total_listened = cursor.fetchone()['total_listened'] or 0
-    
+
     total_size = sum(os.path.getsize(os.path.join(dp, f)) for dp, dn, filenames in os.walk(DOWNLOAD_DIR) for f in filenames if os.path.isfile(os.path.join(dp, f)))
     total_size += sum(os.path.getsize(os.path.join(ALBUM_ART_DIR, f)) for f in os.listdir(ALBUM_ART_DIR) if os.path.isfile(os.path.join(ALBUM_ART_DIR, f)))
     storage_usage = shutil.disk_usage(DOWNLOAD_DIR)
-    
+
     return jsonify({
-        'total_playlists': total_playlists, 
+        'total_playlists': total_playlists,
         'total_songs': total_songs,
         'total_listened': int(total_listened),
         'storage_used': total_size,
-        'storage_free': storage_usage.free, 
+        'storage_free': storage_usage.free,
         'storage_total': storage_usage.total
     })
 
@@ -219,14 +232,14 @@ def top_songs():
     db = get_db()
     cursor = db.cursor()
     cursor.execute('''
-        SELECT s.id, s.title, s.artist, s.filename, s.album_art, s.duration_seconds, 
+        SELECT s.id, s.title, s.artist, s.filename, s.album_art, s.duration_seconds,
                COALESCE(s.play_count, 0) as play_count,
                COALESCE(SUM(l.seconds_listened), 0) as total_listened
-        FROM songs s 
+        FROM songs s
         LEFT JOIN listening_logs l ON s.id = l.song_id
         GROUP BY s.id
         ORDER BY s.play_count DESC, total_listened DESC
-        LIMIT 10
+        LIMIT 5
     ''')
     return jsonify([dict(row) for row in cursor.fetchall()])
 
@@ -235,17 +248,16 @@ def top_songs_duration():
     db = get_db()
     cursor = db.cursor()
     cursor.execute('''
-        SELECT s.id, s.title, s.artist, s.filename, s.album_art, s.duration_seconds, 
+        SELECT s.id, s.title, s.artist, s.filename, s.album_art, s.duration_seconds,
                COALESCE(s.play_count, 0) as play_count,
                COALESCE(SUM(l.seconds_listened), 0) as total_listened
         FROM songs s LEFT JOIN listening_logs l ON s.id = l.song_id
         GROUP BY s.id
         ORDER BY total_listened DESC
-        LIMIT 10
+        LIMIT 5
     ''')
     return jsonify([dict(row) for row in cursor.fetchall()])
 
 
 if __name__ == '__main__':
-    # Parameter allow_unsafe_werkzeug dihapus untuk menghindari crash
     socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)

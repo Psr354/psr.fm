@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentPlaylistId = null, currentPlaylistSongs = [], currentSongIndex = -1, isShuffle = false, repeatMode = 0;
     let currentPlayingSongId = null;
     let wasPlayingBeforeSeek = false;
-    let lastLoggedTime = 0; 
+    let lastLoggedTime = 0;
 
     const progressFill = document.getElementById('progress-fill');
     const volumeFill = document.getElementById('volume-fill');
@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- GLOBAL DOWNLOAD MODAL ---
     const globalDownloadBtn = document.getElementById('global-download-btn');
     const globalDownloadModal = document.getElementById('global-download-modal');
-    
+
     if (globalDownloadBtn) {
         globalDownloadBtn.addEventListener('click', async () => {
             const playlists = await (await fetch('/api/playlists')).json();
@@ -60,17 +60,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const checked = Array.from(document.querySelectorAll('#playlist-checkboxes input:checked')).map(cb => parseInt(cb.value));
         if (!url) return showToast('URL is required', 'error');
         if (checked.length === 0) return showToast('Select at least one playlist', 'error');
-        
-        await fetch('/api/download', { 
-            method: 'POST', 
-            headers: {'Content-Type': 'application/json'}, 
-            body: JSON.stringify({url: url, playlist_ids: checked}) 
+
+        await fetch('/api/download', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url: url, playlist_ids: checked})
         });
-        
+
         globalDownloadModal.style.display = 'none';
         document.getElementById('global-url-input').value = '';
         showToast('Downloading to selected playlists!', 'success');
-        
+
         const wrapper = document.getElementById('download-progress-wrapper');
         if (wrapper) wrapper.classList.add('active');
     });
@@ -82,7 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         let remaining = [...currentPlaylistSongs];
-        remaining.splice(currentSongIndex, 1); 
+        remaining.splice(currentSongIndex, 1);
 
         if (isShuffle) {
             for (let i = remaining.length - 1; i > 0; i--) {
@@ -134,6 +134,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.nav-item').forEach(btn => btn.classList.remove('active'));
         if (viewName === 'dashboard') document.getElementById('home-btn').classList.add('active');
         if (viewName === 'search') { document.getElementById('search-btn').classList.add('active'); document.getElementById('search-input').focus(); }
+        
+        // Update animasi is-playing untuk view yang baru aktif
+        highlightPlayingSong();
+        
         if (viewName === 'dashboard') loadDashboard();
     }
 
@@ -166,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updatePlaylistMeta();
         }
         loadDashboard();
-        loadPlaylists(); 
+        loadPlaylists();
     });
 
     socket.on('download_error', (data) => {
@@ -239,7 +243,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const timestamp = new Date().getTime();
                     coverImg.src = `/static/album_art/${data.cover_art}?t=${timestamp}`;
                     showToast('Cover updated!');
-                    loadPlaylists(); 
+                    loadPlaylists();
                 } else {
                     showToast('Failed to upload cover', 'error');
                 }
@@ -296,7 +300,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if(!audio.paused && currentPlayingSongId) {
                 const delta = audio.currentTime - lastLoggedTime;
-                if(delta >= 5) { 
+                if(delta >= 5) {
                     logListen(currentPlayingSongId, delta);
                     lastLoggedTime = audio.currentTime;
                 }
@@ -362,7 +366,7 @@ document.addEventListener('DOMContentLoaded', () => {
         volumeFill.style.width = `${e.target.value}%`;
         updateVolumeIcon(audio.volume);
     });
-    volumeFill.style.width = '100%'; 
+    volumeFill.style.width = '100%';
 
     function updateVolumeIcon(vol) {
         const icon = document.getElementById('volume-icon');
@@ -401,9 +405,9 @@ document.addEventListener('DOMContentLoaded', () => {
         currentPlaylistId = playlist.id;
         document.getElementById('playlist-title').innerText = playlist.name;
 
-	if (window.innerWidth <= 768) {
+        if (window.innerWidth <= 768) {
         document.querySelector('.sidebar').classList.remove('open');
-    	}
+        }
 
         const timestamp = new Date().getTime();
         const coverSrc = playlist.cover_art ? `/static/album_art/${playlist.cover_art}?t=${timestamp}` : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 24 24' fill='%23333'><path d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/></svg>";
@@ -424,6 +428,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentPlaylistSongs = await (await fetch(`/api/songs?playlist_id=${playlist.id}`)).json();
         renderSongs(currentPlaylistSongs, 'playlist-songs-list', true);
         updatePlaylistMeta();
+        highlightPlayingSong();
     }
 
     function updatePlaylistMeta() {
@@ -441,7 +446,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="stat-card"><h4>${formatTime(stats.total_listened)}</h4><p>Time Listened</p></div>
             <div class="stat-card"><h4>${formatBytes(stats.storage_used)}</h4><p>Storage Used</p></div>
         `;
-        renderSongs(await (await fetch('/api/songs')).json(), 'recent-songs-list', true);
+        renderSongs(await (await fetch('/api/songs?limit=5')).json(), 'recent-songs-list', true);
 
         // top songs load(play)
         const topSongs = await (await fetch('/api/top-songs')).json();
@@ -452,17 +457,40 @@ document.addEventListener('DOMContentLoaded', () => {
         renderTopSongs(topSongsDuration, 'top-songs-duration-list');
     }
 
+    // ==========================================
+    // FIXED FUNCTIONS - View-Aware is-playing Logic
+    // ==========================================
+
     function renderSongs(songs, containerId, showDelete) {
         const container = document.getElementById(containerId);
         if (!container) return;
+
+        console.log("▶ [DEBUG] renderSongs berjalan untuk:", containerId, "| Total lagu:", songs.length);
+
         container.innerHTML = '';
-        if (songs.length === 0) { container.innerHTML = '<p class="empty-state">No songs here yet.</p>'; return; }
+        if (songs.length === 0) {
+            container.innerHTML = '<p class="empty-state">No songs here yet.</p>';
+            return;
+        }
+
+        // Cek apakah container berada di view yang aktif
+        const activeView = document.querySelector('.view.active');
+        const isContainerInActiveView = activeView && activeView.contains(container);
 
         songs.forEach((song, index) => {
             const div = document.createElement('div');
             div.className = 'song-item';
-            div.setAttribute('data-id', song.id);
-            if (song.id === currentPlayingSongId) div.classList.add('is-playing');
+
+            const songIdStr = String(song.id);
+            const currentIdStr = String(currentPlayingSongId);
+
+            div.setAttribute('data-id', songIdStr);
+
+            // Hanya tambahkan is-playing jika container berada di view aktif
+            if (isContainerInActiveView && songIdStr === currentIdStr && currentIdStr !== 'null' && currentIdStr !== 'undefined') {
+                div.classList.add('is-playing');
+                console.log("✅ [DEBUG] Kelas is-playing ditambahkan saat pembuatan elemen untuk ID:", songIdStr, "di view aktif");
+            }
 
             div.innerHTML = `
                 <img src="/static/album_art/${song.album_art}" class="song-art" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
@@ -485,7 +513,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         const p = (await (await fetch('/api/playlists')).json()).find(pl => pl.id === currentPlaylistId);
                         if(p) openPlaylist(p);
                     } else {
-                        loadDashboard(); 
+                        loadDashboard();
                     }
                 }
             });
@@ -498,11 +526,20 @@ document.addEventListener('DOMContentLoaded', () => {
         container.innerHTML = '';
         if (songs.length === 0) { container.innerHTML = '<p class="empty-state">No listening history yet. Play some songs!</p>'; return; }
 
+        // Cek apakah container berada di view yang aktif
+        const activeView = document.querySelector('.view.active');
+        const isContainerInActiveView = activeView && activeView.contains(container);
+
         songs.forEach((song, index) => {
             const div = document.createElement('div');
             div.className = 'song-item';
-            div.setAttribute('data-id', song.id);
-            if (song.id === currentPlayingSongId) div.classList.add('is-playing');
+
+            div.setAttribute('data-id', String(song.id));
+            
+            // Hanya tambahkan is-playing jika container berada di view aktif
+            if (isContainerInActiveView && String(song.id) === String(currentPlayingSongId)) {
+                div.classList.add('is-playing');
+            }
 
             const listenedMins = Math.round((song.total_listened || 0) / 60);
             let listenedText = `${listenedMins} mins`;
@@ -541,16 +578,54 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function highlightPlayingSong() {
+        console.log("▶ [DEBUG] highlightPlayingSong berjalan. Target ID:", currentPlayingSongId);
+
+        if (!currentPlayingSongId || String(currentPlayingSongId) === 'null' || String(currentPlayingSongId) === 'undefined') {
+            console.warn("⚠ [DEBUG] currentPlayingSongId tidak valid, membatalkan highlight.");
+            return;
+        }
+
+        // 1. Hapus dulu semua animasi is-playing dari seluruh DOM
+        document.querySelectorAll('.song-item.is-playing').forEach(el => el.classList.remove('is-playing'));
+
+        const targetId = String(currentPlayingSongId);
+
+        // 2. Dapatkan view yang sedang aktif
+        const activeView = document.querySelector('.view.active');
+        
+        if (!activeView) {
+            console.warn("❌ [DEBUG] Tidak ada view aktif ditemukan");
+            return;
+        }
+
+        // 3. Tunggu 50ms agar browser selesai menggambar ulang DOM
+        setTimeout(() => {
+            // 4. Cari lagu HANYA di dalam view yang aktif
+            const activeEl = activeView.querySelector(`.song-item[data-id="${targetId}"]`);
+
+            if (activeEl) {
+                activeEl.classList.add('is-playing');
+                console.log("✅ [DEBUG] BERHASIL: Animasi ditambahkan ke ID", targetId, "di view aktif");
+            } else {
+                console.warn("❌ [DEBUG] Lagu dengan ID", targetId, "tidak ditemukan di view aktif");
+            }
+        }, 50);
+    }
+
     async function searchSongs(query) { return await (await fetch(`/api/search?q=${encodeURIComponent(query)}`)).json(); }
 
     function playSong(songs, index) {
-        flushListenLog(); 
-        currentPlaylistSongs = songs; currentSongIndex = index;
+        flushListenLog();
+        currentPlaylistSongs = songs;
+        currentSongIndex = index;
         const song = songs[index];
-        currentPlayingSongId = song.id;
+
+        currentPlayingSongId = String(song.id);
+        console.log("▶ [DEBUG] playSong dipanggil. currentPlayingSongId diatur ke:", currentPlayingSongId);
+
         fetch(`/api/songs/${song.id}/play`, { method: 'POST' }).catch(e => console.error(e));
 
-        // Path audio sekarang langsung ke library tanpa folder_name
         audio.src = `/audio/${song.filename}`;
         audio.play().catch(e => console.log("Autoplay prevented", e));
 
@@ -559,14 +634,9 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('player-art').src = `/static/album_art/${song.album_art}`;
 
         updatePlayPauseIcon(true);
-        highlightPlayingSong();
-        buildQueue(); 
-    }
 
-    function highlightPlayingSong() {
-        document.querySelectorAll('.song-item').forEach(el => el.classList.remove('is-playing'));
-        const activeEl = document.querySelector(`.song-item[data-id="${currentPlayingSongId}"]`);
-        if (activeEl) activeEl.classList.add('is-playing');
+        highlightPlayingSong();
+        buildQueue();
     }
 
     function togglePlay() {
@@ -574,15 +644,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (audio.paused) { audio.play(); updatePlayPauseIcon(true); }
         else { audio.pause(); updatePlayPauseIcon(false); }
     }
-    
-    function updatePlayPauseIcon(isPlaying) { 
+
+    function updatePlayPauseIcon(isPlaying) {
         const btn = document.querySelector('#play-pause-btn i');
-        if(btn) btn.className = isPlaying ? 'fas fa-pause' : 'fas fa-play'; 
+        if(btn) btn.className = isPlaying ? 'fas fa-pause' : 'fas fa-play';
     }
 
     function playNext() {
         if (playQueue.length > 0) {
-            const nextSong = playQueue.shift(); 
+            const nextSong = playQueue.shift();
             const idx = currentPlaylistSongs.findIndex(s => s.id === nextSong.id);
             if (idx !== -1) {
                 playSong(currentPlaylistSongs, idx);
@@ -597,13 +667,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         playSong(currentPlaylistSongs, nextIndex);
     }
-    
+
     function playPrev() {
         if (currentPlaylistSongs.length === 0) return;
         if (audio.currentTime > 3) { audio.currentTime = 0; return; }
         playSong(currentPlaylistSongs, (currentSongIndex - 1 + currentPlaylistSongs.length) % currentPlaylistSongs.length);
     }
-    
+
     function handleSongEnded() { playNext(); }
 
     function formatTime(s) { if (!s || isNaN(s)) return '0:00'; const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60); return h > 0 ? `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}` : `${m}:${sec.toString().padStart(2, '0')}`; }

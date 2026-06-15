@@ -67,6 +67,9 @@ body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color
 .eq-bar:nth-child(3) { animation-delay: 0.5s; }
 @keyframes eq { 0%, 100% { height: 4px; } 50% { height: 16px; } }
 
+.song-item.is-playing { background-color: rgba(29, 185, 84, 0.1); border: 1px solid rgba(29, 185, 84, 0.2); }
+.song-item.is-playing .song-title { color: var(--accent-color); }
+
 .btn-primary { background-color: var(--accent-color); color: black; border: none; padding: 14px 32px; border-radius: 50px; font-weight: 700; font-size: 14px; cursor: pointer; transition: all 0.2s; }
 .btn-primary:hover { transform: scale(1.03); background-color: var(--accent-hover); box-shadow: 0 8px 16px rgba(29, 185, 84, 0.3); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
