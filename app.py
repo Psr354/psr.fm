@@ -5,6 +5,8 @@ import uuid
 from flask import Flask, request, jsonify, send_from_directory, render_template, g
 from werkzeug.utils import secure_filename
 from flask_socketio import SocketIO
+from PIL import Image
+import io
 
 from services.database import init_db, get_db_connection
 from services.downloader import download_queue, start_worker
@@ -79,15 +81,59 @@ def rename_playlist(playlist_id):
 def upload_cover(playlist_id):
     if 'cover' not in request.files:
         return jsonify({'error': 'No file'}), 400
+    
     file = request.files['cover']
-    ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in ['.jpg', '.jpeg', '.png', '.webp']:
-        ext = '.jpg'
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    # ==========================================
+    # SECURITY FIX: Validasi Konten dengan Pillow (PIL)
+    # ==========================================
+    try:
+        # Baca isi file ke memory untuk diverifikasi
+        file_bytes = file.read()
+        file.seek(0)  # Reset pointer ke awal
+        
+        # Buka gambar menggunakan Pillow
+        img = Image.open(io.BytesIO(file_bytes))
+        
+        # Verifikasi bahwa file benar-benar gambar yang valid (tidak korup)
+        img.verify()
+        
+        # Setelah verify(), kita harus buka ulang karena verify() menutup file
+        img = Image.open(io.BytesIO(file_bytes))
+        
+        # Cek format gambar yang diizinkan
+        allowed_formats = ['JPEG', 'PNG', 'WEBP']
+        if img.format not in allowed_formats:
+            return jsonify({
+                'error': f'Invalid image format: {img.format}. Only JPG, PNG, and WEBP are allowed.'
+            }), 400
+        
+        # Tentukan ekstensi berdasarkan format asli
+        ext_map = {
+            'JPEG': '.jpg',
+            'PNG': '.png',
+            'WEBP': '.webp'
+        }
+        ext = ext_map[img.format]
+        
+    except Exception as e:
+        # Jika Pillow gagal membuka file, berarti file bukan gambar atau korup
+        return jsonify({
+            'error': 'Invalid file content. The file is not a valid image or is corrupted.'
+        }), 400
+
+    # ==========================================
+    # Simpan File dengan Ekstensi yang Valid
+    # ==========================================
     filename = f"pl_cover_{playlist_id}{ext}"
     save_path = os.path.join(ALBUM_ART_DIR, filename)
 
     db = get_db()
     cursor = db.cursor()
+    
+    # Hapus cover lama jika ada
     cursor.execute('SELECT cover_art FROM playlists WHERE id = ?', (playlist_id,))
     old = cursor.fetchone()
     if old and old['cover_art']:
@@ -95,9 +141,14 @@ def upload_cover(playlist_id):
         if os.path.exists(old_path):
             os.remove(old_path)
 
+    # Simpan file
+    file.seek(0)
     file.save(save_path)
+    
+    # Update database
     db.execute('UPDATE playlists SET cover_art = ? WHERE id = ?', (filename, playlist_id))
     db.commit()
+    
     return jsonify({'status': 'success', 'cover_art': filename})
 
 @app.route('/api/playlists/<int:playlist_id>', methods=['DELETE'])
