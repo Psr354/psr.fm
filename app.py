@@ -25,7 +25,9 @@ app.secret_key = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 
 from flask_wtf.csrf import CSRFProtect, generate_csrf, validate_csrf
 
-# Initialize CSRF protection
+# Initialize CSRF token helpers. Actual API checks are handled in
+# csrf_protect_api() so login/setup can stay unauthenticated.
+app.config['WTF_CSRF_CHECK_DEFAULT'] = False
 csrf = CSRFProtect(app)
 
 # Generate CSRF token dan set di cookie
