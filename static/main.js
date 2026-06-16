@@ -1,3 +1,39 @@
+// Global fetch interceptor untuk handle 401 (unauthorized)
+const originalFetch = window.fetch;
+window.fetch = async function(...args) {
+    const response = await originalFetch.apply(this, args);
+    if (response.status === 401 && !args[0].includes('/api/login') && !args[0].includes('/api/setup') && !args[0].includes('/api/users')) {
+        window.location.href = '/login';
+    }
+    return response;
+};
+
+// CSRF Token Helper
+function getCSRFToken() {
+    const match = document.cookie.match(/csrf_token=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+}
+
+// Override fetch untuk auto-include CSRF token
+const _originalFetch = window.fetch;
+window.fetch = function(url, options = {}) {
+    const csrfToken = getCSRFToken();
+    options.headers = options.headers || {};
+    
+    // Tambahkan CSRF token untuk POST/PUT/DELETE
+    if (csrfToken && ['POST', 'PUT', 'DELETE'].includes(options.method?.toUpperCase())) {
+        options.headers['X-CSRF-Token'] = csrfToken;
+    }
+    
+    // Handle 401 unauthorized
+    return _originalFetch.call(this, url, options).then(response => {
+        if (response.status === 401 && !url.includes('/api/login') && !url.includes('/api/setup')) {
+            window.location.href = '/login';
+        }
+        return response;
+    });
+};
+
 document.addEventListener('DOMContentLoaded', () => {
     const views = { dashboard: document.getElementById('dashboard-view'), playlist: document.getElementById('playlist-view'), search: document.getElementById('search-view') };
     const audio = document.getElementById('audio-player');
@@ -13,6 +49,152 @@ document.addEventListener('DOMContentLoaded', () => {
     const volumeFill = document.getElementById('volume-fill');
     const progressBar = document.getElementById('progress-bar');
     const volumeBar = document.getElementById('volume-bar');
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        })[char]);
+    }
+
+    function mediaUrlName(value) {
+        const name = String(value || '').split('/').pop().split('\\').pop();
+        return encodeURIComponent(name);
+    }
+
+    function getGreeting() {
+        const hour = new Date().getHours();
+        if (hour < 12) return 'Good Morning';
+        if (hour < 18) return 'Good Afternoon';
+        return 'Good Evening';
+    }
+
+    function renderEmptyState(container, options = {}) {
+        const icon = options.icon || 'fa-music';
+        const title = options.title || 'No songs here yet';
+        const body = options.body || 'Download audio into a playlist to start building this room.';
+        const action = options.action ? `<button class="btn-primary compact-action empty-action" ${options.actionAttr || ''}>${options.action}</button>` : '';
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon"><i class="fas ${icon}"></i></div>
+                <h4>${escapeHtml(title)}</h4>
+                <p>${escapeHtml(body)}</p>
+                ${action}
+            </div>
+        `;
+    }
+
+    const dashboardTitle = document.querySelector('#dashboard-view .page-heading h2');
+    if (dashboardTitle) dashboardTitle.innerText = getGreeting();
+
+    // ==========================================
+    // USER INFO & LOGOUT
+    // ==========================================
+    async function loadUserInfo() {
+        try {
+            const res = await fetch('/api/me');
+            if (res.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            const data = await res.json();
+            const userNameEl = document.getElementById('user-name');
+            const userAvatarEl = document.getElementById('user-avatar');
+            const addUserBtn = document.getElementById('add-user-btn');
+            if (userNameEl) userNameEl.innerText = data.username;
+            if (userAvatarEl) userAvatarEl.innerText = data.username.charAt(0).toUpperCase();
+            if (addUserBtn) addUserBtn.style.display = data.can_add_users ? 'flex' : 'none';
+        } catch (err) {
+            console.error('Failed to load user info', err);
+        }
+    }
+    
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', async () => {
+            if (confirm('Are you sure you want to sign out?')) {
+                await fetch('/api/logout', { method: 'POST' });
+                window.location.href = '/login';
+            }
+        });
+    }
+    loadUserInfo();
+
+    // ==========================================
+    // ADD NEW USER LOGIC
+    // ==========================================
+    const addUserBtn = document.getElementById('add-user-btn');
+    const addUserModal = document.getElementById('add-user-modal');
+    const cancelAddUser = document.getElementById('cancel-add-user');
+    const confirmAddUser = document.getElementById('confirm-add-user');
+    const addUserError = document.getElementById('add-user-error');
+
+    if (addUserBtn) {
+        addUserBtn.addEventListener('click', () => {
+            addUserModal.style.display = 'flex';
+            document.getElementById('new-username').value = '';
+            document.getElementById('new-password').value = '';
+            addUserError.style.display = 'none';
+        });
+    }
+    if (cancelAddUser) {
+        cancelAddUser.addEventListener('click', () => { addUserModal.style.display = 'none'; });
+    }
+    if (confirmAddUser) {
+        confirmAddUser.addEventListener('click', async () => {
+            const username = document.getElementById('new-username').value.trim();
+            const password = document.getElementById('new-password').value;
+
+            if (!username || !password) {
+                addUserError.innerText = 'Username and password are required';
+                addUserError.style.display = 'block';
+                return;
+            }
+
+            confirmAddUser.disabled = true;
+            confirmAddUser.innerText = 'Creating...';
+
+            try {
+                const res = await fetch('/api/users', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username, password})
+                });
+                const data = await res.json();
+
+                if (res.ok && data.status === 'success') {
+                    showToast(`Account "${username}" created successfully!`);
+                    addUserModal.style.display = 'none';
+                } else {
+                    addUserError.innerText = data.error || 'Failed to create user';
+                    addUserError.style.display = 'block';
+                }
+            } catch (err) {
+                addUserError.innerText = 'Connection error';
+                addUserError.style.display = 'block';
+            } finally {
+                confirmAddUser.disabled = false;
+                confirmAddUser.innerText = 'Create Account';
+            }
+        });
+    }
+
+    document.querySelectorAll('.modal').forEach(modalEl => {
+        modalEl.addEventListener('click', (e) => {
+            if (e.target === modalEl) modalEl.style.display = 'none';
+        });
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            document.querySelectorAll('.modal').forEach(modalEl => {
+                modalEl.style.display = 'none';
+            });
+        }
+    });
 
     // --- MOBILE MENU ---
     const mobileMenuBtn = document.getElementById('mobile-menu-btn');
@@ -34,38 +216,66 @@ document.addEventListener('DOMContentLoaded', () => {
     const globalDownloadBtn = document.getElementById('global-download-btn');
     const globalDownloadModal = document.getElementById('global-download-modal');
 
-    if (globalDownloadBtn) {
-        globalDownloadBtn.addEventListener('click', async () => {
-            const playlists = await (await fetch('/api/playlists')).json();
-            const list = document.getElementById('playlist-checkboxes');
-            list.innerHTML = '';
-            if (playlists.length === 0) {
-                list.innerHTML = '<p style="color: var(--text-secondary); font-size: 13px;">No playlists found. Create one first!</p>';
-            } else {
-                playlists.forEach(p => {
-                    list.innerHTML += `<label style="display:flex; align-items:center; gap:8px; padding:8px 0; cursor:pointer;"><input type="checkbox" value="${p.id}" style="width:18px; height:18px; accent-color: var(--accent-color);"><span>${p.name}</span></label>`;
-                });
-            }
-            globalDownloadModal.style.display = 'flex';
-            document.getElementById('global-url-input').focus();
-        });
+    async function openDownloadModal() {
+        const playlists = await (await fetch('/api/playlists')).json();
+        const list = document.getElementById('playlist-checkboxes');
+        list.innerHTML = '';
+        if (playlists.length === 0) {
+            list.innerHTML = '<p class="empty-compact">No playlists found. Create one first.</p>';
+        } else {
+            playlists.forEach(p => {
+                list.innerHTML += `<label class="checkbox-row"><input type="checkbox" value="${p.id}"><span>${escapeHtml(p.name)}</span></label>`;
+            });
+        }
+        globalDownloadModal.style.display = 'flex';
+        document.getElementById('global-url-input').focus();
     }
+
+    if (globalDownloadBtn) {
+        globalDownloadBtn.addEventListener('click', openDownloadModal);
+    }
+
+    const dashboardDownloadBtn = document.getElementById('dashboard-download-btn');
+    if (dashboardDownloadBtn) {
+        dashboardDownloadBtn.addEventListener('click', openDownloadModal);
+    }
+
+    document.addEventListener('click', (e) => {
+        const downloadTrigger = e.target.closest('[data-open-download]');
+        if (downloadTrigger) openDownloadModal();
+    });
 
     document.getElementById('cancel-global-download-btn').addEventListener('click', () => {
         globalDownloadModal.style.display = 'none';
     });
 
-    document.getElementById('save-global-download-btn').addEventListener('click', async () => {
+    async function submitDownload() {
         const url = document.getElementById('global-url-input').value.trim();
         const checked = Array.from(document.querySelectorAll('#playlist-checkboxes input:checked')).map(cb => parseInt(cb.value));
         if (!url) return showToast('URL is required', 'error');
         if (checked.length === 0) return showToast('Select at least one playlist', 'error');
 
-        await fetch('/api/download', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({url: url, playlist_ids: checked})
-        });
+        const downloadBtn = document.getElementById('save-global-download-btn');
+        downloadBtn.disabled = true;
+        downloadBtn.innerText = 'Starting...';
+
+        let res, data;
+        try {
+            res = await fetch('/api/download', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({url: url, playlist_ids: checked})
+            });
+            data = await res.json().catch(() => ({}));
+        } catch (err) {
+            showToast('Connection error', 'error');
+            return;
+        } finally {
+            downloadBtn.disabled = false;
+            downloadBtn.innerText = 'Download';
+        }
+
+        if (!res.ok) return showToast(data.error || 'Download request failed', 'error');
 
         globalDownloadModal.style.display = 'none';
         document.getElementById('global-url-input').value = '';
@@ -73,6 +283,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const wrapper = document.getElementById('download-progress-wrapper');
         if (wrapper) wrapper.classList.add('active');
+    }
+
+    document.getElementById('save-global-download-btn').addEventListener('click', submitDownload);
+    document.getElementById('global-url-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submitDownload();
     });
 
     function buildQueue() {
@@ -113,10 +328,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const div = document.createElement('div');
             div.className = 'queue-item';
             div.innerHTML = `
-                <img src="/static/album_art/${song.album_art}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'36\' height=\'36\' viewBox=\'0 0 24 24\' fill=\'%23555\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'36\' height=\'36\' viewBox=\'0 0 24 24\' fill=\'%23555\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
                 <div class="q-info">
-                    <div class="q-title">${song.title}</div>
-                    <div class="q-artist">${song.artist || 'Unknown'}</div>
+                    <div class="q-title">${escapeHtml(song.title)}</div>
+                    <div class="q-artist">${escapeHtml(song.artist || 'Unknown')}</div>
                 </div>
             `;
             div.addEventListener('click', () => {
@@ -145,7 +360,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const container = document.getElementById('toast-container');
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
-        toast.innerHTML = `<i class="fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'} toast-icon"></i> ${message}`;
+        const icon = document.createElement('i');
+        icon.className = `fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'} toast-icon`;
+        const text = document.createElement('span');
+        text.textContent = message;
+        toast.append(icon, text);
         container.appendChild(toast);
         setTimeout(() => toast.classList.add('show'), 10);
         setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 400); }, 4000);
@@ -155,10 +374,16 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('download_progress', (data) => {
         const wrapper = document.getElementById('download-progress-wrapper');
         const bar = document.getElementById('download-progress-bar');
+        const label = document.getElementById('download-progress-label');
         if (wrapper && bar) {
             wrapper.classList.add('active');
             bar.style.width = `${data.percent}%`;
-            if (data.percent >= 100) setTimeout(() => { wrapper.classList.remove('active'); bar.style.width = '0%'; }, 1000);
+            if (label) label.innerText = `${Math.round(data.percent)}%`;
+            if (data.percent >= 100) setTimeout(() => {
+                wrapper.classList.remove('active');
+                bar.style.width = '0%';
+                if (label) label.innerText = '0%';
+            }, 1000);
         }
     });
 
@@ -176,7 +401,9 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('download_error', (data) => {
         showToast(`Download failed: ${data.error || 'Unknown error'}`, 'error');
         const wrapper = document.getElementById('download-progress-wrapper');
+        const label = document.getElementById('download-progress-label');
         if(wrapper) wrapper.classList.remove('active');
+        if(label) label.innerText = '0%';
     });
 
     // --- MODAL & PLAYLISTS ---
@@ -206,24 +433,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('cancel-modal-btn').addEventListener('click', () => modal.style.display = 'none');
 
-    saveBtn.addEventListener('click', async () => {
+    async function submitPlaylistModal() {
         const name = nameInput.value.trim();
         if (name) {
-            if (isRenaming && currentPlaylistId) {
-                await fetch(`/api/playlists/${currentPlaylistId}`, {
-                    method: 'PUT', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({name})
-                });
-                document.getElementById('playlist-title').innerText = name;
-                showToast('Playlist renamed!');
-            } else {
-                await createPlaylist(name);
-                showToast(`Playlist "${name}" created!`);
+            saveBtn.disabled = true;
+            try {
+                if (isRenaming && currentPlaylistId) {
+                    await fetch(`/api/playlists/${currentPlaylistId}`, {
+                        method: 'PUT', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({name})
+                    });
+                    document.getElementById('playlist-title').innerText = name;
+                    showToast('Playlist renamed!');
+                } else {
+                    await createPlaylist(name);
+                    showToast(`Playlist "${name}" created!`);
+                }
+                nameInput.value = '';
+                modal.style.display = 'none';
+                loadPlaylists();
+            } catch (err) {
+                showToast('Connection error', 'error');
+            } finally {
+                saveBtn.disabled = false;
             }
-            nameInput.value = '';
-            modal.style.display = 'none';
-            loadPlaylists();
         }
+    }
+
+    saveBtn.addEventListener('click', submitPlaylistModal);
+    nameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submitPlaylistModal();
     });
 
     const coverWrapper = document.getElementById('playlist-cover-wrapper');
@@ -241,7 +480,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
                 if (data.status === 'success') {
                     const timestamp = new Date().getTime();
-                    coverImg.src = `/static/album_art/${data.cover_art}?t=${timestamp}`;
+                    coverImg.src = `/static/album_art/${mediaUrlName(data.cover_art)}?t=${timestamp}`;
                     showToast('Cover updated!');
                     loadPlaylists();
                 } else {
@@ -378,7 +617,14 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('search-input').addEventListener('input', debounce(async (e) => {
         const query = e.target.value.trim();
         if (query.length > 1) renderSongs(await searchSongs(query), 'search-results', false);
-        else document.getElementById('search-results').innerHTML = '';
+        else {
+            const searchResults = document.getElementById('search-results');
+            renderEmptyState(searchResults, {
+                icon: 'fa-search',
+                title: 'Search your library',
+                body: 'Type at least two characters to find a song or artist in this account.'
+            });
+        }
     }, 300));
 
     async function loadPlaylists() {
@@ -390,8 +636,8 @@ document.addEventListener('DOMContentLoaded', () => {
             li.className = 'playlist-item';
             if (p.id === currentPlaylistId) li.classList.add('active');
             li.setAttribute('data-id', p.id);
-            const coverSrc = p.cover_art ? `/static/album_art/${p.cover_art}` : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24' fill='%23555'><path d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/></svg>";
-            li.innerHTML = `<img src="${coverSrc}"> <span>${p.name}</span>`;
+            const coverSrc = p.cover_art ? `/static/album_art/${mediaUrlName(p.cover_art)}` : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24' fill='%23555'><path d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/></svg>";
+            li.innerHTML = `<img src="${coverSrc}"> <span>${escapeHtml(p.name)}</span>`;
             li.addEventListener('click', () => openPlaylist(p));
             list.appendChild(li);
         });
@@ -406,11 +652,11 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('playlist-title').innerText = playlist.name;
 
         if (window.innerWidth <= 768) {
-        document.querySelector('.sidebar').classList.remove('open');
+            document.querySelector('.sidebar').classList.remove('open');
         }
 
         const timestamp = new Date().getTime();
-        const coverSrc = playlist.cover_art ? `/static/album_art/${playlist.cover_art}?t=${timestamp}` : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 24 24' fill='%23333'><path d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/></svg>";
+        const coverSrc = playlist.cover_art ? `/static/album_art/${mediaUrlName(playlist.cover_art)}?t=${timestamp}` : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 24 24' fill='%23333'><path d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/></svg>";
         coverImg.src = coverSrc;
 
         showView('playlist');
@@ -441,10 +687,10 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadDashboard() {
         const stats = await (await fetch('/api/dashboard')).json();
         document.getElementById('stats-grid').innerHTML = `
-            <div class="stat-card"><h4>${stats.total_playlists}</h4><p>Playlists</p></div>
-            <div class="stat-card"><h4>${stats.total_songs}</h4><p>Songs</p></div>
-            <div class="stat-card"><h4>${formatTime(stats.total_listened)}</h4><p>Time Listened</p></div>
-            <div class="stat-card"><h4>${formatBytes(stats.storage_used)}</h4><p>Storage Used</p></div>
+            <div class="stat-card stat-playlists"><div class="stat-icon"><i class="fas fa-list"></i></div><div><h4>${stats.total_playlists}</h4><p>Playlists</p></div></div>
+            <div class="stat-card stat-songs"><div class="stat-icon"><i class="fas fa-music"></i></div><div><h4>${stats.total_songs}</h4><p>Songs</p></div></div>
+            <div class="stat-card stat-time"><div class="stat-icon"><i class="fas fa-clock"></i></div><div><h4>${formatTime(stats.total_listened)}</h4><p>Time Listened</p></div></div>
+            <div class="stat-card stat-storage"><div class="stat-icon"><i class="fas fa-hard-drive"></i></div><div><h4>${formatBytes(stats.storage_used)}</h4><p>Storage Used</p></div></div>
         `;
         renderSongs(await (await fetch('/api/songs?limit=5')).json(), 'recent-songs-list', true);
 
@@ -465,11 +711,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const container = document.getElementById(containerId);
         if (!container) return;
 
-        console.log("▶ [DEBUG] renderSongs berjalan untuk:", containerId, "| Total lagu:", songs.length);
-
         container.innerHTML = '';
         if (songs.length === 0) {
-            container.innerHTML = '<p class="empty-state">No songs here yet.</p>';
+            const isSearch = containerId === 'search-results';
+            renderEmptyState(container, {
+                icon: isSearch ? 'fa-search' : 'fa-compact-disc',
+                title: isSearch ? 'No matching songs' : 'No songs here yet',
+                body: isSearch ? 'Try another title or artist from your library.' : 'Download a song into one of your playlists to start listening.',
+                action: isSearch ? '' : '<i class="fas fa-download"></i> Download',
+                actionAttr: 'data-open-download'
+            });
             return;
         }
 
@@ -489,13 +740,12 @@ document.addEventListener('DOMContentLoaded', () => {
             // Hanya tambahkan is-playing jika container berada di view aktif
             if (isContainerInActiveView && songIdStr === currentIdStr && currentIdStr !== 'null' && currentIdStr !== 'undefined') {
                 div.classList.add('is-playing');
-                console.log("✅ [DEBUG] Kelas is-playing ditambahkan saat pembuatan elemen untuk ID:", songIdStr, "di view aktif");
             }
 
             div.innerHTML = `
-                <img src="/static/album_art/${song.album_art}" class="song-art" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
                 <div class="eq-container"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>
-                <div class="song-info"><div class="song-title">${song.title}</div><div class="song-artist">${song.artist || 'Unknown'}</div></div>
+                <div class="song-info"><div class="song-title">${escapeHtml(song.title)}</div><div class="song-artist">${escapeHtml(song.artist || 'Unknown')}</div></div>
                 <div class="song-duration">${formatTime(song.duration_seconds)}</div>
                 ${showDelete ? `<button class="icon-btn delete-song" data-id="${song.id}"><i class="fas fa-trash"></i></button>` : ''}
             `;
@@ -524,7 +774,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const container = document.getElementById(containerId);
         if (!container) return;
         container.innerHTML = '';
-        if (songs.length === 0) { container.innerHTML = '<p class="empty-state">No listening history yet. Play some songs!</p>'; return; }
+        if (songs.length === 0) {
+            renderEmptyState(container, {
+                icon: 'fa-chart-line',
+                title: 'No listening history yet',
+                body: 'Play songs from your room and this section will fill in automatically.'
+            });
+            return;
+        }
 
         // Cek apakah container berada di view yang aktif
         const activeView = document.querySelector('.view.active');
@@ -550,15 +807,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             div.innerHTML = `
-                <img src="/static/album_art/${song.album_art}" class="song-art" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
                 <div class="eq-container"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>
                 <div class="song-info">
-                    <div class="song-title">${song.title}</div>
-                    <div class="song-artist">${song.artist || 'Unknown'}</div>
+                    <div class="song-title">${escapeHtml(song.title)}</div>
+                    <div class="song-artist">${escapeHtml(song.artist || 'Unknown')}</div>
                 </div>
-                <div class="song-stats" style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px; margin-left: 16px; min-width: 90px;">
-                    <span style="color: var(--accent-color); font-weight: 600; font-size: 13px;"><i class="fas fa-play-circle"></i> ${song.play_count || 0} plays</span>
-                    <span style="color: var(--text-secondary); font-size: 12px;"><i class="fas fa-clock"></i> ${listenedText}</span>
+                <div class="song-stats">
+                    <span class="song-stat-primary"><i class="fas fa-play-circle"></i> ${song.play_count || 0} plays</span>
+                    <span class="song-stat-secondary"><i class="fas fa-clock"></i> ${listenedText}</span>
                 </div>
                 <button class="icon-btn delete-song" data-id="${song.id}"><i class="fas fa-trash"></i></button>
             `;
@@ -579,10 +836,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function highlightPlayingSong() {
-        console.log("▶ [DEBUG] highlightPlayingSong berjalan. Target ID:", currentPlayingSongId);
-
         if (!currentPlayingSongId || String(currentPlayingSongId) === 'null' || String(currentPlayingSongId) === 'undefined') {
-            console.warn("⚠ [DEBUG] currentPlayingSongId tidak valid, membatalkan highlight.");
             return;
         }
 
@@ -595,7 +849,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const activeView = document.querySelector('.view.active');
         
         if (!activeView) {
-            console.warn("❌ [DEBUG] Tidak ada view aktif ditemukan");
             return;
         }
 
@@ -606,9 +859,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (activeEl) {
                 activeEl.classList.add('is-playing');
-                console.log("✅ [DEBUG] BERHASIL: Animasi ditambahkan ke ID", targetId, "di view aktif");
-            } else {
-                console.warn("❌ [DEBUG] Lagu dengan ID", targetId, "tidak ditemukan di view aktif");
             }
         }, 50);
     }
@@ -622,16 +872,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const song = songs[index];
 
         currentPlayingSongId = String(song.id);
-        console.log("▶ [DEBUG] playSong dipanggil. currentPlayingSongId diatur ke:", currentPlayingSongId);
 
         fetch(`/api/songs/${song.id}/play`, { method: 'POST' }).catch(e => console.error(e));
 
-        audio.src = `/audio/${song.filename}`;
+        audio.src = `/audio/${mediaUrlName(song.filename)}`;
         audio.play().catch(e => console.log("Autoplay prevented", e));
 
         document.getElementById('player-title').innerText = song.title;
         document.getElementById('player-artist').innerText = song.artist || 'Unknown';
-        document.getElementById('player-art').src = `/static/album_art/${song.album_art}`;
+        document.getElementById('player-art').src = `/static/album_art/${mediaUrlName(song.album_art)}`;
 
         updatePlayPauseIcon(true);
 
@@ -682,4 +931,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadPlaylists();
     loadDashboard();
+    renderEmptyState(document.getElementById('search-results'), {
+        icon: 'fa-search',
+        title: 'Search your library',
+        body: 'Type at least two characters to find a song or artist in this account.'
+    });
 });

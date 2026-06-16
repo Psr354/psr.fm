@@ -1,17 +1,38 @@
-# Database & Data Pribadi
+# ==========================================
+# DATABASE & LOCAL DATA
+# ==========================================
+*.db
 database.db
 
-# File Media & Log 
+# ==========================================
+# GENERATED MEDIA & LOGS
+# ==========================================
 downloads/
 logs/
+static/album_art/
 
-# Python
+# ==========================================
+# PYTHON
+# ==========================================
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
 .env
+venv/
+env/
 
+# ==========================================
 # IDE & OS
+# ==========================================
 .vscode/
 .idea/
 .DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~

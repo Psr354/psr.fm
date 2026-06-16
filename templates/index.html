@@ -15,11 +15,21 @@
     <div class="app-container">
         <aside class="sidebar">
             <div class="logo"><h1>psr.fm</h1></div>
+            
+            <div class="user-info" id="user-info">
+                <div class="user-avatar" id="user-avatar">?</div>
+                <div class="user-details">
+                    <div class="user-name" id="user-name">Loading...</div>
+                    <div class="user-status">Online</div>
+                </div>
+            </div>
+
             <nav class="nav-menu">
                 <button id="home-btn" class="nav-item active"><i class="fas fa-home"></i> Home</button>
                 <button id="search-btn" class="nav-item"><i class="fas fa-search"></i> Search</button>
-                <button id="global-download-btn" class="nav-item" style="margin-top: 12px; color: var(--accent-color);"><i class="fas fa-download"></i> Download Song</button>
+                <button id="global-download-btn" class="nav-item nav-item-accent"><i class="fas fa-download"></i> Download Song</button>
             </nav>
+            
             <div class="playlist-section">
                 <div class="playlist-header">
                     <h3>Playlists</h3>
@@ -27,31 +37,47 @@
                 </div>
                 <ul id="playlist-list" class="playlist-items"></ul>
             </div>
+
+            <button id="add-user-btn" class="add-user-btn">
+                <i class="fas fa-user-plus"></i> Add New Account
+            </button>
+            <button id="logout-btn" class="logout-btn">
+                <i class="fas fa-sign-out-alt"></i> Sign Out
+            </button>
         </aside>
 
         <main class="main-content">
             <div id="dashboard-view" class="view active">
-                <h2>Good Evening</h2>
+                <div class="page-heading">
+                    <div>
+                        <p class="eyebrow">Your room</p>
+                        <h2>Good Evening</h2>
+                        <p class="page-subtitle">A private library for this account.</p>
+                    </div>
+                    <button id="dashboard-download-btn" class="btn-primary compact-action"><i class="fas fa-download"></i> Download</button>
+                </div>
                 <div class="stats-grid" id="stats-grid"></div>
-                <div class="recent-songs"><h3 style="margin-bottom: 16px;">Recently Added</h3><div id="recent-songs-list" class="songs-list"></div></div>
-            <div class="top-songs-section" style="margin-top: 40px;">
-                <h3 style="margin-bottom: 16px; font-size: 20px;">🔥 Top Played (Most Plays)</h3>
-                <div id="top-songs-list" class="songs-list"></div>
-            </div>
-
-            <div class="top-songs-section" style="margin-top: 40px;">
-                <h3 style="margin-bottom: 16px; font-size: 20px;">⏱️ Top Listened (Longest Duration)</h3>
-                <div id="top-songs-duration-list" class="songs-list"></div>
-            </div>
+                <section class="content-section">
+                    <div class="section-heading"><h3 class="section-title">Recently Added</h3><span class="section-note">Newest in your room</span></div>
+                    <div id="recent-songs-list" class="songs-list"></div>
+                </section>
+                <section class="content-section">
+                    <div class="section-heading"><h3 class="section-title">Top Played</h3><span class="section-note">Most started tracks</span></div>
+                    <div id="top-songs-list" class="songs-list"></div>
+                </section>
+                <section class="content-section">
+                    <div class="section-heading"><h3 class="section-title">Top Listened</h3><span class="section-note">Most listening time</span></div>
+                    <div id="top-songs-duration-list" class="songs-list"></div>
+                </section>
             </div>
 
             <div id="playlist-view" class="view">
                 <div class="playlist-header-main">
-                    <div style="display:flex; align-items:center; gap:24px;">
+                    <div class="playlist-identity">
                         <div class="playlist-cover-wrapper" id="playlist-cover-wrapper"><img id="playlist-cover-img" src=""><div class="playlist-cover-overlay"><i class="fas fa-camera"></i><span>Change</span></div><input type="file" id="playlist-cover-input" accept="image/*" style="display:none;"></div>
                         <div>
-                            <div style="display:flex; align-items:center; gap:12px;"><h2 id="playlist-title" style="font-size: 32px;">Playlist</h2><button id="rename-playlist-btn" class="icon-btn"><i class="fas fa-pen"></i></button></div>
-                            <p id="playlist-meta" style="color: var(--text-secondary); margin-top:8px;"></p>
+                            <div class="playlist-title-row"><h2 id="playlist-title">Playlist</h2><button id="rename-playlist-btn" class="icon-btn"><i class="fas fa-pen"></i></button></div>
+                            <p id="playlist-meta" class="playlist-meta"></p>
                         </div>
                     </div>
                     <button id="delete-playlist-btn" class="btn-danger"><i class="fas fa-trash"></i> Delete</button>
@@ -60,14 +86,27 @@
             </div>
 
             <div id="search-view" class="view">
-                <h2>Search</h2>
-                <div class="search-container"><input type="text" id="search-input" placeholder="Search..."></div>
+                <div class="page-heading simple-heading">
+                    <div>
+                        <p class="eyebrow">Find music</p>
+                        <h2>Search</h2>
+                        <p class="page-subtitle">Search only inside your own library.</p>
+                    </div>
+                </div>
+                <div class="search-container"><i class="fas fa-search"></i><input type="text" id="search-input" placeholder="Search by title or artist..."></div>
                 <div id="search-results" class="songs-list"></div>
             </div>
         </main>
     </div>
 
     <div class="toast-container" id="toast-container"></div>
+    <div id="download-progress-wrapper" class="download-progress-wrapper">
+        <div class="download-progress-meta">
+            <span><i class="fas fa-cloud-download-alt"></i> Downloading audio</span>
+            <span id="download-progress-label">0%</span>
+        </div>
+        <div class="download-progress-track"><div id="download-progress-bar" class="download-progress-bar"></div></div>
+    </div>
 
     <!-- Modals -->
     <div id="playlist-modal" class="modal">
@@ -78,14 +117,33 @@
         </div>
     </div>
 
-    <!-- Global Download Modal -->
     <div id="global-download-modal" class="modal">
         <div class="modal-content">
             <h3>Download Song</h3>
             <input type="text" id="global-url-input" placeholder="Paste YouTube URL...">
-            <p style="color: var(--text-secondary); font-size: 13px; margin-top: 12px;">Add to playlists:</p>
-            <div id="playlist-checkboxes" style="max-height: 200px; overflow-y: auto; margin-bottom: 16px; background: #0a0a0a; padding: 12px; border-radius: 6px;"></div>
+            <p class="field-hint">Add to playlists:</p>
+            <div id="playlist-checkboxes" class="checkbox-list"></div>
             <div class="modal-actions"><button id="cancel-global-download-btn" class="btn-secondary">Cancel</button><button id="save-global-download-btn" class="btn-primary">Download</button></div>
+        </div>
+    </div>
+
+    <!-- Modal Tambah User -->
+    <div id="add-user-modal" class="modal">
+        <div class="modal-content">
+            <h3>Add New Account</h3>
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" id="new-username" placeholder="Min. 3 characters">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="new-password" placeholder="Min. 6 characters">
+            </div>
+            <div id="add-user-error" class="error-message" style="display: none;"></div>
+            <div class="modal-actions">
+                <button id="cancel-add-user" class="btn-secondary">Cancel</button>
+                <button id="confirm-add-user" class="btn-primary">Create Account</button>
+            </div>
         </div>
     </div>
 

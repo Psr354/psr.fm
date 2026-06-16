@@ -26,7 +26,8 @@ def download_worker(db_path, download_dir, album_art_dir, sio):
 
 def process_download(task, db_path, download_dir, album_art_dir):
     url = task['url']
-    playlist_ids = task['playlist_ids'] # List of IDs
+    playlist_ids = task['playlist_ids']
+    user_id = task['user_id']
     
     def progress_hook(d):
         if socketio_instance:
@@ -77,8 +78,8 @@ def process_download(task, db_path, download_dir, album_art_dir):
             
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
-    cursor.execute('INSERT INTO songs (title, artist, filename, album_art, duration_seconds) VALUES (?, ?, ?, ?, ?)',
-                 (title, artist, expected_file, album_art_filename, duration_seconds))
+    cursor.execute('INSERT INTO songs (title, artist, filename, album_art, duration_seconds, user_id) VALUES (?, ?, ?, ?, ?, ?)',
+                 (title, artist, expected_file, album_art_filename, duration_seconds, user_id))
     song_id = cursor.lastrowid
     
     for pid in playlist_ids:

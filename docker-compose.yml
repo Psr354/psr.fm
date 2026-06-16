@@ -14,5 +14,7 @@
       - ./app.py:/app/app.py
       - ./services:/app/services
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       - FLASK_ENV=production
