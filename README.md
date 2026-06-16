@@ -87,9 +87,9 @@ Shortcut:
 Clone repository:
 
 ```bash
-git clone https://github.com/psr354/psr-fm.git
+git clone https://github.com/psr354/psr.fm.git
 
-cd psr-fm
+cd psr.fm
 ```
 
 Create database:
@@ -224,7 +224,7 @@ https://github.com/psr354
 
 Project:
 
-https://github.com/psr354/psr-fm
+https://github.com/psr354/psr.fm
 
 ---
 
