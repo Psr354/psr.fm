@@ -900,22 +900,34 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function playNext() {
-        if (playQueue.length > 0) {
-            const nextSong = playQueue.shift();
-            const idx = currentPlaylistSongs.findIndex(s => s.id === nextSong.id);
-            if (idx !== -1) {
-                playSong(currentPlaylistSongs, idx);
-                return;
-            }
-        }
-        if (currentPlaylistSongs.length === 0) return;
-        if (repeatMode === 2) { audio.currentTime = 0; audio.play(); return; }
-        let nextIndex = (currentSongIndex + 1) % currentPlaylistSongs.length;
-        if (nextIndex === 0 && repeatMode === 0 && currentSongIndex === currentPlaylistSongs.length - 1) {
-            audio.pause(); updatePlayPauseIcon(false); return;
-        }
-        playSong(currentPlaylistSongs, nextIndex);
+    // ✅ FIX: Cek Repeat One DULUAN, sebelum queue
+    if (repeatMode === 2) {
+        audio.currentTime = 0;
+        audio.play();
+        return;
     }
+    
+    // Baru cek queue untuk mode lain
+    if (playQueue.length > 0) {
+        const nextSong = playQueue.shift();
+        const idx = currentPlaylistSongs.findIndex(s => s.id === nextSong.id);
+        if (idx !== -1) {
+            playSong(currentPlaylistSongs, idx);
+            return;
+        }
+    }
+    
+    if (currentPlaylistSongs.length === 0) return;
+    
+    let nextIndex = (currentSongIndex + 1) % currentPlaylistSongs.length;
+    if (nextIndex === 0 && repeatMode === 0 && currentSongIndex === currentPlaylistSongs.length - 1) {
+        audio.pause();
+        updatePlayPauseIcon(false);
+        return;
+    }
+    
+    playSong(currentPlaylistSongs, nextIndex);
+}
 
     function playPrev() {
         if (currentPlaylistSongs.length === 0) return;
