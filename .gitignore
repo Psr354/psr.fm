@@ -10,6 +10,9 @@ database.db
 downloads/
 logs/
 static/album_art/
+old.js
+old.css
+old.html
 
 # ==========================================
 # PYTHON

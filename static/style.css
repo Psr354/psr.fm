@@ -278,6 +278,19 @@ body, .app-container {
     .modal-content { width: 90%; max-width: 400px; padding: 24px; }
 }
 
+
+.loop-indicator {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: rgba(29, 185, 84, 0.7);
+    border-left: 3px solid var(--accent-color);
+    border-right: 3px solid var(--accent-color);
+    pointer-events: none;
+    z-index: 1;
+    transition: all 0.2s ease;
+}
+
 /* ==========================================
    A-B LOOP FEATURE - REDESIGNED
    ========================================== */

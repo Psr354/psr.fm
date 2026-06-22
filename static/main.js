@@ -6,7 +6,7 @@ window.fetch = async function(url, options = {}) {
     // CSRF Token injection untuk POST/PUT/DELETE
     const csrfMatch = document.cookie.match(/csrf_token=([^;]+)/);
     const csrfToken = csrfMatch ? decodeURIComponent(csrfMatch[1]) : null;
-    
+
     options.headers = options.headers || {};
     if (csrfToken && ['POST', 'PUT', 'DELETE'].includes(options.method?.toUpperCase())) {
         options.headers['X-CSRF-Token'] = csrfToken;
@@ -14,17 +14,17 @@ window.fetch = async function(url, options = {}) {
 
     try {
         const response = await _originalFetch.call(this, url, options);
-        
+
         // Handle 401 Unauthorized (skip untuk auth endpoints)
         if (response.status === 401) {
             const path = typeof url === 'string' ? url : url.toString();
-            if (!path.includes('/api/login') && 
-                !path.includes('/api/setup') && 
+            if (!path.includes('/api/login') &&
+                !path.includes('/api/setup') &&
                 !path.includes('/api/users')) {
                 window.location.href = '/login';
             }
         }
-        
+
         return response;
     } catch (err) {
         console.error('Fetch error:', err);
@@ -36,7 +36,7 @@ window.fetch = async function(url, options = {}) {
 // MAIN APPLICATION
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
-    
+
     // ==========================================
     // STATE MANAGEMENT (Single Source of Truth)
     // ==========================================
@@ -120,8 +120,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const h = Math.floor(s / 3600);
         const m = Math.floor((s % 3600) / 60);
         const sec = Math.floor(s % 60);
-        return h > 0 
-            ? `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}` 
+        return h > 0
+            ? `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`
             : `${m}:${sec.toString().padStart(2, '0')}`;
     }
 
@@ -176,8 +176,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const icon = options.icon || 'fa-music';
         const title = options.title || 'No songs here yet';
         const body = options.body || 'Download audio into a playlist to start building this room.';
-        const action = options.action 
-            ? `<button class="btn-primary compact-action empty-action" ${options.actionAttr || ''}>${options.action}</button>` 
+        const action = options.action
+            ? `<button class="btn-primary compact-action empty-action" ${options.actionAttr || ''}>${options.action}</button>`
             : '';
         container.innerHTML = `
             <div class="empty-state">
@@ -189,15 +189,21 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
+    // [UPDATED]: Smart UI Indicator Engine
     function updateLoopIndicator() {
         if (!el.loopIndicator || !el.audio.duration) return;
-        
-        if (state.isLooping && state.loopEnd > state.loopStart) {
+
+        // Tampilkan asalkan Titik B > Titik A (tanpa harus nunggu tombol Start Loop dipencet)
+        if (state.loopEnd > state.loopStart && state.loopEnd <= el.audio.duration) {
             const startPercent = (state.loopStart / el.audio.duration) * 100;
             const endPercent = (state.loopEnd / el.audio.duration) * 100;
+            
             el.loopIndicator.style.left = `${startPercent}%`;
             el.loopIndicator.style.width = `${endPercent - startPercent}%`;
             el.loopIndicator.style.display = 'block';
+
+            // Pembeda visual: Redup saat sekadar "Preview", Menyala terang saat Loop "Active"
+            el.loopIndicator.style.opacity = state.isLooping ? '1' : '0.35';
         } else {
             el.loopIndicator.style.display = 'none';
         }
@@ -222,35 +228,30 @@ document.addEventListener('DOMContentLoaded', () => {
         updateLoopIndicator();
     }
 
-// NEW: Quick jump to loop start 
+    // Quick jump to loop start
     function jumpToLoopStart() {
-    	if (!state.isLooping || state.loopStart < 0) return;
-    
-   	el.audio.currentTime = state.loopStart;
-    
-    // Visual feedback: flash button
-   	const jumpBtn = document.getElementById('jump-loop-btn');
+        if (!state.isLooping || state.loopStart < 0) return;
+
+        el.audio.currentTime = state.loopStart;
+
+        // Visual feedback: flash button
+        const jumpBtn = document.getElementById('jump-loop-btn');
         if (jumpBtn) {
             jumpBtn.style.transform = 'scale(0.9)';
             setTimeout(() => {
                 jumpBtn.style.transform = '';
             }, 150);
-    	}
-    
-    // Ensure audio is playing
+        }
+
         if (el.audio.paused) {
             el.audio.play().catch(e => console.log("Play prevented", e));
         }
-    
-    // Reset listen log timer
+
         state.lastLoggedTime = el.audio.currentTime;
-    
         showToast('Jumped to loop start', 'success');
     }
 
-// ✅ NEW: Jump button listener
-document.getElementById('jump-loop-btn')?.addEventListener('click', jumpToLoopStart);
-
+    document.getElementById('jump-loop-btn')?.addEventListener('click', jumpToLoopStart);
 
     function updateVolumeIcon(vol) {
         if (!el.volumeIcon) return;
@@ -620,7 +621,7 @@ document.getElementById('jump-loop-btn')?.addEventListener('click', jumpToLoopSt
     async function submitPlaylistModal() {
         const name = nameInput?.value.trim();
         if (!name || !saveBtn) return;
-        
+
         saveBtn.disabled = true;
         try {
             if (state.isRenaming && state.currentPlaylistId) {
@@ -696,7 +697,7 @@ document.getElementById('jump-loop-btn')?.addEventListener('click', jumpToLoopSt
     document.getElementById('play-pause-btn')?.addEventListener('click', togglePlay);
     document.getElementById('prev-btn')?.addEventListener('click', () => playPrev());
     document.getElementById('next-btn')?.addEventListener('click', () => playNext(false));
-    
+
     document.getElementById('shuffle-btn')?.addEventListener('click', () => {
         state.isShuffle = !state.isShuffle;
         document.getElementById('shuffle-btn')?.classList.toggle('active', state.isShuffle);
@@ -721,8 +722,8 @@ document.getElementById('jump-loop-btn')?.addEventListener('click', jumpToLoopSt
         const btn = document.getElementById('repeat-btn');
         if (btn) {
             btn.classList.toggle('active', state.repeatMode > 0);
-            btn.innerHTML = state.repeatMode === 2 
-                ? '<i class="fas fa-redo"></i><span class="repeat-one">1</span>' 
+            btn.innerHTML = state.repeatMode === 2
+                ? '<i class="fas fa-redo"></i><span class="repeat-one">1</span>'
                 : '<i class="fas fa-redo"></i>';
         }
     });
@@ -730,33 +731,30 @@ document.getElementById('jump-loop-btn')?.addEventListener('click', jumpToLoopSt
     // ==========================================
     // A-B LOOP FEATURE
     // ==========================================
-if (el.loopBtn && el.loopPopover) {
-    let clickTimer = null;
-    
-    el.loopBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        
-        // ✅ NEW: Double-click detection for quick jump
-        if (clickTimer) {
-            // Double-click detected
-            clearTimeout(clickTimer);
-            clickTimer = null;
-            
-            if (state.isLooping) {
-                jumpToLoopStart();
-                showToast('Jumped to loop start (double-click)', 'success');
-            } else {
-                el.loopPopover.classList.toggle('active');
-            }
-        } else {
-            // Single-click: wait to see if double-click happens
-            clickTimer = setTimeout(() => {
-                el.loopPopover.classList.toggle('active');
+    if (el.loopBtn && el.loopPopover) {
+        let clickTimer = null;
+
+        el.loopBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+
+            if (clickTimer) {
+                clearTimeout(clickTimer);
                 clickTimer = null;
-            }, 250);
-        }
-    });
-}
+
+                if (state.isLooping) {
+                    jumpToLoopStart();
+                    showToast('Jumped to loop start (double-click)', 'success');
+                } else {
+                    el.loopPopover.classList.toggle('active');
+                }
+            } else {
+                clickTimer = setTimeout(() => {
+                    el.loopPopover.classList.toggle('active');
+                    clickTimer = null;
+                }, 250);
+            }
+        });
+    }
 
     document.addEventListener('click', (e) => {
         if (el.loopPopover && !e.target.closest('#loop-popover') && !e.target.closest('#loop-btn')) {
@@ -790,40 +788,38 @@ if (el.loopBtn && el.loopPopover) {
         updateLoopIndicator();
     });
 
-el.toggleLoopBtn?.addEventListener('click', () => {
-    const jumpBtn = document.getElementById('jump-loop-btn');
-    
-    if (!state.isLooping) {
-        // Start loop
-        if (state.loopEnd <= state.loopStart) {
-            showToast('End time must be greater than start time', 'error');
-            return;
+    el.toggleLoopBtn?.addEventListener('click', () => {
+        const jumpBtn = document.getElementById('jump-loop-btn');
+
+        if (!state.isLooping) {
+            if (state.loopEnd <= state.loopStart) {
+                showToast('End time must be greater than start time', 'error');
+                return;
+            }
+            state.isLooping = true;
+            el.loopBtn?.classList.add('active');
+            if (el.loopStatus) {
+                el.loopStatus.innerText = 'Active';
+                el.loopStatus.classList.add('active');
+            }
+            if (el.toggleLoopBtn) el.toggleLoopBtn.innerHTML = '<i class="fas fa-pause"></i> Stop';
+            if (jumpBtn) jumpBtn.disabled = false;
+            el.audio.currentTime = state.loopStart;
+            updateLoopIndicator();
+            showToast('Loop started', 'success');
+        } else {
+            state.isLooping = false;
+            el.loopBtn?.classList.remove('active');
+            if (el.loopStatus) {
+                el.loopStatus.innerText = 'Off';
+                el.loopStatus.classList.remove('active');
+            }
+            if (el.toggleLoopBtn) el.toggleLoopBtn.innerHTML = '<i class="fas fa-play"></i> Start';
+            if (jumpBtn) jumpBtn.disabled = true;
+            updateLoopIndicator();
+            showToast('Loop stopped', 'success');
         }
-        state.isLooping = true;
-        el.loopBtn?.classList.add('active');
-        if (el.loopStatus) {
-            el.loopStatus.innerText = 'Active';
-            el.loopStatus.classList.add('active');
-        }
-        if (el.toggleLoopBtn) el.toggleLoopBtn.innerHTML = '<i class="fas fa-pause"></i> Stop';
-        if (jumpBtn) jumpBtn.disabled = false;
-        el.audio.currentTime = state.loopStart;
-        updateLoopIndicator();
-        showToast('Loop started', 'success');
-    } else {
-        // Stop loop
-        state.isLooping = false;
-        el.loopBtn?.classList.remove('active');
-        if (el.loopStatus) {
-            el.loopStatus.innerText = 'Off';
-            el.loopStatus.classList.remove('active');
-        }
-        if (el.toggleLoopBtn) el.toggleLoopBtn.innerHTML = '<i class="fas fa-play"></i> Start';
-        if (jumpBtn) jumpBtn.disabled = true;
-        updateLoopIndicator();
-        showToast('Loop stopped', 'success');
-    }
-});
+    });
 
     document.getElementById('clear-loop-btn')?.addEventListener('click', () => {
         resetLoop();
@@ -844,7 +840,7 @@ el.toggleLoopBtn?.addEventListener('click', () => {
         if (e.key === 'l' || e.key === 'L') {
             if (state.isLooping) {
                 jumpToLoopStart();
-           }
+            }
         }
     });
 
@@ -858,20 +854,16 @@ el.toggleLoopBtn?.addEventListener('click', () => {
             if (el.progressFill) el.progressFill.style.width = `${val}%`;
             if (el.currentTime) el.currentTime.innerText = formatTime(el.audio.currentTime);
 
-            // ✅ A-B Loop logic
             if (state.isLooping && el.audio.currentTime >= state.loopEnd) {
                 el.audio.currentTime = state.loopStart;
             }
 
-            // ✅ Secure listen tracking with delta validation
             if (!el.audio.paused && state.currentPlayingSongId) {
                 const delta = el.audio.currentTime - state.lastLoggedTime;
-                // Only log if delta is reasonable (5-30 seconds)
                 if (delta >= 5 && delta <= 30) {
                     logListen(state.currentPlayingSongId, delta);
                     state.lastLoggedTime = el.audio.currentTime;
                 } else if (delta < 0) {
-                    // User seeked backward, reset timer
                     state.lastLoggedTime = el.audio.currentTime;
                 }
             }
@@ -880,8 +872,8 @@ el.toggleLoopBtn?.addEventListener('click', () => {
 
     el.audio.addEventListener('loadedmetadata', () => {
         if (el.duration) el.duration.innerText = formatTime(el.audio.duration);
-        // Reset loop saat lagu baru dimuat
-        if (state.isLooping) resetLoop();
+        if (state.isLooping || state.loopStart > 0 || state.loopEnd > 0) resetLoop();
+        updateLoopIndicator();
     });
 
     el.audio.addEventListener('play', () => {
@@ -900,7 +892,7 @@ el.toggleLoopBtn?.addEventListener('click', () => {
 
     el.audio.addEventListener('ended', () => {
         flushListenLog();
-        playNext(true); // Trigger dari lagu habis sendiri
+        playNext(true);
     });
 
     function flushListenLog() {
@@ -975,8 +967,8 @@ el.toggleLoopBtn?.addEventListener('click', () => {
             li.className = 'playlist-item';
             if (p.id === state.currentPlaylistId) li.classList.add('active');
             li.setAttribute('data-id', p.id);
-            const coverSrc = p.cover_art 
-                ? `/static/album_art/${mediaUrlName(p.cover_art)}` 
+            const coverSrc = p.cover_art
+                ? `/static/album_art/${mediaUrlName(p.cover_art)}`
                 : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24' fill='%23555'><path d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/></svg>";
             li.innerHTML = `<img src="${coverSrc}"> <span>${escapeHtml(p.name)}</span>`;
             li.addEventListener('click', () => openPlaylist(p));
@@ -994,8 +986,8 @@ el.toggleLoopBtn?.addEventListener('click', () => {
         }
 
         const timestamp = new Date().getTime();
-        const coverSrc = playlist.cover_art 
-            ? `/static/album_art/${mediaUrlName(playlist.cover_art)}?t=${timestamp}` 
+        const coverSrc = playlist.cover_art
+            ? `/static/album_art/${mediaUrlName(playlist.cover_art)}?t=${timestamp}`
             : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 24 24' fill='%23333'><path d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/></svg>";
         if (el.playlistCoverImg) el.playlistCoverImg.src = coverSrc;
 
@@ -1014,7 +1006,7 @@ el.toggleLoopBtn?.addEventListener('click', () => {
                 }
             };
         }
-        
+
         state.currentPlaylistSongs = await (await fetch(`/api/songs?playlist_id=${playlist.id}`)).json();
         renderSongs(state.currentPlaylistSongs, 'playlist-songs-list', true);
         updatePlaylistMeta();
@@ -1064,8 +1056,8 @@ el.toggleLoopBtn?.addEventListener('click', () => {
             renderEmptyState(container, {
                 icon: isSearch ? 'fa-search' : 'fa-compact-disc',
                 title: isSearch ? 'No matching songs' : 'No songs here yet',
-                body: isSearch 
-                    ? 'Try another title or artist from your library.' 
+                body: isSearch
+                    ? 'Try another title or artist from your library.'
                     : 'Download a song into one of your playlists to start listening.',
                 action: isSearch ? '' : '<i class="fas fa-download"></i> Download',
                 actionAttr: 'data-open-download'
@@ -1183,9 +1175,6 @@ el.toggleLoopBtn?.addEventListener('click', () => {
         });
     }
 
-    // ==========================================
-    // HIGHLIGHT PLAYING SONG (requestAnimationFrame)
-    // ==========================================
     function highlightPlayingSong() {
         if (!state.currentPlayingSongId || String(state.currentPlayingSongId) === 'null' || String(state.currentPlayingSongId) === 'undefined') {
             return;
@@ -1197,7 +1186,6 @@ el.toggleLoopBtn?.addEventListener('click', () => {
         const activeView = document.querySelector('.view.active');
         if (!activeView) return;
 
-        // ✅ Use requestAnimationFrame instead of setTimeout for precision
         requestAnimationFrame(() => {
             const activeEl = activeView.querySelector(`.song-item[data-id="${targetId}"]`);
             if (activeEl) {
@@ -1229,11 +1217,10 @@ el.toggleLoopBtn?.addEventListener('click', () => {
         updatePlayPauseIcon(true);
         highlightPlayingSong();
         buildQueue();
-        
-        // ✅ Reset loop when song changes (clean integration, no monkey-patching)
-        if (state.isLooping) {
+
+        // [IMPROVED]: Bersihkan state Loop tiap kali melompat ke lagu baru
+        if (state.isLooping || state.loopStart > 0 || state.loopEnd > 0) {
             resetLoop();
-            showToast('Loop reset for new song', 'success');
         }
     }
 
@@ -1248,16 +1235,13 @@ el.toggleLoopBtn?.addEventListener('click', () => {
         }
     }
 
-    // ✅ playNext dengan parameter untuk distinguish trigger
     function playNext(isFromSongEnded = true) {
-        // ✅ Repeat One logic - hanya aktif jika lagu habis sendiri, BUKAN karena user pencet Next
         if (state.repeatMode === 2 && isFromSongEnded) {
             el.audio.currentTime = 0;
             el.audio.play();
             return;
         }
 
-        // Queue logic
         if (state.playQueue.length > 0) {
             const nextSong = state.playQueue.shift();
             const idx = state.currentPlaylistSongs.findIndex(s => s.id === nextSong.id);
