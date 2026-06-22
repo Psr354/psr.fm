@@ -54,6 +54,7 @@ Support:
 
 - Queue
 - Shuffle
+- Looping
 - Repeat
 - Next / Previous
 - Keyboard shortcut
@@ -65,7 +66,8 @@ Shortcut:
 | Space | Play / Pause |
 | ← | Previous |
 | → | Next |
-
+| l | jump to loop start |
+| esc | close popover |
 ---
 
 ## 🛠️ Tech Stack

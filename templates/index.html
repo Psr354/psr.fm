@@ -186,31 +186,45 @@
     <script src="{{ url_for('static', filename='main.js') }}"></script>
 
     <!-- Loop Popover -->
-    <div id="loop-popover" class="loop-popover">
-    <h4>A-B Loop <span id="loop-status" class="loop-status">Off</span></h4>
+    <!-- Loop Popover -->
+<div id="loop-popover" class="loop-popover">
+    <div class="loop-header">
+        <h4>A-B Loop</h4>
+        <span id="loop-status" class="loop-status">Off</span>
+    </div>
+    
     <div class="loop-controls">
-        <div class="loop-time-input">
+        <div class="loop-row">
             <label>Start (A):</label>
-            <input type="text" id="loop-start-input" placeholder="0:00" value="0:00">
-            <button id="set-loop-start-btn" class="loop-set-btn" title="Set to current time">
-                <i class="fas fa-map-marker-alt"></i>
-            </button>
+            <div class="loop-input-group">
+                <input type="text" id="loop-start-input" placeholder="0:00" value="0:00">
+                <button id="set-loop-start-btn" class="loop-set-btn" title="Set to current time">
+                    <i class="fas fa-map-marker-alt"></i>
+                </button>
+            </div>
         </div>
-        <div class="loop-time-input">
+        
+        <div class="loop-row">
             <label>End (B):</label>
-            <input type="text" id="loop-end-input" placeholder="0:00" value="0:00">
-            <button id="set-loop-end-btn" class="loop-set-btn" title="Set to current time">
-                <i class="fas fa-map-marker-alt"></i>
-            </button>
+            <div class="loop-input-group">
+                <input type="text" id="loop-end-input" placeholder="0:00" value="0:00">
+                <button id="set-loop-end-btn" class="loop-set-btn" title="Set to current time">
+                    <i class="fas fa-map-marker-alt"></i>
+                </button>
+            </div>
         </div>
-        <div class="loop-actions">
-            <button id="toggle-loop-btn" class="btn-primary compact">
-                <i class="fas fa-play"></i> Start Loop
-            </button>
-            <button id="clear-loop-btn" class="btn-secondary compact">
-                <i class="fas fa-times"></i> Clear
-            </button>
-        </div>
+    </div>
+    
+    <div class="loop-actions">
+        <button id="toggle-loop-btn" class="btn-primary compact">
+            <i class="fas fa-play"></i> Start Loop
+        </button>
+        <button id="jump-loop-btn" class="btn-warning compact" disabled>
+            <i class="fas fa-backward"></i> Jump
+        </button>
+        <button id="clear-loop-btn" class="btn-secondary compact">
+            <i class="fas fa-times"></i> Clear
+        </button>
     </div>
 </div>
 

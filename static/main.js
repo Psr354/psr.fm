@@ -215,8 +215,42 @@ document.addEventListener('DOMContentLoaded', () => {
             el.loopStatus.classList.remove('active');
         }
         if (el.toggleLoopBtn) el.toggleLoopBtn.innerHTML = '<i class="fas fa-play"></i> Start Loop';
+
+        const jumpBtn = document.getElementById('jump-loop-btn');
+        if (jumpBtn) jumpBtn.disabled = true;
+
         updateLoopIndicator();
     }
+
+// NEW: Quick jump to loop start 
+    function jumpToLoopStart() {
+    	if (!state.isLooping || state.loopStart < 0) return;
+    
+   	el.audio.currentTime = state.loopStart;
+    
+    // Visual feedback: flash button
+   	const jumpBtn = document.getElementById('jump-loop-btn');
+        if (jumpBtn) {
+            jumpBtn.style.transform = 'scale(0.9)';
+            setTimeout(() => {
+                jumpBtn.style.transform = '';
+            }, 150);
+    	}
+    
+    // Ensure audio is playing
+        if (el.audio.paused) {
+            el.audio.play().catch(e => console.log("Play prevented", e));
+        }
+    
+    // Reset listen log timer
+        state.lastLoggedTime = el.audio.currentTime;
+    
+        showToast('Jumped to loop start', 'success');
+    }
+
+// ✅ NEW: Jump button listener
+document.getElementById('jump-loop-btn')?.addEventListener('click', jumpToLoopStart);
+
 
     function updateVolumeIcon(vol) {
         if (!el.volumeIcon) return;
@@ -696,12 +730,33 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     // A-B LOOP FEATURE
     // ==========================================
-    if (el.loopBtn && el.loopPopover) {
-        el.loopBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            el.loopPopover.classList.toggle('active');
-        });
-    }
+if (el.loopBtn && el.loopPopover) {
+    let clickTimer = null;
+    
+    el.loopBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        
+        // ✅ NEW: Double-click detection for quick jump
+        if (clickTimer) {
+            // Double-click detected
+            clearTimeout(clickTimer);
+            clickTimer = null;
+            
+            if (state.isLooping) {
+                jumpToLoopStart();
+                showToast('Jumped to loop start (double-click)', 'success');
+            } else {
+                el.loopPopover.classList.toggle('active');
+            }
+        } else {
+            // Single-click: wait to see if double-click happens
+            clickTimer = setTimeout(() => {
+                el.loopPopover.classList.toggle('active');
+                clickTimer = null;
+            }, 250);
+        }
+    });
+}
 
     document.addEventListener('click', (e) => {
         if (el.loopPopover && !e.target.closest('#loop-popover') && !e.target.closest('#loop-btn')) {
@@ -735,34 +790,40 @@ document.addEventListener('DOMContentLoaded', () => {
         updateLoopIndicator();
     });
 
-    el.toggleLoopBtn?.addEventListener('click', () => {
-        if (!state.isLooping) {
-            if (state.loopEnd <= state.loopStart) {
-                showToast('End time must be greater than start time', 'error');
-                return;
-            }
-            state.isLooping = true;
-            el.loopBtn?.classList.add('active');
-            if (el.loopStatus) {
-                el.loopStatus.innerText = 'Active';
-                el.loopStatus.classList.add('active');
-            }
-            if (el.toggleLoopBtn) el.toggleLoopBtn.innerHTML = '<i class="fas fa-pause"></i> Stop Loop';
-            el.audio.currentTime = state.loopStart;
-            updateLoopIndicator();
-            showToast('Loop started', 'success');
-        } else {
-            state.isLooping = false;
-            el.loopBtn?.classList.remove('active');
-            if (el.loopStatus) {
-                el.loopStatus.innerText = 'Off';
-                el.loopStatus.classList.remove('active');
-            }
-            if (el.toggleLoopBtn) el.toggleLoopBtn.innerHTML = '<i class="fas fa-play"></i> Start Loop';
-            updateLoopIndicator();
-            showToast('Loop stopped', 'success');
+el.toggleLoopBtn?.addEventListener('click', () => {
+    const jumpBtn = document.getElementById('jump-loop-btn');
+    
+    if (!state.isLooping) {
+        // Start loop
+        if (state.loopEnd <= state.loopStart) {
+            showToast('End time must be greater than start time', 'error');
+            return;
         }
-    });
+        state.isLooping = true;
+        el.loopBtn?.classList.add('active');
+        if (el.loopStatus) {
+            el.loopStatus.innerText = 'Active';
+            el.loopStatus.classList.add('active');
+        }
+        if (el.toggleLoopBtn) el.toggleLoopBtn.innerHTML = '<i class="fas fa-pause"></i> Stop';
+        if (jumpBtn) jumpBtn.disabled = false;
+        el.audio.currentTime = state.loopStart;
+        updateLoopIndicator();
+        showToast('Loop started', 'success');
+    } else {
+        // Stop loop
+        state.isLooping = false;
+        el.loopBtn?.classList.remove('active');
+        if (el.loopStatus) {
+            el.loopStatus.innerText = 'Off';
+            el.loopStatus.classList.remove('active');
+        }
+        if (el.toggleLoopBtn) el.toggleLoopBtn.innerHTML = '<i class="fas fa-play"></i> Start';
+        if (jumpBtn) jumpBtn.disabled = true;
+        updateLoopIndicator();
+        showToast('Loop stopped', 'success');
+    }
+});
 
     document.getElementById('clear-loop-btn')?.addEventListener('click', () => {
         resetLoop();
@@ -780,6 +841,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (e.code === 'ArrowRight') playNext(false);
         if (e.code === 'ArrowLeft') playPrev();
+        if (e.key === 'l' || e.key === 'L') {
+            if (state.isLooping) {
+                jumpToLoopStart();
+           }
+        }
     });
 
     // ==========================================
