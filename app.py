@@ -23,6 +23,13 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 
+MAINTENANCE_MODE = False
+
+@app.before_request
+def maintenance_check():
+    if MAINTENANCE_MODE:
+        return render_template('maintenance.html'), 503
+
 from flask_wtf.csrf import CSRFProtect, generate_csrf, validate_csrf
 
 # Initialize CSRF token helpers. Actual API checks are handled in

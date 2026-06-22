@@ -160,13 +160,18 @@
                 <button id="play-pause-btn" class="control-btn play-btn"><i class="fas fa-play"></i></button>
                 <button id="next-btn" class="control-btn"><i class="fas fa-step-forward"></i></button>
                 <button id="repeat-btn" class="control-btn"><i class="fas fa-redo"></i></button>
+        	<button id="loop-btn" class="control-btn" title="A-B Loop"><i class="fas fa-braille"></i></button>
             </div>
             <div class="progress-container">
-                <span id="current-time" class="time">0:00</span>
-                <div class="slider-container"><div class="slider-track"><div class="slider-fill" id="progress-fill"></div></div><input type="range" id="progress-bar" class="progress-bar" min="0" max="100" value="0" step="0.1"></div>
-                <span id="duration" class="time">0:00</span>
-            </div>
-        </div>
+       		 <span id="current-time" class="time">0:00</span>
+        	 <div class="slider-container">
+            	      <div class="slider-track"><div class="slider-fill" id="progress-fill"></div></div>
+            	      <input type="range" id="progress-bar" class="progress-bar" min="0" max="100" value="0" step="0.1">
+            	      <div id="loop-indicator" class="loop-indicator" style="display: none;"></div>
+        	 </div>
+        	 <span id="duration" class="time">0:00</span>
+    	     </div>
+	</div>
         <div class="volume-control">
             <button id="queue-btn" class="control-btn"><i class="fas fa-list"></i></button>
             <i id="volume-icon" class="fas fa-volume-up"></i>
@@ -179,5 +184,35 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
     <script src="{{ url_for('static', filename='main.js') }}"></script>
+
+    <!-- Loop Popover -->
+    <div id="loop-popover" class="loop-popover">
+    <h4>A-B Loop <span id="loop-status" class="loop-status">Off</span></h4>
+    <div class="loop-controls">
+        <div class="loop-time-input">
+            <label>Start (A):</label>
+            <input type="text" id="loop-start-input" placeholder="0:00" value="0:00">
+            <button id="set-loop-start-btn" class="loop-set-btn" title="Set to current time">
+                <i class="fas fa-map-marker-alt"></i>
+            </button>
+        </div>
+        <div class="loop-time-input">
+            <label>End (B):</label>
+            <input type="text" id="loop-end-input" placeholder="0:00" value="0:00">
+            <button id="set-loop-end-btn" class="loop-set-btn" title="Set to current time">
+                <i class="fas fa-map-marker-alt"></i>
+            </button>
+        </div>
+        <div class="loop-actions">
+            <button id="toggle-loop-btn" class="btn-primary compact">
+                <i class="fas fa-play"></i> Start Loop
+            </button>
+            <button id="clear-loop-btn" class="btn-secondary compact">
+                <i class="fas fa-times"></i> Clear
+            </button>
+        </div>
+    </div>
+</div>
+
 </body>
 </html>

@@ -1,68 +1,150 @@
-// Global fetch interceptor untuk handle 401 (unauthorized)
-const originalFetch = window.fetch;
-window.fetch = async function(...args) {
-    const response = await originalFetch.apply(this, args);
-    if (response.status === 401 && !args[0].includes('/api/login') && !args[0].includes('/api/setup') && !args[0].includes('/api/users')) {
-        window.location.href = '/login';
-    }
-    return response;
-};
-
-// CSRF Token Helper
-function getCSRFToken() {
-    const match = document.cookie.match(/csrf_token=([^;]+)/);
-    return match ? decodeURIComponent(match[1]) : null;
-}
-
-// Override fetch untuk auto-include CSRF token
+// ==========================================
+// GLOBAL FETCH INTERCEPTOR (SINGLE SOURCE)
+// ==========================================
 const _originalFetch = window.fetch;
-window.fetch = function(url, options = {}) {
-    const csrfToken = getCSRFToken();
-    options.headers = options.headers || {};
+window.fetch = async function(url, options = {}) {
+    // CSRF Token injection untuk POST/PUT/DELETE
+    const csrfMatch = document.cookie.match(/csrf_token=([^;]+)/);
+    const csrfToken = csrfMatch ? decodeURIComponent(csrfMatch[1]) : null;
     
-    // Tambahkan CSRF token untuk POST/PUT/DELETE
+    options.headers = options.headers || {};
     if (csrfToken && ['POST', 'PUT', 'DELETE'].includes(options.method?.toUpperCase())) {
         options.headers['X-CSRF-Token'] = csrfToken;
     }
-    
-    // Handle 401 unauthorized
-    return _originalFetch.call(this, url, options).then(response => {
-        if (response.status === 401 && !url.includes('/api/login') && !url.includes('/api/setup')) {
-            window.location.href = '/login';
+
+    try {
+        const response = await _originalFetch.call(this, url, options);
+        
+        // Handle 401 Unauthorized (skip untuk auth endpoints)
+        if (response.status === 401) {
+            const path = typeof url === 'string' ? url : url.toString();
+            if (!path.includes('/api/login') && 
+                !path.includes('/api/setup') && 
+                !path.includes('/api/users')) {
+                window.location.href = '/login';
+            }
         }
+        
         return response;
-    });
+    } catch (err) {
+        console.error('Fetch error:', err);
+        throw err;
+    }
 };
 
+// ==========================================
+// MAIN APPLICATION
+// ==========================================
 document.addEventListener('DOMContentLoaded', () => {
-    const views = { dashboard: document.getElementById('dashboard-view'), playlist: document.getElementById('playlist-view'), search: document.getElementById('search-view') };
-    const audio = document.getElementById('audio-player');
+    
+    // ==========================================
+    // STATE MANAGEMENT (Single Source of Truth)
+    // ==========================================
+    const state = {
+        playQueue: [],
+        currentPlaylistId: null,
+        currentPlaylistSongs: [],
+        currentSongIndex: -1,
+        isShuffle: false,
+        repeatMode: 0, // 0=Off, 1=RepeatAll, 2=RepeatOne
+        currentPlayingSongId: null,
+        wasPlayingBeforeSeek: false,
+        lastLoggedTime: 0,
+        loopStart: 0,
+        loopEnd: 0,
+        isLooping: false,
+        isRenaming: false,
+        currentPlaylist: null
+    };
+
+    // ==========================================
+    // DOM ELEMENT CACHING
+    // ==========================================
+    const el = {
+        audio: document.getElementById('audio-player'),
+        progressFill: document.getElementById('progress-fill'),
+        volumeFill: document.getElementById('volume-fill'),
+        progressBar: document.getElementById('progress-bar'),
+        volumeBar: document.getElementById('volume-bar'),
+        currentTime: document.getElementById('current-time'),
+        duration: document.getElementById('duration'),
+        volumeIcon: document.getElementById('volume-icon'),
+        nowPlaying: document.getElementById('now-playing-container'),
+        playerTitle: document.getElementById('player-title'),
+        playerArtist: document.getElementById('player-artist'),
+        playerArt: document.getElementById('player-art'),
+        playPauseBtn: document.getElementById('play-pause-btn'),
+        toastContainer: document.getElementById('toast-container'),
+        downloadWrapper: document.getElementById('download-progress-wrapper'),
+        downloadBar: document.getElementById('download-progress-bar'),
+        downloadLabel: document.getElementById('download-progress-label'),
+        loopIndicator: document.getElementById('loop-indicator'),
+        loopBtn: document.getElementById('loop-btn'),
+        loopPopover: document.getElementById('loop-popover'),
+        loopStartInput: document.getElementById('loop-start-input'),
+        loopEndInput: document.getElementById('loop-end-input'),
+        loopStatus: document.getElementById('loop-status'),
+        toggleLoopBtn: document.getElementById('toggle-loop-btn'),
+        queueMode: document.getElementById('queue-mode'),
+        queueList: document.getElementById('queue-list'),
+        sidebar: document.querySelector('.sidebar'),
+        mobileMenuBtn: document.getElementById('mobile-menu-btn'),
+        views: {
+            dashboard: document.getElementById('dashboard-view'),
+            playlist: document.getElementById('playlist-view'),
+            search: document.getElementById('search-view')
+        },
+        playlistCoverImg: document.getElementById('playlist-cover-img'),
+        playlistTitle: document.getElementById('playlist-title'),
+        playlistMeta: document.getElementById('playlist-meta')
+    };
+
     const socket = io();
 
-    let playQueue = [];
-    let currentPlaylistId = null, currentPlaylistSongs = [], currentSongIndex = -1, isShuffle = false, repeatMode = 0;
-    let currentPlayingSongId = null;
-    let wasPlayingBeforeSeek = false;
-    let lastLoggedTime = 0;
-
-    const progressFill = document.getElementById('progress-fill');
-    const volumeFill = document.getElementById('volume-fill');
-    const progressBar = document.getElementById('progress-bar');
-    const volumeBar = document.getElementById('volume-bar');
-
+    // ==========================================
+    // HELPER FUNCTIONS
+    // ==========================================
     function escapeHtml(value) {
         return String(value ?? '').replace(/[&<>"']/g, (char) => ({
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#039;'
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
         })[char]);
     }
 
     function mediaUrlName(value) {
         const name = String(value || '').split('/').pop().split('\\').pop();
         return encodeURIComponent(name);
+    }
+
+    function formatTime(s) {
+        if (!s || isNaN(s)) return '0:00';
+        const h = Math.floor(s / 3600);
+        const m = Math.floor((s % 3600) / 60);
+        const sec = Math.floor(s % 60);
+        return h > 0 
+            ? `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}` 
+            : `${m}:${sec.toString().padStart(2, '0')}`;
+    }
+
+    function parseTime(timeStr) {
+        if (!timeStr || typeof timeStr !== 'string') return 0;
+        const parts = timeStr.split(':').map(Number);
+        if (parts.length === 2) return parts[0] * 60 + parts[1];
+        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        return 0;
+    }
+
+    function formatBytes(b) {
+        if (!b || b === 0) return '0 Bytes';
+        const i = Math.floor(Math.log(b) / Math.log(1024));
+        return parseFloat((b / Math.pow(1024, i)).toFixed(2)) + ' ' + ['Bytes', 'KB', 'MB', 'GB', 'TB'][i];
+    }
+
+    function debounce(f, w) {
+        let t;
+        return (...a) => {
+            clearTimeout(t);
+            t = setTimeout(() => f(...a), w);
+        };
     }
 
     function getGreeting() {
@@ -72,11 +154,31 @@ document.addEventListener('DOMContentLoaded', () => {
         return 'Good Evening';
     }
 
+    function showToast(message, type = 'success') {
+        if (!el.toastContainer) return;
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        const icon = document.createElement('i');
+        icon.className = `fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'} toast-icon`;
+        const text = document.createElement('span');
+        text.textContent = message;
+        toast.append(icon, text);
+        el.toastContainer.appendChild(toast);
+        setTimeout(() => toast.classList.add('show'), 10);
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 400);
+        }, 4000);
+    }
+
     function renderEmptyState(container, options = {}) {
+        if (!container) return;
         const icon = options.icon || 'fa-music';
         const title = options.title || 'No songs here yet';
         const body = options.body || 'Download audio into a playlist to start building this room.';
-        const action = options.action ? `<button class="btn-primary compact-action empty-action" ${options.actionAttr || ''}>${options.action}</button>` : '';
+        const action = options.action 
+            ? `<button class="btn-primary compact-action empty-action" ${options.actionAttr || ''}>${options.action}</button>` 
+            : '';
         container.innerHTML = `
             <div class="empty-state">
                 <div class="empty-icon"><i class="fas ${icon}"></i></div>
@@ -87,11 +189,49 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
-    const dashboardTitle = document.querySelector('#dashboard-view .page-heading h2');
-    if (dashboardTitle) dashboardTitle.innerText = getGreeting();
+    function updateLoopIndicator() {
+        if (!el.loopIndicator || !el.audio.duration) return;
+        
+        if (state.isLooping && state.loopEnd > state.loopStart) {
+            const startPercent = (state.loopStart / el.audio.duration) * 100;
+            const endPercent = (state.loopEnd / el.audio.duration) * 100;
+            el.loopIndicator.style.left = `${startPercent}%`;
+            el.loopIndicator.style.width = `${endPercent - startPercent}%`;
+            el.loopIndicator.style.display = 'block';
+        } else {
+            el.loopIndicator.style.display = 'none';
+        }
+    }
+
+    function resetLoop() {
+        state.isLooping = false;
+        state.loopStart = 0;
+        state.loopEnd = 0;
+        if (el.loopStartInput) el.loopStartInput.value = '0:00';
+        if (el.loopEndInput) el.loopEndInput.value = '0:00';
+        if (el.loopBtn) el.loopBtn.classList.remove('active');
+        if (el.loopStatus) {
+            el.loopStatus.innerText = 'Off';
+            el.loopStatus.classList.remove('active');
+        }
+        if (el.toggleLoopBtn) el.toggleLoopBtn.innerHTML = '<i class="fas fa-play"></i> Start Loop';
+        updateLoopIndicator();
+    }
+
+    function updateVolumeIcon(vol) {
+        if (!el.volumeIcon) return;
+        if (vol === 0) el.volumeIcon.className = 'fas fa-volume-mute';
+        else if (vol < 0.5) el.volumeIcon.className = 'fas fa-volume-down';
+        else el.volumeIcon.className = 'fas fa-volume-up';
+    }
+
+    function updatePlayPauseIcon(isPlaying) {
+        const icon = el.playPauseBtn?.querySelector('i');
+        if (icon) icon.className = isPlaying ? 'fas fa-pause' : 'fas fa-play';
+    }
 
     // ==========================================
-    // USER INFO & LOGOUT
+    // USER INFO & AUTH
     // ==========================================
     async function loadUserInfo() {
         try {
@@ -111,7 +251,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Failed to load user info', err);
         }
     }
-    
+
     const logoutBtn = document.getElementById('logout-btn');
     if (logoutBtn) {
         logoutBtn.addEventListener('click', async () => {
@@ -124,33 +264,38 @@ document.addEventListener('DOMContentLoaded', () => {
     loadUserInfo();
 
     // ==========================================
-    // ADD NEW USER LOGIC
+    // ADD NEW USER (Admin Only)
     // ==========================================
     const addUserBtn = document.getElementById('add-user-btn');
     const addUserModal = document.getElementById('add-user-modal');
-    const cancelAddUser = document.getElementById('cancel-add-user');
-    const confirmAddUser = document.getElementById('confirm-add-user');
     const addUserError = document.getElementById('add-user-error');
+    const newUsernameInput = document.getElementById('new-username');
+    const newPasswordInput = document.getElementById('new-password');
+    const confirmAddUser = document.getElementById('confirm-add-user');
 
     if (addUserBtn) {
         addUserBtn.addEventListener('click', () => {
             addUserModal.style.display = 'flex';
-            document.getElementById('new-username').value = '';
-            document.getElementById('new-password').value = '';
-            addUserError.style.display = 'none';
+            if (newUsernameInput) newUsernameInput.value = '';
+            if (newPasswordInput) newPasswordInput.value = '';
+            if (addUserError) addUserError.style.display = 'none';
         });
     }
-    if (cancelAddUser) {
-        cancelAddUser.addEventListener('click', () => { addUserModal.style.display = 'none'; });
-    }
+
+    document.getElementById('cancel-add-user')?.addEventListener('click', () => {
+        if (addUserModal) addUserModal.style.display = 'none';
+    });
+
     if (confirmAddUser) {
         confirmAddUser.addEventListener('click', async () => {
-            const username = document.getElementById('new-username').value.trim();
-            const password = document.getElementById('new-password').value;
+            const username = newUsernameInput?.value.trim();
+            const password = newPasswordInput?.value;
 
             if (!username || !password) {
-                addUserError.innerText = 'Username and password are required';
-                addUserError.style.display = 'block';
+                if (addUserError) {
+                    addUserError.innerText = 'Username and password are required';
+                    addUserError.style.display = 'block';
+                }
                 return;
             }
 
@@ -167,14 +312,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (res.ok && data.status === 'success') {
                     showToast(`Account "${username}" created successfully!`);
-                    addUserModal.style.display = 'none';
+                    if (addUserModal) addUserModal.style.display = 'none';
                 } else {
-                    addUserError.innerText = data.error || 'Failed to create user';
-                    addUserError.style.display = 'block';
+                    if (addUserError) {
+                        addUserError.innerText = data.error || 'Failed to create user';
+                        addUserError.style.display = 'block';
+                    }
                 }
             } catch (err) {
-                addUserError.innerText = 'Connection error';
-                addUserError.style.display = 'block';
+                if (addUserError) {
+                    addUserError.innerText = 'Connection error';
+                    addUserError.style.display = 'block';
+                }
             } finally {
                 confirmAddUser.disabled = false;
                 confirmAddUser.innerText = 'Create Account';
@@ -182,6 +331,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // ==========================================
+    // MODAL HANDLERS (Global)
+    // ==========================================
     document.querySelectorAll('.modal').forEach(modalEl => {
         modalEl.addEventListener('click', (e) => {
             if (e.target === modalEl) modalEl.style.display = 'none';
@@ -193,32 +345,39 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.modal').forEach(modalEl => {
                 modalEl.style.display = 'none';
             });
+            if (el.loopPopover) el.loopPopover.classList.remove('active');
         }
     });
 
-    // --- MOBILE MENU ---
-    const mobileMenuBtn = document.getElementById('mobile-menu-btn');
-    const sidebar = document.querySelector('.sidebar');
-    if (mobileMenuBtn && sidebar) {
-        mobileMenuBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+    // ==========================================
+    // MOBILE MENU
+    // ==========================================
+    if (el.mobileMenuBtn && el.sidebar) {
+        el.mobileMenuBtn.addEventListener('click', () => el.sidebar.classList.toggle('open'));
         document.querySelectorAll('.nav-item, .playlist-item').forEach(item => {
             item.addEventListener('click', () => {
-                if (window.innerWidth <= 768) sidebar.classList.remove('open');
+                if (window.innerWidth <= 768) el.sidebar.classList.remove('open');
             });
         });
     }
 
-    // --- UI NAVIGATION ---
-    document.getElementById('home-btn').addEventListener('click', () => showView('dashboard'));
-    document.getElementById('search-btn').addEventListener('click', () => showView('search'));
+    // ==========================================
+    // NAVIGATION
+    // ==========================================
+    document.getElementById('home-btn')?.addEventListener('click', () => showView('dashboard'));
+    document.getElementById('search-btn')?.addEventListener('click', () => showView('search'));
 
-    // --- GLOBAL DOWNLOAD MODAL ---
+    // ==========================================
+    // DOWNLOAD MODAL
+    // ==========================================
     const globalDownloadBtn = document.getElementById('global-download-btn');
     const globalDownloadModal = document.getElementById('global-download-modal');
+    const globalUrlInput = document.getElementById('global-url-input');
 
     async function openDownloadModal() {
         const playlists = await (await fetch('/api/playlists')).json();
         const list = document.getElementById('playlist-checkboxes');
+        if (!list) return;
         list.innerHTML = '';
         if (playlists.length === 0) {
             list.innerHTML = '<p class="empty-compact">No playlists found. Create one first.</p>';
@@ -227,104 +386,100 @@ document.addEventListener('DOMContentLoaded', () => {
                 list.innerHTML += `<label class="checkbox-row"><input type="checkbox" value="${p.id}"><span>${escapeHtml(p.name)}</span></label>`;
             });
         }
-        globalDownloadModal.style.display = 'flex';
-        document.getElementById('global-url-input').focus();
+        if (globalDownloadModal) globalDownloadModal.style.display = 'flex';
+        if (globalUrlInput) globalUrlInput.focus();
     }
 
-    if (globalDownloadBtn) {
-        globalDownloadBtn.addEventListener('click', openDownloadModal);
-    }
-
-    const dashboardDownloadBtn = document.getElementById('dashboard-download-btn');
-    if (dashboardDownloadBtn) {
-        dashboardDownloadBtn.addEventListener('click', openDownloadModal);
-    }
-
+    globalDownloadBtn?.addEventListener('click', openDownloadModal);
+    document.getElementById('dashboard-download-btn')?.addEventListener('click', openDownloadModal);
     document.addEventListener('click', (e) => {
-        const downloadTrigger = e.target.closest('[data-open-download]');
-        if (downloadTrigger) openDownloadModal();
+        if (e.target.closest('[data-open-download]')) openDownloadModal();
     });
 
-    document.getElementById('cancel-global-download-btn').addEventListener('click', () => {
-        globalDownloadModal.style.display = 'none';
+    document.getElementById('cancel-global-download-btn')?.addEventListener('click', () => {
+        if (globalDownloadModal) globalDownloadModal.style.display = 'none';
     });
 
     async function submitDownload() {
-        const url = document.getElementById('global-url-input').value.trim();
+        const url = globalUrlInput?.value.trim();
         const checked = Array.from(document.querySelectorAll('#playlist-checkboxes input:checked')).map(cb => parseInt(cb.value));
         if (!url) return showToast('URL is required', 'error');
         if (checked.length === 0) return showToast('Select at least one playlist', 'error');
 
         const downloadBtn = document.getElementById('save-global-download-btn');
-        downloadBtn.disabled = true;
-        downloadBtn.innerText = 'Starting...';
+        if (downloadBtn) {
+            downloadBtn.disabled = true;
+            downloadBtn.innerText = 'Starting...';
+        }
 
         let res, data;
         try {
             res = await fetch('/api/download', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({url: url, playlist_ids: checked})
+                body: JSON.stringify({url, playlist_ids: checked})
             });
             data = await res.json().catch(() => ({}));
         } catch (err) {
             showToast('Connection error', 'error');
             return;
         } finally {
-            downloadBtn.disabled = false;
-            downloadBtn.innerText = 'Download';
+            if (downloadBtn) {
+                downloadBtn.disabled = false;
+                downloadBtn.innerText = 'Download';
+            }
         }
 
         if (!res.ok) return showToast(data.error || 'Download request failed', 'error');
 
-        globalDownloadModal.style.display = 'none';
-        document.getElementById('global-url-input').value = '';
+        if (globalDownloadModal) globalDownloadModal.style.display = 'none';
+        if (globalUrlInput) globalUrlInput.value = '';
         showToast('Downloading to selected playlists!', 'success');
-
-        const wrapper = document.getElementById('download-progress-wrapper');
-        if (wrapper) wrapper.classList.add('active');
+        if (el.downloadWrapper) el.downloadWrapper.classList.add('active');
     }
 
-    document.getElementById('save-global-download-btn').addEventListener('click', submitDownload);
-    document.getElementById('global-url-input').addEventListener('keydown', (e) => {
+    document.getElementById('save-global-download-btn')?.addEventListener('click', submitDownload);
+    globalUrlInput?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') submitDownload();
     });
 
+    // ==========================================
+    // QUEUE MANAGEMENT
+    // ==========================================
     function buildQueue() {
-        playQueue = [];
-        if (!currentPlaylistSongs || currentPlaylistSongs.length <= 1) {
+        state.playQueue = [];
+        if (!state.currentPlaylistSongs || state.currentPlaylistSongs.length <= 1) {
             updateQueueUI();
             return;
         }
-        let remaining = [...currentPlaylistSongs];
-        remaining.splice(currentSongIndex, 1);
+        const remaining = [...state.currentPlaylistSongs];
+        remaining.splice(state.currentSongIndex, 1);
 
-        if (isShuffle) {
+        if (state.isShuffle) {
             for (let i = remaining.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
             }
-            playQueue = remaining;
-            document.getElementById('queue-mode').innerText = '(Shuffled)';
+            state.playQueue = remaining;
+            if (el.queueMode) el.queueMode.innerText = '(Shuffled)';
         } else {
-            for (let i = 1; i < currentPlaylistSongs.length; i++) {
-                let nextIdx = (currentSongIndex + i) % currentPlaylistSongs.length;
-                playQueue.push(currentPlaylistSongs[nextIdx]);
+            for (let i = 1; i < state.currentPlaylistSongs.length; i++) {
+                const nextIdx = (state.currentSongIndex + i) % state.currentPlaylistSongs.length;
+                state.playQueue.push(state.currentPlaylistSongs[nextIdx]);
             }
-            document.getElementById('queue-mode').innerText = '';
+            if (el.queueMode) el.queueMode.innerText = '';
         }
         updateQueueUI();
     }
 
     function updateQueueUI() {
-        const list = document.getElementById('queue-list');
-        if (!list) return;
-        list.innerHTML = '';
-        if (playQueue.length === 0) {
-            list.innerHTML = '<p style="color: var(--text-secondary); font-size: 12px; text-align: center; padding: 12px;">Queue is empty</p>';
+        if (!el.queueList) return;
+        el.queueList.innerHTML = '';
+        if (state.playQueue.length === 0) {
+            el.queueList.innerHTML = '<p style="color: var(--text-secondary); font-size: 12px; text-align: center; padding: 12px;">Queue is empty</p>';
             return;
         }
-        playQueue.slice(0, 15).forEach(song => {
+        state.playQueue.slice(0, 15).forEach(song => {
             const div = document.createElement('div');
             div.className = 'queue-item';
             div.innerHTML = `
@@ -335,63 +490,53 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
             div.addEventListener('click', () => {
-                const idx = currentPlaylistSongs.findIndex(s => s.id === song.id);
-                if (idx !== -1) playSong(currentPlaylistSongs, idx);
-                document.getElementById('queue-popover').classList.remove('active');
+                const idx = state.currentPlaylistSongs.findIndex(s => s.id === song.id);
+                if (idx !== -1) playSong(state.currentPlaylistSongs, idx);
+                document.getElementById('queue-popover')?.classList.remove('active');
             });
-            list.appendChild(div);
+            el.queueList.appendChild(div);
         });
     }
 
+    // ==========================================
+    // VIEW MANAGEMENT
+    // ==========================================
     function showView(viewName) {
-        Object.values(views).forEach(v => v.classList.remove('active'));
-        views[viewName].classList.add('active');
+        Object.values(el.views).forEach(v => v?.classList.remove('active'));
+        el.views[viewName]?.classList.add('active');
         document.querySelectorAll('.nav-item').forEach(btn => btn.classList.remove('active'));
-        if (viewName === 'dashboard') document.getElementById('home-btn').classList.add('active');
-        if (viewName === 'search') { document.getElementById('search-btn').classList.add('active'); document.getElementById('search-input').focus(); }
-        
-        // Update animasi is-playing untuk view yang baru aktif
+        if (viewName === 'dashboard') document.getElementById('home-btn')?.classList.add('active');
+        if (viewName === 'search') {
+            document.getElementById('search-btn')?.classList.add('active');
+            document.getElementById('search-input')?.focus();
+        }
         highlightPlayingSong();
-        
         if (viewName === 'dashboard') loadDashboard();
     }
 
-    function showToast(message, type = 'success') {
-        const container = document.getElementById('toast-container');
-        const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-        const icon = document.createElement('i');
-        icon.className = `fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'} toast-icon`;
-        const text = document.createElement('span');
-        text.textContent = message;
-        toast.append(icon, text);
-        container.appendChild(toast);
-        setTimeout(() => toast.classList.add('show'), 10);
-        setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 400); }, 4000);
-    }
-
-    // --- WEBSOCKET EVENTS ---
+    // ==========================================
+    // WEBSOCKET EVENTS
+    // ==========================================
     socket.on('download_progress', (data) => {
-        const wrapper = document.getElementById('download-progress-wrapper');
-        const bar = document.getElementById('download-progress-bar');
-        const label = document.getElementById('download-progress-label');
-        if (wrapper && bar) {
-            wrapper.classList.add('active');
-            bar.style.width = `${data.percent}%`;
-            if (label) label.innerText = `${Math.round(data.percent)}%`;
-            if (data.percent >= 100) setTimeout(() => {
-                wrapper.classList.remove('active');
-                bar.style.width = '0%';
-                if (label) label.innerText = '0%';
-            }, 1000);
+        if (el.downloadWrapper && el.downloadBar) {
+            el.downloadWrapper.classList.add('active');
+            el.downloadBar.style.width = `${data.percent}%`;
+            if (el.downloadLabel) el.downloadLabel.innerText = `${Math.round(data.percent)}%`;
+            if (data.percent >= 100) {
+                setTimeout(() => {
+                    el.downloadWrapper.classList.remove('active');
+                    el.downloadBar.style.width = '0%';
+                    if (el.downloadLabel) el.downloadLabel.innerText = '0%';
+                }, 1000);
+            }
         }
     });
 
     socket.on('song_added', (song) => {
         showToast(`Added: ${song.title}`, 'success');
-        if (song.playlist_ids && song.playlist_ids.includes(currentPlaylistId)) {
-            currentPlaylistSongs.unshift(song);
-            renderSongs(currentPlaylistSongs, 'playlist-songs-list', true);
+        if (song.playlist_ids && song.playlist_ids.includes(state.currentPlaylistId)) {
+            state.currentPlaylistSongs.unshift(song);
+            renderSongs(state.currentPlaylistSongs, 'playlist-songs-list', true);
             updatePlaylistMeta();
         }
         loadDashboard();
@@ -400,179 +545,305 @@ document.addEventListener('DOMContentLoaded', () => {
 
     socket.on('download_error', (data) => {
         showToast(`Download failed: ${data.error || 'Unknown error'}`, 'error');
-        const wrapper = document.getElementById('download-progress-wrapper');
-        const label = document.getElementById('download-progress-label');
-        if(wrapper) wrapper.classList.remove('active');
-        if(label) label.innerText = '0%';
+        if (el.downloadWrapper) el.downloadWrapper.classList.remove('active');
+        if (el.downloadLabel) el.downloadLabel.innerText = '0%';
     });
 
-    // --- MODAL & PLAYLISTS ---
-    const modal = document.getElementById('playlist-modal');
+    // ==========================================
+    // PLAYLIST MODAL
+    // ==========================================
+    const playlistModal = document.getElementById('playlist-modal');
     const modalTitle = document.getElementById('modal-title');
     const saveBtn = document.getElementById('save-playlist-btn');
     const nameInput = document.getElementById('playlist-name-input');
-    let isRenaming = false;
 
-    document.getElementById('create-playlist-btn').addEventListener('click', () => {
-        isRenaming = false;
-        modalTitle.innerText = "Create Playlist";
-        saveBtn.innerText = "Create";
-        nameInput.value = "";
-        modal.style.display = 'flex';
-        nameInput.focus();
+    document.getElementById('create-playlist-btn')?.addEventListener('click', () => {
+        state.isRenaming = false;
+        if (modalTitle) modalTitle.innerText = "Create Playlist";
+        if (saveBtn) saveBtn.innerText = "Create";
+        if (nameInput) {
+            nameInput.value = "";
+            nameInput.focus();
+        }
+        if (playlistModal) playlistModal.style.display = 'flex';
     });
 
-    document.getElementById('rename-playlist-btn').addEventListener('click', () => {
-        isRenaming = true;
-        modalTitle.innerText = "Rename Playlist";
-        saveBtn.innerText = "Save";
-        nameInput.value = document.getElementById('playlist-title').innerText;
-        modal.style.display = 'flex';
-        nameInput.focus();
+    document.getElementById('rename-playlist-btn')?.addEventListener('click', () => {
+        state.isRenaming = true;
+        if (modalTitle) modalTitle.innerText = "Rename Playlist";
+        if (saveBtn) saveBtn.innerText = "Save";
+        if (nameInput && el.playlistTitle) {
+            nameInput.value = el.playlistTitle.innerText;
+            nameInput.focus();
+        }
+        if (playlistModal) playlistModal.style.display = 'flex';
     });
 
-    document.getElementById('cancel-modal-btn').addEventListener('click', () => modal.style.display = 'none');
+    document.getElementById('cancel-modal-btn')?.addEventListener('click', () => {
+        if (playlistModal) playlistModal.style.display = 'none';
+    });
 
     async function submitPlaylistModal() {
-        const name = nameInput.value.trim();
-        if (name) {
-            saveBtn.disabled = true;
-            try {
-                if (isRenaming && currentPlaylistId) {
-                    await fetch(`/api/playlists/${currentPlaylistId}`, {
-                        method: 'PUT', headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({name})
-                    });
-                    document.getElementById('playlist-title').innerText = name;
-                    showToast('Playlist renamed!');
-                } else {
-                    await createPlaylist(name);
-                    showToast(`Playlist "${name}" created!`);
-                }
-                nameInput.value = '';
-                modal.style.display = 'none';
-                loadPlaylists();
-            } catch (err) {
-                showToast('Connection error', 'error');
-            } finally {
-                saveBtn.disabled = false;
+        const name = nameInput?.value.trim();
+        if (!name || !saveBtn) return;
+        
+        saveBtn.disabled = true;
+        try {
+            if (state.isRenaming && state.currentPlaylistId) {
+                await fetch(`/api/playlists/${state.currentPlaylistId}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name})
+                });
+                if (el.playlistTitle) el.playlistTitle.innerText = name;
+                showToast('Playlist renamed!');
+            } else {
+                await fetch('/api/playlists', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({name})
+                });
+                showToast(`Playlist "${name}" created!`);
             }
+            if (nameInput) nameInput.value = '';
+            if (playlistModal) playlistModal.style.display = 'none';
+            loadPlaylists();
+        } catch (err) {
+            showToast('Connection error', 'error');
+        } finally {
+            saveBtn.disabled = false;
         }
     }
 
-    saveBtn.addEventListener('click', submitPlaylistModal);
-    nameInput.addEventListener('keydown', (e) => {
+    saveBtn?.addEventListener('click', submitPlaylistModal);
+    nameInput?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') submitPlaylistModal();
     });
 
+    // ==========================================
+    // COVER UPLOAD
+    // ==========================================
     const coverWrapper = document.getElementById('playlist-cover-wrapper');
     const coverInput = document.getElementById('playlist-cover-input');
-    const coverImg = document.getElementById('playlist-cover-img');
 
     if (coverWrapper && coverInput) {
         coverWrapper.addEventListener('click', () => coverInput.click());
         coverInput.addEventListener('change', async (e) => {
             const file = e.target.files[0];
-            if (file && currentPlaylistId) {
+            if (file && state.currentPlaylistId) {
                 const formData = new FormData();
                 formData.append('cover', file);
-                const res = await fetch(`/api/playlists/${currentPlaylistId}/cover`, { method: 'POST', body: formData });
-                const data = await res.json();
-                if (data.status === 'success') {
-                    const timestamp = new Date().getTime();
-                    coverImg.src = `/static/album_art/${mediaUrlName(data.cover_art)}?t=${timestamp}`;
-                    showToast('Cover updated!');
-                    loadPlaylists();
-                } else {
-                    showToast('Failed to upload cover', 'error');
+                try {
+                    const res = await fetch(`/api/playlists/${state.currentPlaylistId}/cover`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await res.json();
+                    if (data.status === 'success') {
+                        const timestamp = new Date().getTime();
+                        if (el.playlistCoverImg) {
+                            el.playlistCoverImg.src = `/static/album_art/${mediaUrlName(data.cover_art)}?t=${timestamp}`;
+                        }
+                        showToast('Cover updated!');
+                        loadPlaylists();
+                    } else {
+                        showToast('Failed to upload cover', 'error');
+                    }
+                } catch (err) {
+                    showToast('Connection error', 'error');
                 }
             }
         });
     }
 
-    // --- AUDIO CONTROLS ---
-    document.getElementById('play-pause-btn').addEventListener('click', togglePlay);
-    document.getElementById('prev-btn').addEventListener('click', playPrev);
-    document.getElementById('next-btn').addEventListener('click', playNext);
-    document.getElementById('shuffle-btn').addEventListener('click', () => {
-        isShuffle = !isShuffle;
-        document.getElementById('shuffle-btn').classList.toggle('active', isShuffle);
+    // ==========================================
+    // AUDIO CONTROLS
+    // ==========================================
+    document.getElementById('play-pause-btn')?.addEventListener('click', togglePlay);
+    document.getElementById('prev-btn')?.addEventListener('click', () => playPrev());
+    document.getElementById('next-btn')?.addEventListener('click', () => playNext(false));
+    
+    document.getElementById('shuffle-btn')?.addEventListener('click', () => {
+        state.isShuffle = !state.isShuffle;
+        document.getElementById('shuffle-btn')?.classList.toggle('active', state.isShuffle);
         buildQueue();
     });
 
-    document.getElementById('queue-btn').addEventListener('click', (e) => {
+    document.getElementById('queue-btn')?.addEventListener('click', (e) => {
         e.stopPropagation();
-        document.getElementById('queue-popover').classList.toggle('active');
+        document.getElementById('queue-popover')?.classList.toggle('active');
     });
+
     document.addEventListener('click', (e) => {
-        if (!e.target.closest('#queue-popover') && !e.target.closest('#queue-btn')) {
-            const popover = document.getElementById('queue-popover');
-            if (popover) popover.classList.remove('active');
+        const queuePopover = document.getElementById('queue-popover');
+        const queueBtn = document.getElementById('queue-btn');
+        if (queuePopover && !e.target.closest('#queue-popover') && !e.target.closest('#queue-btn')) {
+            queuePopover.classList.remove('active');
         }
     });
 
-    document.getElementById('repeat-btn').addEventListener('click', () => {
-        repeatMode = (repeatMode + 1) % 3;
+    document.getElementById('repeat-btn')?.addEventListener('click', () => {
+        state.repeatMode = (state.repeatMode + 1) % 3;
         const btn = document.getElementById('repeat-btn');
-        btn.classList.toggle('active', repeatMode > 0);
-        btn.innerHTML = repeatMode === 2 ? '<i class="fas fa-redo"></i><span class="repeat-one">1</span>' : '<i class="fas fa-redo"></i>';
+        if (btn) {
+            btn.classList.toggle('active', state.repeatMode > 0);
+            btn.innerHTML = state.repeatMode === 2 
+                ? '<i class="fas fa-redo"></i><span class="repeat-one">1</span>' 
+                : '<i class="fas fa-redo"></i>';
+        }
     });
 
-    // --- KEYBOARD SHORTCUTS ---
+    // ==========================================
+    // A-B LOOP FEATURE
+    // ==========================================
+    if (el.loopBtn && el.loopPopover) {
+        el.loopBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            el.loopPopover.classList.toggle('active');
+        });
+    }
+
+    document.addEventListener('click', (e) => {
+        if (el.loopPopover && !e.target.closest('#loop-popover') && !e.target.closest('#loop-btn')) {
+            el.loopPopover.classList.remove('active');
+        }
+    });
+
+    document.getElementById('set-loop-start-btn')?.addEventListener('click', () => {
+        if (el.loopStartInput) {
+            el.loopStartInput.value = formatTime(el.audio.currentTime);
+            state.loopStart = el.audio.currentTime;
+            updateLoopIndicator();
+        }
+    });
+
+    document.getElementById('set-loop-end-btn')?.addEventListener('click', () => {
+        if (el.loopEndInput) {
+            el.loopEndInput.value = formatTime(el.audio.currentTime);
+            state.loopEnd = el.audio.currentTime;
+            updateLoopIndicator();
+        }
+    });
+
+    el.loopStartInput?.addEventListener('change', () => {
+        state.loopStart = parseTime(el.loopStartInput.value);
+        updateLoopIndicator();
+    });
+
+    el.loopEndInput?.addEventListener('change', () => {
+        state.loopEnd = parseTime(el.loopEndInput.value);
+        updateLoopIndicator();
+    });
+
+    el.toggleLoopBtn?.addEventListener('click', () => {
+        if (!state.isLooping) {
+            if (state.loopEnd <= state.loopStart) {
+                showToast('End time must be greater than start time', 'error');
+                return;
+            }
+            state.isLooping = true;
+            el.loopBtn?.classList.add('active');
+            if (el.loopStatus) {
+                el.loopStatus.innerText = 'Active';
+                el.loopStatus.classList.add('active');
+            }
+            if (el.toggleLoopBtn) el.toggleLoopBtn.innerHTML = '<i class="fas fa-pause"></i> Stop Loop';
+            el.audio.currentTime = state.loopStart;
+            updateLoopIndicator();
+            showToast('Loop started', 'success');
+        } else {
+            state.isLooping = false;
+            el.loopBtn?.classList.remove('active');
+            if (el.loopStatus) {
+                el.loopStatus.innerText = 'Off';
+                el.loopStatus.classList.remove('active');
+            }
+            if (el.toggleLoopBtn) el.toggleLoopBtn.innerHTML = '<i class="fas fa-play"></i> Start Loop';
+            updateLoopIndicator();
+            showToast('Loop stopped', 'success');
+        }
+    });
+
+    document.getElementById('clear-loop-btn')?.addEventListener('click', () => {
+        resetLoop();
+        showToast('Loop cleared', 'success');
+    });
+
+    // ==========================================
+    // KEYBOARD SHORTCUTS
+    // ==========================================
     document.addEventListener('keydown', (e) => {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
         if (e.code === 'Space' || e.keyCode === 32) {
             e.preventDefault();
             togglePlay();
         }
-        if (e.code === 'ArrowRight') playNext();
+        if (e.code === 'ArrowRight') playNext(false);
         if (e.code === 'ArrowLeft') playPrev();
     });
 
-    // Custom Slider Engine & Listen Tracking
-    audio.addEventListener('timeupdate', () => {
-        if (audio.duration && !isNaN(audio.duration)) {
-            const val = (audio.currentTime / audio.duration) * 100;
-            progressBar.value = val;
-            progressFill.style.width = `${val}%`;
-            document.getElementById('current-time').innerText = formatTime(audio.currentTime);
+    // ==========================================
+    // AUDIO EVENT LISTENERS
+    // ==========================================
+    el.audio.addEventListener('timeupdate', () => {
+        if (el.audio.duration && !isNaN(el.audio.duration)) {
+            const val = (el.audio.currentTime / el.audio.duration) * 100;
+            if (el.progressBar) el.progressBar.value = val;
+            if (el.progressFill) el.progressFill.style.width = `${val}%`;
+            if (el.currentTime) el.currentTime.innerText = formatTime(el.audio.currentTime);
 
-            if(!audio.paused && currentPlayingSongId) {
-                const delta = audio.currentTime - lastLoggedTime;
-                if(delta >= 5) {
-                    logListen(currentPlayingSongId, delta);
-                    lastLoggedTime = audio.currentTime;
+            // ✅ A-B Loop logic
+            if (state.isLooping && el.audio.currentTime >= state.loopEnd) {
+                el.audio.currentTime = state.loopStart;
+            }
+
+            // ✅ Secure listen tracking with delta validation
+            if (!el.audio.paused && state.currentPlayingSongId) {
+                const delta = el.audio.currentTime - state.lastLoggedTime;
+                // Only log if delta is reasonable (5-30 seconds)
+                if (delta >= 5 && delta <= 30) {
+                    logListen(state.currentPlayingSongId, delta);
+                    state.lastLoggedTime = el.audio.currentTime;
+                } else if (delta < 0) {
+                    // User seeked backward, reset timer
+                    state.lastLoggedTime = el.audio.currentTime;
                 }
             }
         }
     });
 
-    audio.addEventListener('loadedmetadata', () => {
-        document.getElementById('duration').innerText = formatTime(audio.duration);
+    el.audio.addEventListener('loadedmetadata', () => {
+        if (el.duration) el.duration.innerText = formatTime(el.audio.duration);
+        // Reset loop saat lagu baru dimuat
+        if (state.isLooping) resetLoop();
     });
 
-    audio.addEventListener('play', () => {
-        lastLoggedTime = audio.currentTime;
-        document.getElementById('now-playing-container').classList.add('playing');
+    el.audio.addEventListener('play', () => {
+        state.lastLoggedTime = el.audio.currentTime;
+        if (el.nowPlaying) el.nowPlaying.classList.add('playing');
     });
 
-    audio.addEventListener('pause', () => {
-        document.getElementById('now-playing-container').classList.remove('playing');
+    el.audio.addEventListener('pause', () => {
+        if (el.nowPlaying) el.nowPlaying.classList.remove('playing');
         flushListenLog();
     });
 
-    audio.addEventListener('seeked', () => { lastLoggedTime = audio.currentTime; });
+    el.audio.addEventListener('seeked', () => {
+        state.lastLoggedTime = el.audio.currentTime;
+    });
 
-    audio.addEventListener('ended', () => {
+    el.audio.addEventListener('ended', () => {
         flushListenLog();
-        handleSongEnded();
+        playNext(true); // Trigger dari lagu habis sendiri
     });
 
     function flushListenLog() {
-        if(currentPlayingSongId && lastLoggedTime > 0) {
-            const delta = audio.currentTime - lastLoggedTime;
-            if(delta > 0) logListen(currentPlayingSongId, delta);
-            lastLoggedTime = 0;
+        if (state.currentPlayingSongId && state.lastLoggedTime > 0) {
+            const delta = el.audio.currentTime - state.lastLoggedTime;
+            if (delta > 0 && delta <= 30) {
+                logListen(state.currentPlayingSongId, delta);
+            }
+            state.lastLoggedTime = 0;
         }
     }
 
@@ -580,45 +851,43 @@ document.addEventListener('DOMContentLoaded', () => {
         fetch('/api/listen', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({song_id: songId, seconds: seconds})
+            body: JSON.stringify({song_id: songId, seconds})
         }).catch(e => console.error(e));
     }
 
-    progressBar.addEventListener('input', (e) => {
-        if(audio.duration && !isNaN(audio.duration)) {
-            audio.currentTime = (e.target.value / 100) * audio.duration;
-            progressFill.style.width = `${e.target.value}%`;
+    el.progressBar?.addEventListener('input', (e) => {
+        if (el.audio.duration && !isNaN(el.audio.duration)) {
+            el.audio.currentTime = (e.target.value / 100) * el.audio.duration;
+            if (el.progressFill) el.progressFill.style.width = `${e.target.value}%`;
         }
     });
 
-    progressBar.addEventListener('mousedown', () => {
-        wasPlayingBeforeSeek = !audio.paused;
-        if (wasPlayingBeforeSeek) audio.pause();
+    el.progressBar?.addEventListener('mousedown', () => {
+        state.wasPlayingBeforeSeek = !el.audio.paused;
+        if (state.wasPlayingBeforeSeek) el.audio.pause();
     });
 
-    progressBar.addEventListener('mouseup', () => {
-        if (wasPlayingBeforeSeek) audio.play();
+    el.progressBar?.addEventListener('mouseup', () => {
+        if (state.wasPlayingBeforeSeek) el.audio.play();
     });
 
-    volumeBar.addEventListener('input', (e) => {
-        audio.volume = e.target.value / 100;
-        volumeFill.style.width = `${e.target.value}%`;
-        updateVolumeIcon(audio.volume);
+    el.volumeBar?.addEventListener('input', (e) => {
+        el.audio.volume = e.target.value / 100;
+        if (el.volumeFill) el.volumeFill.style.width = `${e.target.value}%`;
+        updateVolumeIcon(el.audio.volume);
     });
-    volumeFill.style.width = '100%';
+    if (el.volumeFill) el.volumeFill.style.width = '100%';
 
-    function updateVolumeIcon(vol) {
-        const icon = document.getElementById('volume-icon');
-        if (vol === 0) icon.className = 'fas fa-volume-mute';
-        else if (vol < 0.5) icon.className = 'fas fa-volume-down';
-        else icon.className = 'fas fa-volume-up';
-    }
-
-    document.getElementById('search-input').addEventListener('input', debounce(async (e) => {
+    // ==========================================
+    // SEARCH
+    // ==========================================
+    document.getElementById('search-input')?.addEventListener('input', debounce(async (e) => {
         const query = e.target.value.trim();
-        if (query.length > 1) renderSongs(await searchSongs(query), 'search-results', false);
-        else {
-            const searchResults = document.getElementById('search-results');
+        const searchResults = document.getElementById('search-results');
+        if (query.length > 1) {
+            const results = await (await fetch(`/api/search?q=${encodeURIComponent(query)}`)).json();
+            renderSongs(results, 'search-results', false);
+        } else {
             renderEmptyState(searchResults, {
                 icon: 'fa-search',
                 title: 'Search your library',
@@ -627,86 +896,98 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, 300));
 
+    // ==========================================
+    // PLAYLISTS
+    // ==========================================
     async function loadPlaylists() {
         const playlists = await (await fetch('/api/playlists')).json();
         const list = document.getElementById('playlist-list');
+        if (!list) return;
         list.innerHTML = '';
         playlists.forEach(p => {
             const li = document.createElement('li');
             li.className = 'playlist-item';
-            if (p.id === currentPlaylistId) li.classList.add('active');
+            if (p.id === state.currentPlaylistId) li.classList.add('active');
             li.setAttribute('data-id', p.id);
-            const coverSrc = p.cover_art ? `/static/album_art/${mediaUrlName(p.cover_art)}` : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24' fill='%23555'><path d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/></svg>";
+            const coverSrc = p.cover_art 
+                ? `/static/album_art/${mediaUrlName(p.cover_art)}` 
+                : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24' fill='%23555'><path d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/></svg>";
             li.innerHTML = `<img src="${coverSrc}"> <span>${escapeHtml(p.name)}</span>`;
             li.addEventListener('click', () => openPlaylist(p));
             list.appendChild(li);
         });
     }
 
-    async function createPlaylist(name) {
-        await fetch('/api/playlists', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name}) });
-    }
-
     async function openPlaylist(playlist) {
-        currentPlaylistId = playlist.id;
-        document.getElementById('playlist-title').innerText = playlist.name;
+        state.currentPlaylistId = playlist.id;
+        state.currentPlaylist = playlist;
+        if (el.playlistTitle) el.playlistTitle.innerText = playlist.name;
 
         if (window.innerWidth <= 768) {
-            document.querySelector('.sidebar').classList.remove('open');
+            el.sidebar?.classList.remove('open');
         }
 
         const timestamp = new Date().getTime();
-        const coverSrc = playlist.cover_art ? `/static/album_art/${mediaUrlName(playlist.cover_art)}?t=${timestamp}` : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 24 24' fill='%23333'><path d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/></svg>";
-        coverImg.src = coverSrc;
+        const coverSrc = playlist.cover_art 
+            ? `/static/album_art/${mediaUrlName(playlist.cover_art)}?t=${timestamp}` 
+            : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 24 24' fill='%23333'><path d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/></svg>";
+        if (el.playlistCoverImg) el.playlistCoverImg.src = coverSrc;
 
         showView('playlist');
         loadPlaylists();
 
-        document.getElementById('delete-playlist-btn').onclick = async () => {
-            if(confirm(`Delete playlist "${playlist.name}"? (Songs will remain in other playlists)`)) {
-                await fetch(`/api/playlists/${playlist.id}`, {method: 'DELETE'});
-                currentPlaylistId = null;
-                loadPlaylists();
-                showView('dashboard');
-                showToast('Playlist deleted');
-            }
-        };
-        currentPlaylistSongs = await (await fetch(`/api/songs?playlist_id=${playlist.id}`)).json();
-        renderSongs(currentPlaylistSongs, 'playlist-songs-list', true);
+        const deleteBtn = document.getElementById('delete-playlist-btn');
+        if (deleteBtn) {
+            deleteBtn.onclick = async () => {
+                if (confirm(`Delete playlist "${playlist.name}"? (Songs will remain in other playlists)`)) {
+                    await fetch(`/api/playlists/${playlist.id}`, {method: 'DELETE'});
+                    state.currentPlaylistId = null;
+                    loadPlaylists();
+                    showView('dashboard');
+                    showToast('Playlist deleted');
+                }
+            };
+        }
+        
+        state.currentPlaylistSongs = await (await fetch(`/api/songs?playlist_id=${playlist.id}`)).json();
+        renderSongs(state.currentPlaylistSongs, 'playlist-songs-list', true);
         updatePlaylistMeta();
         highlightPlayingSong();
     }
 
     function updatePlaylistMeta() {
-        const meta = document.getElementById('playlist-meta');
-        if(!meta) return;
-        const totalSec = currentPlaylistSongs.reduce((acc, s) => acc + (s.duration_seconds || 0), 0);
-        meta.innerText = `${currentPlaylistSongs.length} songs • ${formatTime(totalSec)}`;
+        if (!el.playlistMeta) return;
+        const totalSec = state.currentPlaylistSongs.reduce((acc, s) => acc + (s.duration_seconds || 0), 0);
+        el.playlistMeta.innerText = `${state.currentPlaylistSongs.length} songs • ${formatTime(totalSec)}`;
     }
 
+    // ==========================================
+    // DASHBOARD
+    // ==========================================
     async function loadDashboard() {
         const stats = await (await fetch('/api/dashboard')).json();
-        document.getElementById('stats-grid').innerHTML = `
-            <div class="stat-card stat-playlists"><div class="stat-icon"><i class="fas fa-list"></i></div><div><h4>${stats.total_playlists}</h4><p>Playlists</p></div></div>
-            <div class="stat-card stat-songs"><div class="stat-icon"><i class="fas fa-music"></i></div><div><h4>${stats.total_songs}</h4><p>Songs</p></div></div>
-            <div class="stat-card stat-time"><div class="stat-icon"><i class="fas fa-clock"></i></div><div><h4>${formatTime(stats.total_listened)}</h4><p>Time Listened</p></div></div>
-            <div class="stat-card stat-storage"><div class="stat-icon"><i class="fas fa-hard-drive"></i></div><div><h4>${formatBytes(stats.storage_used)}</h4><p>Storage Used</p></div></div>
-        `;
-        renderSongs(await (await fetch('/api/songs?limit=5')).json(), 'recent-songs-list', true);
+        const statsGrid = document.getElementById('stats-grid');
+        if (statsGrid) {
+            statsGrid.innerHTML = `
+                <div class="stat-card stat-playlists"><div class="stat-icon"><i class="fas fa-list"></i></div><div><h4>${stats.total_playlists}</h4><p>Playlists</p></div></div>
+                <div class="stat-card stat-songs"><div class="stat-icon"><i class="fas fa-music"></i></div><div><h4>${stats.total_songs}</h4><p>Songs</p></div></div>
+                <div class="stat-card stat-time"><div class="stat-icon"><i class="fas fa-clock"></i></div><div><h4>${formatTime(stats.total_listened)}</h4><p>Time Listened</p></div></div>
+                <div class="stat-card stat-storage"><div class="stat-icon"><i class="fas fa-hard-drive"></i></div><div><h4>${formatBytes(stats.storage_used)}</h4><p>Storage Used</p></div></div>
+            `;
+        }
+        const recentSongs = await (await fetch('/api/songs?limit=5')).json();
+        renderSongs(recentSongs, 'recent-songs-list', true);
 
-        // top songs load(play)
         const topSongs = await (await fetch('/api/top-songs')).json();
         renderTopSongs(topSongs, 'top-songs-list');
 
-        // top songs load(duration)
         const topSongsDuration = await (await fetch('/api/top-songs-duration')).json();
         renderTopSongs(topSongsDuration, 'top-songs-duration-list');
     }
 
     // ==========================================
-    // FIXED FUNCTIONS - View-Aware is-playing Logic
+    // RENDER FUNCTIONS
     // ==========================================
-
     function renderSongs(songs, containerId, showDelete) {
         const container = document.getElementById(containerId);
         if (!container) return;
@@ -717,27 +998,25 @@ document.addEventListener('DOMContentLoaded', () => {
             renderEmptyState(container, {
                 icon: isSearch ? 'fa-search' : 'fa-compact-disc',
                 title: isSearch ? 'No matching songs' : 'No songs here yet',
-                body: isSearch ? 'Try another title or artist from your library.' : 'Download a song into one of your playlists to start listening.',
+                body: isSearch 
+                    ? 'Try another title or artist from your library.' 
+                    : 'Download a song into one of your playlists to start listening.',
                 action: isSearch ? '' : '<i class="fas fa-download"></i> Download',
                 actionAttr: 'data-open-download'
             });
             return;
         }
 
-        // Cek apakah container berada di view yang aktif
         const activeView = document.querySelector('.view.active');
         const isContainerInActiveView = activeView && activeView.contains(container);
 
         songs.forEach((song, index) => {
             const div = document.createElement('div');
             div.className = 'song-item';
-
             const songIdStr = String(song.id);
-            const currentIdStr = String(currentPlayingSongId);
-
+            const currentIdStr = String(state.currentPlayingSongId);
             div.setAttribute('data-id', songIdStr);
 
-            // Hanya tambahkan is-playing jika container berada di view aktif
             if (isContainerInActiveView && songIdStr === currentIdStr && currentIdStr !== 'null' && currentIdStr !== 'undefined') {
                 div.classList.add('is-playing');
             }
@@ -749,25 +1028,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="song-duration">${formatTime(song.duration_seconds)}</div>
                 ${showDelete ? `<button class="icon-btn delete-song" data-id="${song.id}"><i class="fas fa-trash"></i></button>` : ''}
             `;
-            div.addEventListener('click', (e) => { if (!e.target.closest('.delete-song')) playSong(songs, index); });
+            div.addEventListener('click', (e) => {
+                if (!e.target.closest('.delete-song')) playSong(songs, index);
+            });
             container.appendChild(div);
         });
 
-        if (showDelete) container.querySelectorAll('.delete-song').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                if(confirm('Delete this song completely from all playlists and storage?')) {
-                    await fetch(`/api/songs/${e.currentTarget.getAttribute('data-id')}`, {method: 'DELETE'});
-                    showToast('Song deleted permanently');
-                    if(currentPlaylistId) {
-                        const p = (await (await fetch('/api/playlists')).json()).find(pl => pl.id === currentPlaylistId);
-                        if(p) openPlaylist(p);
-                    } else {
-                        loadDashboard();
+        if (showDelete) {
+            container.querySelectorAll('.delete-song').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    if (confirm('Delete this song completely from all playlists and storage?')) {
+                        await fetch(`/api/songs/${e.currentTarget.getAttribute('data-id')}`, {method: 'DELETE'});
+                        showToast('Song deleted permanently');
+                        if (state.currentPlaylistId) {
+                            const p = (await (await fetch('/api/playlists')).json()).find(pl => pl.id === state.currentPlaylistId);
+                            if (p) openPlaylist(p);
+                        } else {
+                            loadDashboard();
+                        }
                     }
-                }
+                });
             });
-        });
+        }
     }
 
     function renderTopSongs(songs, containerId) {
@@ -783,18 +1066,15 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Cek apakah container berada di view yang aktif
         const activeView = document.querySelector('.view.active');
         const isContainerInActiveView = activeView && activeView.contains(container);
 
         songs.forEach((song, index) => {
             const div = document.createElement('div');
             div.className = 'song-item';
-
             div.setAttribute('data-id', String(song.id));
-            
-            // Hanya tambahkan is-playing jika container berada di view aktif
-            if (isContainerInActiveView && String(song.id) === String(currentPlayingSongId)) {
+
+            if (isContainerInActiveView && String(song.id) === String(state.currentPlayingSongId)) {
                 div.classList.add('is-playing');
             }
 
@@ -819,14 +1099,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <button class="icon-btn delete-song" data-id="${song.id}"><i class="fas fa-trash"></i></button>
             `;
-            div.addEventListener('click', (e) => { if (!e.target.closest('.delete-song')) playSong(songs, index); });
+            div.addEventListener('click', (e) => {
+                if (!e.target.closest('.delete-song')) playSong(songs, index);
+            });
             container.appendChild(div);
         });
 
         container.querySelectorAll('.delete-song').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                if(confirm('Delete this song completely from all playlists and storage?')) {
+                if (confirm('Delete this song completely from all playlists and storage?')) {
                     await fetch(`/api/songs/${e.currentTarget.getAttribute('data-id')}`, {method: 'DELETE'});
                     showToast('Song deleted permanently');
                     loadDashboard();
@@ -835,111 +1117,116 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // ==========================================
+    // HIGHLIGHT PLAYING SONG (requestAnimationFrame)
+    // ==========================================
     function highlightPlayingSong() {
-        if (!currentPlayingSongId || String(currentPlayingSongId) === 'null' || String(currentPlayingSongId) === 'undefined') {
+        if (!state.currentPlayingSongId || String(state.currentPlayingSongId) === 'null' || String(state.currentPlayingSongId) === 'undefined') {
             return;
         }
 
-        // 1. Hapus dulu semua animasi is-playing dari seluruh DOM
         document.querySelectorAll('.song-item.is-playing').forEach(el => el.classList.remove('is-playing'));
 
-        const targetId = String(currentPlayingSongId);
-
-        // 2. Dapatkan view yang sedang aktif
+        const targetId = String(state.currentPlayingSongId);
         const activeView = document.querySelector('.view.active');
-        
-        if (!activeView) {
-            return;
-        }
+        if (!activeView) return;
 
-        // 3. Tunggu 50ms agar browser selesai menggambar ulang DOM
-        setTimeout(() => {
-            // 4. Cari lagu HANYA di dalam view yang aktif
+        // ✅ Use requestAnimationFrame instead of setTimeout for precision
+        requestAnimationFrame(() => {
             const activeEl = activeView.querySelector(`.song-item[data-id="${targetId}"]`);
-
             if (activeEl) {
                 activeEl.classList.add('is-playing');
             }
-        }, 50);
+        });
     }
 
-    async function searchSongs(query) { return await (await fetch(`/api/search?q=${encodeURIComponent(query)}`)).json(); }
-
+    // ==========================================
+    // PLAYBACK CONTROL
+    // ==========================================
     function playSong(songs, index) {
         flushListenLog();
-        currentPlaylistSongs = songs;
-        currentSongIndex = index;
+        state.currentPlaylistSongs = songs;
+        state.currentSongIndex = index;
         const song = songs[index];
 
-        currentPlayingSongId = String(song.id);
+        state.currentPlayingSongId = String(song.id);
 
         fetch(`/api/songs/${song.id}/play`, { method: 'POST' }).catch(e => console.error(e));
 
-        audio.src = `/audio/${mediaUrlName(song.filename)}`;
-        audio.play().catch(e => console.log("Autoplay prevented", e));
+        el.audio.src = `/audio/${mediaUrlName(song.filename)}`;
+        el.audio.play().catch(e => console.log("Autoplay prevented", e));
 
-        document.getElementById('player-title').innerText = song.title;
-        document.getElementById('player-artist').innerText = song.artist || 'Unknown';
-        document.getElementById('player-art').src = `/static/album_art/${mediaUrlName(song.album_art)}`;
+        if (el.playerTitle) el.playerTitle.innerText = song.title;
+        if (el.playerArtist) el.playerArtist.innerText = song.artist || 'Unknown';
+        if (el.playerArt) el.playerArt.src = `/static/album_art/${mediaUrlName(song.album_art)}`;
 
         updatePlayPauseIcon(true);
-
         highlightPlayingSong();
         buildQueue();
+        
+        // ✅ Reset loop when song changes (clean integration, no monkey-patching)
+        if (state.isLooping) {
+            resetLoop();
+            showToast('Loop reset for new song', 'success');
+        }
     }
 
     function togglePlay() {
-        if (!audio.src) return;
-        if (audio.paused) { audio.play(); updatePlayPauseIcon(true); }
-        else { audio.pause(); updatePlayPauseIcon(false); }
-    }
-
-    function updatePlayPauseIcon(isPlaying) {
-        const btn = document.querySelector('#play-pause-btn i');
-        if(btn) btn.className = isPlaying ? 'fas fa-pause' : 'fas fa-play';
-    }
-
-    function playNext() {
-    // ✅ FIX: Cek Repeat One DULUAN, sebelum queue
-    if (repeatMode === 2) {
-        audio.currentTime = 0;
-        audio.play();
-        return;
-    }
-    
-    // Baru cek queue untuk mode lain
-    if (playQueue.length > 0) {
-        const nextSong = playQueue.shift();
-        const idx = currentPlaylistSongs.findIndex(s => s.id === nextSong.id);
-        if (idx !== -1) {
-            playSong(currentPlaylistSongs, idx);
-            return;
+        if (!el.audio.src) return;
+        if (el.audio.paused) {
+            el.audio.play();
+            updatePlayPauseIcon(true);
+        } else {
+            el.audio.pause();
+            updatePlayPauseIcon(false);
         }
     }
-    
-    if (currentPlaylistSongs.length === 0) return;
-    
-    let nextIndex = (currentSongIndex + 1) % currentPlaylistSongs.length;
-    if (nextIndex === 0 && repeatMode === 0 && currentSongIndex === currentPlaylistSongs.length - 1) {
-        audio.pause();
-        updatePlayPauseIcon(false);
-        return;
+
+    // ✅ playNext dengan parameter untuk distinguish trigger
+    function playNext(isFromSongEnded = true) {
+        // ✅ Repeat One logic - hanya aktif jika lagu habis sendiri, BUKAN karena user pencet Next
+        if (state.repeatMode === 2 && isFromSongEnded) {
+            el.audio.currentTime = 0;
+            el.audio.play();
+            return;
+        }
+
+        // Queue logic
+        if (state.playQueue.length > 0) {
+            const nextSong = state.playQueue.shift();
+            const idx = state.currentPlaylistSongs.findIndex(s => s.id === nextSong.id);
+            if (idx !== -1) {
+                playSong(state.currentPlaylistSongs, idx);
+                return;
+            }
+        }
+
+        if (state.currentPlaylistSongs.length === 0) return;
+
+        let nextIndex = (state.currentSongIndex + 1) % state.currentPlaylistSongs.length;
+        if (nextIndex === 0 && state.repeatMode === 0 && state.currentSongIndex === state.currentPlaylistSongs.length - 1) {
+            el.audio.pause();
+            updatePlayPauseIcon(false);
+            return;
+        }
+
+        playSong(state.currentPlaylistSongs, nextIndex);
     }
-    
-    playSong(currentPlaylistSongs, nextIndex);
-}
 
     function playPrev() {
-        if (currentPlaylistSongs.length === 0) return;
-        if (audio.currentTime > 3) { audio.currentTime = 0; return; }
-        playSong(currentPlaylistSongs, (currentSongIndex - 1 + currentPlaylistSongs.length) % currentPlaylistSongs.length);
+        if (state.currentPlaylistSongs.length === 0) return;
+        if (el.audio.currentTime > 3) {
+            el.audio.currentTime = 0;
+            return;
+        }
+        playSong(state.currentPlaylistSongs, (state.currentSongIndex - 1 + state.currentPlaylistSongs.length) % state.currentPlaylistSongs.length);
     }
 
-    function handleSongEnded() { playNext(); }
-
-    function formatTime(s) { if (!s || isNaN(s)) return '0:00'; const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60); return h > 0 ? `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}` : `${m}:${sec.toString().padStart(2, '0')}`; }
-    function formatBytes(b) { if (!b || b === 0) return '0 Bytes'; const i = Math.floor(Math.log(b) / Math.log(1024)); return parseFloat((b / Math.pow(1024, i)).toFixed(2)) + ' ' + ['Bytes', 'KB', 'MB', 'GB', 'TB'][i]; }
-    function debounce(f, w) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => f(...a), w); }; }
+    // ==========================================
+    // INITIALIZATION
+    // ==========================================
+    const dashboardTitle = document.querySelector('#dashboard-view .page-heading h2');
+    if (dashboardTitle) dashboardTitle.innerText = getGreeting();
 
     loadPlaylists();
     loadDashboard();
