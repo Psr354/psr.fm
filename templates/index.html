@@ -15,7 +15,7 @@
     <div class="app-container">
         <aside class="sidebar">
             <div class="logo"><h1>psr.fm</h1></div>
-            
+
             <div class="user-info" id="user-info">
                 <div class="user-avatar" id="user-avatar">?</div>
                 <div class="user-details">
@@ -29,7 +29,7 @@
                 <button id="search-btn" class="nav-item"><i class="fas fa-search"></i> Search</button>
                 <button id="global-download-btn" class="nav-item nav-item-accent"><i class="fas fa-download"></i> Download Song</button>
             </nav>
-            
+
             <div class="playlist-section">
                 <div class="playlist-header">
                     <h3>Playlists</h3>
@@ -160,18 +160,18 @@
                 <button id="play-pause-btn" class="control-btn play-btn"><i class="fas fa-play"></i></button>
                 <button id="next-btn" class="control-btn"><i class="fas fa-step-forward"></i></button>
                 <button id="repeat-btn" class="control-btn"><i class="fas fa-redo"></i></button>
-        	<button id="loop-btn" class="control-btn" title="A-B Loop"><i class="fas fa-braille"></i></button>
+                <button id="loop-btn" class="control-btn" title="A-B Loop"><i class="fas fa-braille"></i></button>
             </div>
             <div class="progress-container">
-       		 <span id="current-time" class="time">0:00</span>
-        	 <div class="slider-container">
-            	      <div class="slider-track"><div class="slider-fill" id="progress-fill"></div></div>
-            	      <input type="range" id="progress-bar" class="progress-bar" min="0" max="100" value="0" step="0.1">
-            	      <div id="loop-indicator" class="loop-indicator" style="display: none;"></div>
-        	 </div>
-        	 <span id="duration" class="time">0:00</span>
-    	     </div>
-	</div>
+                 <span id="current-time" class="time">0:00</span>
+                 <div class="slider-container">
+                      <div class="slider-track"><div class="slider-fill" id="progress-fill"></div></div>
+                      <input type="range" id="progress-bar" class="progress-bar" min="0" max="100" value="0" step="0.1">
+                      <div id="loop-indicator" class="loop-indicator" style="display: none;"></div>
+                 </div>
+                 <span id="duration" class="time">0:00</span>
+             </div>
+        </div>
         <div class="volume-control">
             <button id="queue-btn" class="control-btn"><i class="fas fa-list"></i></button>
             <i id="volume-icon" class="fas fa-volume-up"></i>
@@ -186,47 +186,46 @@
     <script src="{{ url_for('static', filename='main.js') }}"></script>
 
     <!-- Loop Popover -->
-    <!-- Loop Popover -->
-<div id="loop-popover" class="loop-popover">
-    <div class="loop-header">
-        <h4>A-B Loop</h4>
-        <span id="loop-status" class="loop-status">Off</span>
-    </div>
-    
-    <div class="loop-controls">
-        <div class="loop-row">
-            <label>Start (A):</label>
-            <div class="loop-input-group">
-                <input type="text" id="loop-start-input" placeholder="0:00" value="0:00">
-                <button id="set-loop-start-btn" class="loop-set-btn" title="Set to current time">
-                    <i class="fas fa-map-marker-alt"></i>
-                </button>
+    <div id="loop-popover" class="loop-popover">
+        <div class="loop-header">
+            <div class="loop-title-group">
+                <h4>A-B Loop</h4>
+                <span id="loop-status" class="loop-status">Off</span>
+            </div>
+            <button id="clear-loop-btn" class="loop-clear-ghost" title="Reset A-B points">Clear</button>
+        </div>
+
+        <div class="loop-controls">
+            <div class="loop-row">
+                <label>Start Point (A)</label>
+                <div class="loop-input-composite">
+                    <input type="text" id="loop-start-input" placeholder="0:00" value="0:00">
+                    <button id="set-loop-start-btn" class="loop-capture-btn" title="Set to current playhead">
+                        <i class="fas fa-thumbtack"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="loop-row">
+                <label>End Point (B)</label>
+                <div class="loop-input-composite">
+                    <input type="text" id="loop-end-input" placeholder="0:00" value="0:00">
+                    <button id="set-loop-end-btn" class="loop-capture-btn" title="Set to current playhead">
+                        <i class="fas fa-thumbtack"></i>
+                    </button>
+                </div>
             </div>
         </div>
-        
-        <div class="loop-row">
-            <label>End (B):</label>
-            <div class="loop-input-group">
-                <input type="text" id="loop-end-input" placeholder="0:00" value="0:00">
-                <button id="set-loop-end-btn" class="loop-set-btn" title="Set to current time">
-                    <i class="fas fa-map-marker-alt"></i>
-                </button>
-            </div>
+
+        <div class="loop-actions">
+            <button id="toggle-loop-btn" class="btn-primary compact">
+                <i class="fas fa-play"></i> Start Loop
+            </button>
+            <button id="jump-loop-btn" class="btn-secondary compact" disabled>
+                <i class="fas fa-reply"></i> Jump (A)
+            </button>
         </div>
     </div>
-    
-    <div class="loop-actions">
-        <button id="toggle-loop-btn" class="btn-primary compact">
-            <i class="fas fa-play"></i> Start Loop
-        </button>
-        <button id="jump-loop-btn" class="btn-warning compact" disabled>
-            <i class="fas fa-backward"></i> Jump
-        </button>
-        <button id="clear-loop-btn" class="btn-secondary compact">
-            <i class="fas fa-times"></i> Clear
-        </button>
-    </div>
-</div>
 
 </body>
 </html>
