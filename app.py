@@ -12,9 +12,11 @@ import io
 from dotenv import load_dotenv
 
 from services.database import (
-    init_db, get_db_connection, 
-    get_user_by_username, create_user, has_any_user
+    init_db, get_db_connection,
+    get_user_by_username, create_user, has_any_user,
+    get_all_users, get_user_files, delete_user_cascade, update_user_password
 )
+
 from services.downloader import download_queue, start_worker
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -75,7 +77,7 @@ DOWNLOAD_DIR = os.path.join(BASE_DIR, 'downloads')
 LIBRARY_DIR = os.path.join(DOWNLOAD_DIR, 'library')
 ALBUM_ART_DIR = os.path.join(BASE_DIR, 'static', 'album_art')
 DATABASE_PATH = os.path.join(BASE_DIR, 'database.db')
-ADMIN_USERNAME = 'psr354'
+ADMIN_USERNAMES = ['psr354']
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 os.makedirs(LIBRARY_DIR, exist_ok=True)
@@ -124,9 +126,6 @@ def get_owned_song(db, song_id):
         (song_id, current_user.id)
     ).fetchone()
 
-def current_user_can_manage_accounts():
-    return current_user.is_authenticated and current_user.username == ADMIN_USERNAME
-
 @app.teardown_appcontext
 def close_connection(exception):
     db = g.pop('db', None)
@@ -162,7 +161,7 @@ def setup_account():
     if len(username) < 3:
         return jsonify({'error': 'Username must be at least 3 characters'}), 400
     
-    user_id = create_user(DATABASE_PATH, username, password)
+    user_id = create_user(DATABASE_PATH, username, password, role='admin')
     if not user_id:
         return jsonify({'error': 'Username already taken'}), 400
     
@@ -204,24 +203,33 @@ def me():
 @app.route('/api/users', methods=['POST'])
 @login_required
 def create_new_user():
-    if not current_user_can_manage_accounts():
-        return jsonify({'error': 'Only psr354 can add accounts'}), 403
+    """Create a new user (admin only)"""
+    # Cek apakah current user adalah admin
+    if not is_admin():
+        return jsonify({'error': 'Only administrators can create new users'}), 403
 
     data = request.get_json()
     username = data.get('username', '').strip()
     password = data.get('password', '')
+    
+    # Validasi input
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
     if len(password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters'}), 400
     if len(username) < 3:
         return jsonify({'error': 'Username must be at least 3 characters'}), 400
-    
-    user_id = create_user(DATABASE_PATH, username, password)
+
+    # Create user dengan role default 'user'
+    user_id = create_user(DATABASE_PATH, username, password, role='user')
     if not user_id:
         return jsonify({'error': 'Username already taken'}), 400
-    
-    return jsonify({'status': 'success', 'message': f'User {username} created successfully'})
+
+    return jsonify({
+        'status': 'success', 
+        'message': f'User {username} created successfully',
+        'user_id': user_id
+    }), 201
 
 # ==========================================
 # MAIN & PROTECTED ROUTES
@@ -503,6 +511,132 @@ def top_songs_duration():
         LIMIT 5
     ''', (current_user.id, current_user.id))
     return jsonify([dict(row) for row in cursor.fetchall()])
+
+# ==========================================
+# ADMIN: USER MANAGEMENT
+# ==========================================
+
+def is_admin():
+    """Check if current user is admin"""
+    if not current_user.is_authenticated:
+        return False
+    conn = get_db_connection(DATABASE_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT role FROM users WHERE id = ?', (current_user.id,))
+    user = cursor.fetchone()
+    conn.close()
+    return user and user['role'] == 'admin'
+
+
+
+@app.route('/api/admin/users')
+@login_required
+def list_users():
+    """List all users with stats (admin only)"""
+    if not is_admin():
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    users = get_all_users(DATABASE_PATH)
+    return jsonify(users)
+
+
+@app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
+@login_required
+def delete_user(user_id):
+    """Delete user and all their data (admin only)"""
+    if not is_admin():
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    # Prevent admin from deleting themselves
+    if user_id == current_user.id:
+        return jsonify({'error': 'You cannot delete your own account'}), 400
+    
+    # Get files before deletion (to delete from filesystem)
+    user_files = get_user_files(DATABASE_PATH, user_id)
+    
+    # Delete from database
+    success = delete_user_cascade(DATABASE_PATH, user_id)
+    if not success:
+        return jsonify({'error': 'Failed to delete user'}), 500
+    
+    # Delete MP3 files and album art from filesystem
+    for file_info in user_files:
+        mp3_path = os.path.join(LIBRARY_DIR, file_info['filename'])
+        if os.path.exists(mp3_path):
+            try:
+                os.remove(mp3_path)
+            except Exception as e:
+                print(f"[WARN] Failed to delete {mp3_path}: {e}")
+        
+        if file_info.get('album_art'):
+            art_path = os.path.join(ALBUM_ART_DIR, file_info['album_art'])
+            if os.path.exists(art_path):
+                try:
+                    os.remove(art_path)
+                except Exception as e:
+                    print(f"[WARN] Failed to delete {art_path}: {e}")
+    
+    return jsonify({'status': 'success', 'message': 'User and all data deleted'})
+
+
+@app.route('/api/admin/users/<int:user_id>/reset-password', methods=['POST'])
+@login_required
+def reset_user_password(user_id):
+    """Reset user password (admin only)"""
+    from werkzeug.security import generate_password_hash
+    
+    if not is_admin():
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    data = request.get_json()
+    new_password = data.get('password', '')
+    
+    if not new_password:
+        return jsonify({'error': 'New password required'}), 400
+    
+    if len(new_password) < 6:
+        return jsonify({'error': 'Password must be at least 6 characters'}), 400
+    
+    new_hash = generate_password_hash(new_password)
+    success = update_user_password(DATABASE_PATH, user_id, new_hash)
+    
+    if not success:
+        return jsonify({'error': 'User not found'}), 404
+    
+    return jsonify({'status': 'success', 'message': 'Password reset successfully'})
+
+
+@app.route('/api/admin/users/<int:user_id>/role', methods=['PUT'])
+@login_required
+def change_user_role(user_id):
+    """Change user role (admin only)"""
+    if not is_admin():
+        return jsonify({'error': 'Admin access required'}), 403
+    
+    # Prevent admin from demoting themselves
+    if user_id == current_user.id:
+        return jsonify({'error': 'You cannot change your own role'}), 400
+    
+    data = request.get_json()
+    new_role = data.get('role', '')
+    
+    if new_role not in ('user', 'admin'):
+        return jsonify({'error': 'Invalid role. Must be user or admin'}), 400
+    
+    conn = get_db_connection(DATABASE_PATH)
+    try:
+        cursor = conn.cursor()
+        cursor.execute('UPDATE users SET role = ? WHERE id = ?', (new_role, user_id))
+        conn.commit()
+        
+        if cursor.rowcount == 0:
+            return jsonify({'error': 'User not found'}), 404
+        
+        return jsonify({'status': 'success', 'message': f'Role updated to {new_role}'})
+    finally:
+        conn.close()
+
+
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
