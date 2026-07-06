@@ -18,6 +18,7 @@ old.html
 # PYTHON
 # ==========================================
 __pycache__/
+.codex_pycache/
 *.py[cod]
 *$py.class
 *.so

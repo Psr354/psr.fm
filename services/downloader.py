@@ -2,14 +2,33 @@ import os
 import uuid
 import queue
 import threading
+from urllib.parse import urlparse
 import yt_dlp
 import requests
 from werkzeug.utils import secure_filename
 from services.metadata import extract_duration
-from services.database import get_db_connection
+from services.database import get_db_connection, update_song_lyrics
+from services.lyrics import search_lyrics
 
 download_queue = queue.Queue()
 socketio_instance = None
+MAX_DOWNLOAD_DURATION_SECONDS = 600
+
+
+def validate_youtube_url(url):
+    if not url or not isinstance(url, str):
+        return False, 'URL is required'
+
+    parsed = urlparse(url.strip())
+    host = parsed.netloc.lower()
+    if host.startswith('www.'):
+        host = host[4:]
+
+    allowed_hosts = {'youtube.com', 'm.youtube.com', 'youtu.be'}
+    if parsed.scheme not in ('http', 'https') or host not in allowed_hosts:
+        return False, 'Only YouTube URLs are allowed'
+
+    return True, ''
 
 def download_worker(db_path, download_dir, album_art_dir, sio):
     global socketio_instance
@@ -28,6 +47,10 @@ def process_download(task, db_path, download_dir, album_art_dir):
     url = task['url']
     playlist_ids = task['playlist_ids']
     user_id = task['user_id']
+
+    is_valid, validation_error = validate_youtube_url(url)
+    if not is_valid:
+        raise Exception(validation_error)
     
     def progress_hook(d):
         if socketio_instance:
@@ -46,6 +69,9 @@ def process_download(task, db_path, download_dir, album_art_dir):
         artist = info.get('uploader', 'Unknown')
         thumbnail_url = info.get('thumbnail', '')
         duration = info.get('duration', 0) or 0
+
+    if duration and duration > MAX_DOWNLOAD_DURATION_SECONDS:
+        raise Exception('Video exceeds the 10 minute limit')
         
     file_uuid = str(uuid.uuid4())
     library_dir = os.path.join(download_dir, 'library')
@@ -83,9 +109,26 @@ def process_download(task, db_path, download_dir, album_art_dir):
     song_id = cursor.lastrowid
     
     for pid in playlist_ids:
-        cursor.execute('INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id) VALUES (?, ?)', (pid, song_id))
+        cursor.execute('SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_songs WHERE playlist_id = ?', (pid,))
+        next_position = cursor.fetchone()[0]
+        cursor.execute(
+            'INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
+            (pid, song_id, next_position)
+        )
     conn.commit()
     conn.close()
+
+    try:
+        lyrics_data = search_lyrics(title, artist, duration_seconds)
+        if lyrics_data:
+            update_song_lyrics(
+                db_path,
+                song_id,
+                lyrics_data.get('lyrics', ''),
+                lyrics_data.get('synced_lyrics', ''),
+            )
+    except Exception as exc:
+        print(f"[WARN] lyrics lookup failed for {song_id}: {exc}")
 
     if socketio_instance:
         socketio_instance.emit('song_added', {'id': song_id, 'playlist_ids': playlist_ids, 'title': title, 'artist': artist, 'filename': expected_file, 'album_art': album_art_filename, 'duration_seconds': duration_seconds})

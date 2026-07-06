@@ -73,6 +73,8 @@ def init_db(db_path):
             album_art TEXT,
             duration_seconds INTEGER,
             play_count INTEGER DEFAULT 0,
+            lyrics TEXT,
+            synced_lyrics TEXT,
             user_id INTEGER NOT NULL DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -89,14 +91,17 @@ def init_db(db_path):
                 playlist_id INTEGER, 
                 song_id INTEGER, 
                 added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (playlist_id, song_id)
+                position INTEGER DEFAULT 0,
+                  PRIMARY KEY (playlist_id, song_id),
+                  FOREIGN KEY (playlist_id) REFERENCES playlists (id) ON DELETE CASCADE,
+                  FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE CASCADE
             )
         ''')
         
         # Migrate data from old schema
         cursor.execute('''
-            INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id) 
-            SELECT playlist_id, id FROM songs WHERE playlist_id IS NOT NULL
+            INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id, position) 
+            SELECT playlist_id, id, id FROM songs WHERE playlist_id IS NOT NULL
         ''')
         
         # Recreate songs table without playlist_id
@@ -127,6 +132,10 @@ def init_db(db_path):
         # Add missing columns to existing songs table
         if 'play_count' not in song_cols:
             cursor.execute("ALTER TABLE songs ADD COLUMN play_count INTEGER DEFAULT 0")
+        if 'lyrics' not in song_cols:
+            cursor.execute("ALTER TABLE songs ADD COLUMN lyrics TEXT")
+        if 'synced_lyrics' not in song_cols:
+            cursor.execute("ALTER TABLE songs ADD COLUMN synced_lyrics TEXT")
         if 'user_id' not in song_cols:
             cursor.execute("ALTER TABLE songs ADD COLUMN user_id INTEGER DEFAULT 1")
             cursor.execute("UPDATE songs SET user_id = 1 WHERE user_id IS NULL")
@@ -139,11 +148,34 @@ def init_db(db_path):
             playlist_id INTEGER,
             song_id INTEGER,
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            position INTEGER DEFAULT 0,
             PRIMARY KEY (playlist_id, song_id),
             FOREIGN KEY (playlist_id) REFERENCES playlists (id) ON DELETE CASCADE,
             FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE CASCADE
         )
     ''')
+
+    cursor.execute("PRAGMA table_info(playlist_songs)")
+    playlist_song_cols = [col[1] for col in cursor.fetchall()]
+    if 'position' not in playlist_song_cols:
+        cursor.execute("ALTER TABLE playlist_songs ADD COLUMN position INTEGER DEFAULT 0")
+
+    cursor.execute("SELECT DISTINCT playlist_id FROM playlist_songs")
+    playlist_ids = [row['playlist_id'] for row in cursor.fetchall()]
+    for playlist_id in playlist_ids:
+        cursor.execute(
+            '''
+            SELECT song_id FROM playlist_songs
+            WHERE playlist_id = ?
+            ORDER BY position ASC, added_at ASC, song_id ASC
+            ''',
+            (playlist_id,)
+        )
+        for index, row in enumerate(cursor.fetchall()):
+            cursor.execute(
+                'UPDATE playlist_songs SET position = ? WHERE playlist_id = ? AND song_id = ?',
+                (index, playlist_id, row['song_id'])
+            )
 
     # ==========================================
     # LISTENING LOGS TABLE
@@ -334,6 +366,20 @@ def update_user_role(database_path, user_id, new_role):
         cursor.execute(
             'UPDATE users SET role = ? WHERE id = ?',
             (new_role, user_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def update_song_lyrics(database_path, song_id, lyrics, synced_lyrics):
+    conn = get_db_connection(database_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE songs SET lyrics = ?, synced_lyrics = ? WHERE id = ?',
+            (lyrics, synced_lyrics, song_id)
         )
         conn.commit()
         return cursor.rowcount > 0

@@ -13,8 +13,11 @@
       - ./logs:/app/logs
       - ./app.py:/app/app.py
       - ./services:/app/services
+      - ./scripts:/app/scripts
+      - ./tests:/app/tests
     restart: unless-stopped
     env_file:
       - .env
     environment:
       - FLASK_ENV=production
+      - PSR_FM_DATABASE_PATH=/app/database.db/psr_fm.sqlite3

@@ -102,14 +102,14 @@
         </main>
     </div>
 
-<div id="users-view" class="view">
-    <div class="page-heading">
+<div id="users-view" class="view admin-view">
+    <div class="admin-toolbar">
         <div>
-            <div class="eyebrow">Admin Panel</div>
+            <div class="eyebrow admin-eyebrow">Admin Panel</div>
             <h2>User Management</h2>
-            <p class="page-subtitle">Manage all registered users in your server</p>
+            <p class="page-subtitle">Manage server access, roles, and account recovery.</p>
         </div>
-        <button id="add-user-btn-main" class="btn-primary compact-action">
+        <button id="add-user-btn-main" class="btn-primary compact-action admin-add-user">
             <i class="fas fa-user-plus"></i> Add New User
         </button>
     </div>
@@ -172,6 +172,14 @@
     </div>
 
     <!-- Users Table -->
+    <div class="users-table-panel">
+        <div class="users-table-titlebar">
+            <div>
+                <h3>Accounts</h3>
+                <p>Role and recovery controls for every user.</p>
+            </div>
+            <i class="fas fa-lock"></i>
+        </div>
     <div class="users-table-wrapper">
         <table class="users-table">
             <thead>
@@ -195,6 +203,7 @@
                 </tr>
             </tbody>
         </table>
+    </div>
     </div>
 </div>
 
@@ -308,10 +317,11 @@
         <div class="player-controls">
             <div class="control-buttons">
                 <button id="shuffle-btn" class="control-btn"><i class="fas fa-random"></i></button>
+                <button id="repeat-btn" class="control-btn"><i class="fas fa-redo"></i></button>
                 <button id="prev-btn" class="control-btn"><i class="fas fa-step-backward"></i></button>
                 <button id="play-pause-btn" class="control-btn play-btn"><i class="fas fa-play"></i></button>
                 <button id="next-btn" class="control-btn"><i class="fas fa-step-forward"></i></button>
-                <button id="repeat-btn" class="control-btn"><i class="fas fa-redo"></i></button>
+                <button id="lyrics-btn" class="control-btn" title="Lyrics"><i class="fas fa-music"></i></button>
                 <button id="loop-btn" class="control-btn" title="A-B Loop"><i class="fas fa-braille"></i></button>
             </div>
             <div class="progress-container">
@@ -333,6 +343,31 @@
 
     <audio id="audio-player"></audio>
     <div id="queue-popover" class="queue-popover"><h4>Up Next <span id="queue-mode"></span></h4><div id="queue-list" class="queue-list"></div></div>
+    <aside id="lyrics-panel" class="lyrics-panel" aria-hidden="true">
+        <div class="lyrics-header">
+            <div>
+                <p class="lyrics-eyebrow">Lyrics</p>
+                <h3 id="lyrics-title">Select a song</h3>
+                <p id="lyrics-subtitle" class="lyrics-subtitle">Cached lyrics will appear here.</p>
+            </div>
+            <button id="lyrics-close-btn" class="lyrics-close-btn" aria-label="Close lyrics panel">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="lyrics-status-row">
+            <span id="lyrics-status" class="lyrics-status">Choose a track to load lyrics.</span>
+            <span class="lyrics-live-pill">LRC</span>
+        </div>
+        <div id="lyrics-body" class="lyrics-body">
+            <div class="lyrics-empty">
+                <i class="fas fa-music"></i>
+                <p>No lyrics loaded yet.</p>
+            </div>
+        </div>
+        <div class="lyrics-actions">
+            <button id="lyrics-retry-btn" class="btn-secondary compact">Try Again</button>
+        </div>
+    </aside>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
     <script src="{{ url_for('static', filename='main.js') }}"></script>

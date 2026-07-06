@@ -1,95 +1,90 @@
-
-# 🎵 psr.fm
+# psr.fm
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Security](https://img.shields.io/badge/Security-Hardened-orange.svg)]()
 
-> A lightweight, self-hosted music streaming server inspired by Spotify.  
-> Download, organize, and stream YouTube audio directly to your personal cloud with multi-user support and enterprise-grade security.
+A lightweight, self-hosted music streaming server inspired by Spotify.
 
----
-
-## ✨ Features
-
-### 🔐 Security & Authentication
-- **Multi-User System** — Isolated data per user with role-based access control
-- **Admin Panel** — Complete user management (list, delete, reset password, change role)
-- **Secure Authentication** — PBKDF2-SHA256 password hashing with salt
-- **CSRF Protection** — All state-changing endpoints protected
-- **IDOR Prevention** — Ownership validation on all resources
-- **XSS Prevention** — Input sanitization with `escapeHtml()`
-- **Rate Limiting** — Protection against brute force and abuse
-
-### 🎧 YouTube Downloader
-- Download audio using `yt-dlp` (pinned version for stability)
-- Convert to MP3 192kbps with FFmpeg
-- Auto-extract metadata (title, artist, album art)
-- Real-time progress bar via WebSocket
-- URL validation (YouTube only, max 10 minutes)
-
-### 📂 Smart Playlist
-- **Many-to-Many architecture** — One song in multiple playlists, no duplication
-- Custom cover images per playlist
-- User-scoped playlists (data isolation)
-- UUID-based file naming (prevents conflicts)
-
-### 📊 Analytics (Per User)
-- Play count tracking
-- Listen time statistics
-- Top played songs
-- Top listened songs (by duration)
-- Storage usage monitoring
-
-### ⚡ Real-Time Features
-- Live download progress bar
-- WebSocket-powered notifications
-- Real-time song addition alerts
-
-### 🎵 Music Player
-
-**Playback Controls:**
-- Queue management with shuffle support
-- **A-B Loop** — Loop specific sections with jump-to-start
-- Repeat modes (Off / Repeat All / Repeat One)
-- Next / Previous with smart logic
-- Volume control with visual feedback
-- Progress bar with seek functionality
-
-**Advanced Features:**
-- **Synced Lyrics** — LRC format with auto-scroll (when available)
-- **Keyboard Shortcuts** — Full keyboard navigation
-- **Responsive Design** — Works on desktop and mobile
-
-### ⌨️ Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Space` | Play / Pause |
-| `←` / `→` | Previous / Next |
-| `L` | Jump to loop start |
-| `Esc` | Close popover/modal/exit admin panel |
+psr.fm lets you download, organize, and stream YouTube audio from your own server with multi-user accounts, playlist management, synced lyrics, and basic security protections.
 
 ---
 
-## 🛠️ Tech Stack
+## Features
+
+### Security and Authentication
+
+- **Multi-user system**: each user has isolated playlists, songs, and listening stats.
+- **Admin panel**: admins can list users, create users, reset passwords, change roles, and delete accounts.
+- **Password hashing**: passwords are stored with PBKDF2-SHA256 hashes and salts.
+- **CSRF protection**: state-changing API endpoints require CSRF tokens.
+- **Ownership checks**: routes validate that playlists and songs belong to the current user.
+- **Frontend escaping**: user-controlled text rendered by the main app is escaped.
+- **Rate limiting**: repeated failed login attempts and manual lyrics refreshes are limited.
+
+### YouTube Downloader
+
+- Downloads audio with `yt-dlp`.
+- Converts audio to MP3 192 kbps with FFmpeg.
+- Extracts title, uploader, duration, and album art when available.
+- Shows realtime download progress with WebSocket updates.
+- Accepts YouTube URLs only.
+- Rejects videos longer than 10 minutes.
+
+### Playlists
+
+- Many-to-many playlists: one song can appear in multiple playlists.
+- Drag-and-drop song ordering inside each playlist.
+- Saved custom order per playlist.
+- Custom cover images per playlist.
+- User-scoped playlist data.
+- UUID-based audio filenames to avoid conflicts.
+
+### Lyrics
+
+- Fetches lyrics from LRCLIB when available.
+- Supports plain lyrics and synced LRC lyrics.
+- Synced lyrics auto-scroll while the song plays.
+- Clicking a synced lyric line seeks the player to that timestamp.
+- Includes a manual lyrics refresh action with rate limiting.
+
+### Analytics
+
+- Play count tracking.
+- Listening time tracking.
+- Top played songs.
+- Top listened songs by duration.
+- Storage usage monitoring.
+
+### Music Player
+
+- Queue management.
+- Shuffle support.
+- Repeat off, repeat all, and repeat one.
+- A-B loop with jump-to-start.
+- Next and previous controls.
+- Volume and seek controls.
+- Keyboard shortcuts.
+- Responsive desktop and mobile layout.
+
+---
+
+## Tech Stack
 
 | Component | Technology |
-|-----------|------------|
-| Backend | Python 3.12 + Flask 3.0.3 |
+| --- | --- |
+| Backend | Python 3.12 + Flask |
 | Authentication | Flask-Login + Werkzeug |
-| Security | Flask-WTF (CSRF) |
+| Security | Flask-WTF CSRF |
 | Realtime | Flask-SocketIO |
-| Database | SQLite (WAL mode) |
-| Downloader | yt-dlp (pinned: 2026.6.9) |
+| Database | SQLite |
+| Downloader | yt-dlp |
 | Media | FFmpeg + Mutagen + Pillow |
 | Frontend | Vanilla HTML/CSS/JS |
 | Deployment | Docker + Docker Compose |
 
 ---
 
-## 📸 Preview
+## Preview
 
 <p align="center">
   <img src="static/dashboard.jpeg" width="800" alt="Dashboard Preview">
@@ -97,12 +92,13 @@
 
 ---
 
-## 🚀 Installation
+## Installation
 
 ### Prerequisites
-- [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/install/)
-- [Git](https://git-scm.com/)
-- ~2GB free disk space
+
+- Docker and Docker Compose
+- Git
+- Around 2 GB of free disk space
 - Stable internet connection
 
 ### 1. Clone Repository
@@ -114,17 +110,30 @@ cd psr.fm
 
 ### 2. Setup Environment
 
+Create a stable secret key:
+
 ```bash
 echo "SECRET_KEY=$(openssl rand -hex 32)" > .env
 ```
 
-> ⚠️ **IMPORTANT:** Don't skip this step. `SECRET_KEY` is required for session security.
+Do not skip this step. `SECRET_KEY` is required for stable login sessions and CSRF tokens.
 
-### 3. Create Database File
+### 3. Database Directory Note
 
-```bash
-touch database.db
+Docker Compose automatically creates the runtime directories used by the app, including:
+
+- `database.db`
+- `downloads`
+- `static/album_art`
+- `logs`
+
+`database.db` must be a directory. The SQLite file is stored at:
+
+```text
+database.db/psr_fm.sqlite3
 ```
+
+Do not run `touch database.db`; that creates a file and breaks the expected database layout.
 
 ### 4. Run with Docker
 
@@ -132,46 +141,22 @@ touch database.db
 docker compose up -d --build
 ```
 
-Wait 1-2 minutes for the build to complete. The container will automatically create the required folders and run database migrations.
+Wait 1-2 minutes for the build to complete. The container creates missing runtime folders and runs database migrations automatically.
 
 ### 5. First-Time Setup
 
-1. Open browser: `http://localhost:5000` (or `http://SERVER_IP:5000`)
-2. You'll be redirected to the **Setup Wizard** (`/setup`)
-3. Create your first admin account:
-   - Username (min. 3 characters)
-   - Password (min. 6 characters)
-4. You'll be logged in automatically
+1. Open `http://localhost:5000` or `http://SERVER_IP:5000`.
+2. You will be redirected to `/setup`.
+3. Create the first admin account:
+   - Username: minimum 3 characters
+   - Password: minimum 6 characters
+4. You will be logged in automatically.
 
-> ⚠️ **IMPORTANT:** Setup page only appears **once**. The first user automatically becomes an administrator. If you forget your password, see [Troubleshooting](#-troubleshooting).
-
----
-
-## 👥 User Management (Admin Only)
-
-The first user created during setup automatically becomes an **administrator** with full access to the User Management panel.
-
-### Admin Privileges
-- ✅ View all registered users with statistics
-- ✅ Add new users
-- ✅ Reset user passwords
-- ✅ Change user roles (promote/demote)
-- ✅ Delete users and all their data
-
-### Accessing User Management
-1. Login as admin
-2. Click **"User Management"** in the sidebar (green accent)
-3. View user stats, search, filter, and manage accounts
-
-### Features
-- **Stats Dashboard** — Total users, admins, regular users, total songs
-- **Search & Filter** — Find users by username, filter by role
-- **Modern UI** — Gradient avatars, role badges, action tooltips
-- **Safety Features** — Cannot delete/modify own account, confirmation modals
+The setup page appears only once. The first user becomes an administrator.
 
 ---
 
-## 🐳 Docker Commands
+## Docker Commands
 
 ```bash
 # Start
@@ -180,11 +165,14 @@ docker compose up -d
 # Stop
 docker compose down
 
-# Rebuild (after code changes)
+# Rebuild after code changes
 docker compose up -d --build
 
-# View logs
-docker compose logs -f psr_fm_app
+# View logs by Compose service name
+docker compose logs -f psr_fm
+
+# View logs by container name
+docker logs -f psr_fm_app
 
 # Restart
 docker compose restart
@@ -192,153 +180,206 @@ docker compose restart
 
 ---
 
-## 🔧 Troubleshooting
+## User Management
 
-### ❌ `TLS handshake timeout` during build
+Admins can open **User Management** from the sidebar.
 
-**Cause:** Network issue when pulling `python:3.12-slim` from Docker Hub.
+Admin actions:
 
-**Solutions:**
+- View all registered users and account statistics.
+- Add regular users.
+- Reset user passwords.
+- Promote or demote users.
+- Delete users and their data.
 
-1. **Check internet connection** — make sure it's stable
-2. **Restart Docker daemon:**
-   ```bash
-   sudo systemctl restart docker
-   ```
-3. **Try again** — sometimes it's just a temporary issue:
-   ```bash
-   docker compose up -d --build
-   ```
-4. **Use Docker mirror** (if in Indonesia/China):
-   ```bash
-   # Edit /etc/docker/daemon.json
-   {
-     "registry-mirrors": ["https://mirror.gcr.io"]
-   }
-   sudo systemctl restart docker
-   ```
+Safety rules:
 
-### ❌ Permission denied on download/upload
+- Admins cannot delete their own account.
+- Admins cannot change their own role.
+- Regular users cannot access admin APIs.
+
+---
+
+## Playlist Ordering
+
+Inside a playlist, drag the handle on the left side of a song row to reorder songs.
+
+The order is saved to SQLite, so it remains after refreshes, restarts, and future logins.
+
+---
+
+## Lyrics
+
+Lyrics are fetched automatically after downloads when a match is available.
+
+For synced LRC lyrics:
+
+- The active lyric line follows playback.
+- Clicking a lyric line seeks the song to that timestamp.
+- The **Try Again** button manually refreshes lyrics for the current song.
+
+Manual lyrics refreshes are rate limited.
+
+---
+
+## Runtime Data
+
+The Docker setup mounts these host folders into the container:
+
+| Host path | Container path | Purpose |
+| --- | --- | --- |
+| `./database.db` | `/app/database.db` | SQLite directory containing `psr_fm.sqlite3` |
+| `./downloads` | `/app/downloads` | Downloaded audio files |
+| `./static/album_art` | `/app/static/album_art` | Album art and playlist covers |
+| `./logs` | `/app/logs` | Runtime logs |
+
+The database path is set in `docker-compose.yml`:
+
+```text
+PSR_FM_DATABASE_PATH=/app/database.db/psr_fm.sqlite3
+```
+
+---
+
+## Troubleshooting
+
+### TLS handshake timeout during build
+
+Cause: network issue when pulling `python:3.12-slim` from Docker Hub.
+
+Try:
 
 ```bash
-sudo chown -R 1000:1000 downloads static/album_art logs database.db
+docker compose up -d --build
+```
+
+If it keeps failing, restart Docker and try again.
+
+### Permission denied on download/upload
+
+```bash
+sudo chown -R 1000:1000 database.db downloads static/album_art logs
 docker compose restart
 ```
 
-### ❌ CSRF token error after restart
+### CSRF token error after restart
 
-Make sure `.env` exists and contains `SECRET_KEY`:
+Make sure `.env` exists and contains a stable `SECRET_KEY`:
+
 ```bash
 cat .env
-# If empty, regenerate:
+```
+
+If it is missing:
+
+```bash
 echo "SECRET_KEY=$(openssl rand -hex 32)" > .env
 docker compose restart
 ```
 
-### ❌ Forgot admin password
+### Forgot admin password
 
-Reset database (⚠️ all user data will be lost, but MP3 files remain safe):
+Reset the database. This deletes user, playlist, and song records. Downloaded MP3 files remain in `downloads`.
+
 ```bash
 docker compose down
-rm database.db
-touch database.db
+rm -rf database.db
 docker compose up -d
-# Open web and create new admin account
 ```
 
-### ❌ User Management menu not visible
+Then open the app and create a new admin account.
 
-Only administrators can see the User Management menu. To promote a user to admin:
+### User Management menu not visible
+
+Only admins can see User Management. To promote a user manually:
+
 ```bash
-# Access database
-sqlite3 database.db
-
-# Promote user to admin
+sqlite3 database.db/psr_fm.sqlite3
 UPDATE users SET role = 'admin' WHERE username = 'your_username';
-
-# Exit
 .quit
-
-# Restart container
 docker compose restart
 ```
 
+### Too many login attempts
+
+The login API allows 5 failed attempts per IP address and username within 5 minutes.
+
+Wait for the retry window to pass, then try again.
+
 ---
 
-## 📁 Project Structure
+## Project Structure
 
-```
+```text
 psr.fm/
-├── app.py                 # Flask routes & API
-├── Dockerfile
-├── docker-compose.yml
-├── requirements.txt
-├── database.db            # SQLite (auto-created)
-├── .env                   # Environment variables
-│
-├── services/
-│   ├── database.py        # Schema & migrations
-│   ├── downloader.py      # yt-dlp worker
-│   └── metadata.py        # Audio metadata
-│
-├── static/
-│   ├── main.js            # Frontend logic
-│   ├── style.css          # Styling
-│   └── album_art/         # Auto-created
-│
-├── templates/
-│   ├── index.html         # Main app
-│   ├── login.html         # Login page
-│   └── setup.html         # Setup wizard
-│
-├── downloads/             # Auto-created
-│   └── library/           # MP3 files (UUID-named)
-│
-└── logs/                  # Auto-created
+|-- app.py
+|-- Dockerfile
+|-- docker-compose.yml
+|-- requirements.txt
+|-- .env
+|-- database.db/
+|   `-- psr_fm.sqlite3
+|-- services/
+|   |-- __init__.py
+|   |-- database.py
+|   |-- downloader.py
+|   |-- lyrics.py
+|   `-- metadata.py
+|-- scripts/
+|   `-- fetch_lyrics_batch.py
+|-- static/
+|   |-- main.js
+|   |-- style.css
+|   `-- album_art/
+|-- templates/
+|   |-- index.html
+|   |-- login.html
+|   |-- maintenance.html
+|   `-- setup.html
+|-- downloads/
+|   `-- library/
+|-- logs/
+`-- tests/
+    `-- test_auth_download.py
 ```
+
+Runtime directories and `.env` are ignored by Git.
 
 ---
 
-## 🤝 Contributing
+## Development Checks
 
-Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
+Run syntax checks:
 
 ```bash
-# Create feature branch
-git checkout -b feature/your-feature
+python -m py_compile app.py services/database.py services/downloader.py services/lyrics.py services/metadata.py
+node --check static/main.js
+```
 
-# Make changes
+Run tests inside the Docker container:
+
+```bash
+docker exec psr_fm_app python -m unittest tests.test_auth_download -v
+```
+
+---
+
+## Contributing
+
+Pull requests are welcome. For major changes, open an issue first to discuss the proposal.
+
+```bash
+git checkout -b feature/your-feature
 git add .
 git commit -m "Add your feature"
-
-# Push and create PR
 git push origin feature/your-feature
 ```
 
 ---
 
-## 📜 License
+## Acknowledgments
 
-MIT License - see [LICENSE](LICENSE) file for details
-
----
-
-## 👤 Author
-
-**psr354**  
-
-- GitHub: [@psr354](https://github.com/psr354)
-- Project: [psr.fm](https://github.com/psr354/psr.fm)
-
----
-
-## 🙏 Acknowledgments
-
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) — YouTube downloader
-- [Flask](https://flask.palletsprojects.com/) — Web framework
-- [FFmpeg](https://ffmpeg.org/) — Audio processing
-- [Docker](https://www.docker.com/) — Containerization
-
----
-
-<p align="center">Made with ❤️ and 🎵 by psr354</p>
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+- [Flask](https://flask.palletsprojects.com/)
+- [FFmpeg](https://ffmpeg.org/)
+- [Docker](https://www.docker.com/)

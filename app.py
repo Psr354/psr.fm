@@ -9,6 +9,8 @@ from werkzeug.security import check_password_hash
 from flask_socketio import SocketIO
 from PIL import Image
 import io
+import time
+from threading import Lock
 from dotenv import load_dotenv
 
 from services.database import (
@@ -17,7 +19,8 @@ from services.database import (
     get_all_users, get_user_files, delete_user_cascade, update_user_password
 )
 
-from services.downloader import download_queue, start_worker
+from services.downloader import download_queue, start_worker, validate_youtube_url
+from services.lyrics import search_lyrics, parse_lrc
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(BASE_DIR, '.env'))
@@ -73,19 +76,30 @@ login_manager.login_message = None
 
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-DOWNLOAD_DIR = os.path.join(BASE_DIR, 'downloads')
+DOWNLOAD_DIR = os.environ.get('PSR_FM_DOWNLOAD_DIR', os.path.join(BASE_DIR, 'downloads'))
 LIBRARY_DIR = os.path.join(DOWNLOAD_DIR, 'library')
-ALBUM_ART_DIR = os.path.join(BASE_DIR, 'static', 'album_art')
-DATABASE_PATH = os.path.join(BASE_DIR, 'database.db')
+ALBUM_ART_DIR = os.environ.get('PSR_FM_ALBUM_ART_DIR', os.path.join(BASE_DIR, 'static', 'album_art'))
+DATABASE_PATH = os.environ.get('PSR_FM_DATABASE_PATH', os.path.join(BASE_DIR, 'database.db', 'psr_fm.sqlite3'))
+DATABASE_DIR = os.path.dirname(DATABASE_PATH) or os.path.join(BASE_DIR, 'database.db')
 ADMIN_USERNAMES = ['psr354']
+LYRICS_RATE_LIMIT_WINDOW_SECONDS = 60
+LYRICS_RATE_LIMIT_MAX_REQUESTS = 10
+_lyrics_rate_limit_lock = Lock()
+_lyrics_rate_limit_state = {}
+LOGIN_RATE_LIMIT_WINDOW_SECONDS = 300
+LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5
+_login_rate_limit_lock = Lock()
+_login_rate_limit_state = {}
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 os.makedirs(LIBRARY_DIR, exist_ok=True)
 os.makedirs(ALBUM_ART_DIR, exist_ok=True)
+os.makedirs(DATABASE_DIR, exist_ok=True)
 os.makedirs(os.path.join(BASE_DIR, 'logs'), exist_ok=True)
 
 init_db(DATABASE_PATH)
-start_worker(DATABASE_PATH, DOWNLOAD_DIR, ALBUM_ART_DIR, socketio)
+if os.environ.get('PSR_FM_DISABLE_WORKER') != '1':
+    start_worker(DATABASE_PATH, DOWNLOAD_DIR, ALBUM_ART_DIR, socketio)
 
 class User(UserMixin):
     def __init__(self, id, username):
@@ -125,6 +139,53 @@ def get_owned_song(db, song_id):
         'SELECT * FROM songs WHERE id = ? AND user_id = ?',
         (song_id, current_user.id)
     ).fetchone()
+
+
+def check_lyrics_rate_limit(user_id):
+    now = time.monotonic()
+    with _lyrics_rate_limit_lock:
+        timestamps = _lyrics_rate_limit_state.get(user_id, [])
+        timestamps = [ts for ts in timestamps if now - ts < LYRICS_RATE_LIMIT_WINDOW_SECONDS]
+        if len(timestamps) >= LYRICS_RATE_LIMIT_MAX_REQUESTS:
+            _lyrics_rate_limit_state[user_id] = timestamps
+            return False, int(LYRICS_RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0]))
+        timestamps.append(now)
+        _lyrics_rate_limit_state[user_id] = timestamps
+        return True, None
+
+
+def _login_rate_limit_key(username):
+    remote_addr = request.headers.get('X-Forwarded-For', request.remote_addr or 'unknown')
+    client_ip = remote_addr.split(',')[0].strip().lower()
+    return f"{client_ip}:{username.strip().lower()}"
+
+
+def check_login_rate_limit(username):
+    now = time.monotonic()
+    key = _login_rate_limit_key(username)
+    with _login_rate_limit_lock:
+        timestamps = _login_rate_limit_state.get(key, [])
+        timestamps = [ts for ts in timestamps if now - ts < LOGIN_RATE_LIMIT_WINDOW_SECONDS]
+        if len(timestamps) >= LOGIN_RATE_LIMIT_MAX_ATTEMPTS:
+            _login_rate_limit_state[key] = timestamps
+            return False, int(LOGIN_RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0]))
+        return True, None
+
+
+def record_failed_login(username):
+    now = time.monotonic()
+    key = _login_rate_limit_key(username)
+    with _login_rate_limit_lock:
+        timestamps = _login_rate_limit_state.get(key, [])
+        timestamps = [ts for ts in timestamps if now - ts < LOGIN_RATE_LIMIT_WINDOW_SECONDS]
+        timestamps.append(now)
+        _login_rate_limit_state[key] = timestamps
+
+
+def clear_login_rate_limit(username):
+    key = _login_rate_limit_key(username)
+    with _login_rate_limit_lock:
+        _login_rate_limit_state.pop(key, None)
 
 @app.teardown_appcontext
 def close_connection(exception):
@@ -176,11 +237,20 @@ def login():
     password = data.get('password', '')
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
+
+    allowed, retry_after = check_login_rate_limit(username)
+    if not allowed:
+        return jsonify({
+            'error': 'Too many login attempts. Please try again later.',
+            'retry_after': retry_after,
+        }), 429
     
     user_row = get_user_by_username(DATABASE_PATH, username)
     if not user_row or not check_password_hash(user_row['password_hash'], password):
+        record_failed_login(username)
         return jsonify({'error': 'Invalid username or password'}), 401
     
+    clear_login_rate_limit(username)
     user = User(id=user_row['id'], username=user_row['username'])
     login_user(user, remember=True)
     return jsonify({'status': 'success', 'username': user.username})
@@ -269,8 +339,10 @@ def rename_playlist(playlist_id):
     if not name:
         return jsonify({'error': 'Name required'}), 400
     db = get_db()
-    db.execute('UPDATE playlists SET name = ? WHERE id = ? AND user_id = ?', (name, playlist_id, current_user.id))
+    cursor = db.execute('UPDATE playlists SET name = ? WHERE id = ? AND user_id = ?', (name, playlist_id, current_user.id))
     db.commit()
+    if cursor.rowcount == 0:
+        return jsonify({'error': 'Playlist not found'}), 404
     return jsonify({'status': 'success'})
 
 @app.route('/api/playlists/<int:playlist_id>/cover', methods=['POST'])
@@ -328,6 +400,48 @@ def delete_playlist(playlist_id):
     db.commit()
     return jsonify({'status': 'success'})
 
+
+@app.route('/api/playlists/<int:playlist_id>/songs/order', methods=['PUT'])
+@login_required
+def reorder_playlist_songs(playlist_id):
+    db = get_db()
+    if not get_owned_playlist(db, playlist_id):
+        return jsonify({'error': 'Playlist not found'}), 404
+
+    data = request.get_json()
+    song_ids = data.get('song_ids', [])
+    if not isinstance(song_ids, list):
+        return jsonify({'error': 'song_ids must be a list'}), 400
+
+    try:
+        ordered_song_ids = [int(song_id) for song_id in song_ids]
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid song order'}), 400
+
+    if len(ordered_song_ids) != len(set(ordered_song_ids)):
+        return jsonify({'error': 'Duplicate song ids are not allowed'}), 400
+
+    cursor = db.execute(
+        '''
+        SELECT ps.song_id
+        FROM playlist_songs ps
+        JOIN songs s ON s.id = ps.song_id
+        WHERE ps.playlist_id = ? AND s.user_id = ?
+        ''',
+        (playlist_id, current_user.id)
+    )
+    existing_song_ids = {row['song_id'] for row in cursor.fetchall()}
+    if set(ordered_song_ids) != existing_song_ids:
+        return jsonify({'error': 'Song order must include every song in the playlist'}), 400
+
+    for position, song_id in enumerate(ordered_song_ids):
+        db.execute(
+            'UPDATE playlist_songs SET position = ? WHERE playlist_id = ? AND song_id = ?',
+            (position, playlist_id, song_id)
+        )
+    db.commit()
+    return jsonify({'status': 'success'})
+
 @app.route('/api/download', methods=['POST'])
 @login_required
 def download_song():
@@ -336,6 +450,9 @@ def download_song():
     playlist_ids = data.get('playlist_ids', [])
     if not url or not playlist_ids:
         return jsonify({'error': 'Missing data'}), 400
+    is_valid, validation_error = validate_youtube_url(url)
+    if not is_valid:
+        return jsonify({'error': validation_error}), 400
     try:
         playlist_ids = sorted({int(pid) for pid in playlist_ids})
     except (TypeError, ValueError):
@@ -368,7 +485,7 @@ def get_songs():
             SELECT s.* FROM songs s 
             JOIN playlist_songs ps ON s.id = ps.song_id 
             WHERE ps.playlist_id = ? AND s.user_id = ?
-            ORDER BY ps.added_at DESC
+            ORDER BY ps.position ASC, ps.added_at ASC
         ''', (playlist_id, current_user.id))
     else:
         if limit:
@@ -450,6 +567,57 @@ def log_play(song_id):
     db.execute('UPDATE songs SET play_count = play_count + 1 WHERE id = ? AND user_id = ?', (song_id, current_user.id))
     db.commit()
     return jsonify({'status': 'ok'})
+
+
+@app.route('/api/songs/<int:song_id>/lyrics')
+@login_required
+def get_song_lyrics(song_id):
+    db = get_db()
+    song = get_owned_song(db, song_id)
+    if not song:
+        return jsonify({'error': 'Not found'}), 404
+
+    return jsonify({
+        'lyrics': song['lyrics'] or '',
+        'synced_lyrics': song['synced_lyrics'] or '',
+    })
+
+
+@app.route('/api/songs/<int:song_id>/lyrics', methods=['POST'])
+@login_required
+def refresh_song_lyrics(song_id):
+    db = get_db()
+    song = get_owned_song(db, song_id)
+    if not song:
+        return jsonify({'error': 'Not found'}), 404
+
+    allowed, retry_after = check_lyrics_rate_limit(current_user.id)
+    if not allowed:
+        return jsonify({'error': 'Too many lyrics requests', 'retry_after': retry_after}), 429
+
+    try:
+        lyrics_data = search_lyrics(song['title'], song['artist'], song['duration_seconds'])
+    except Exception:
+        lyrics_data = None
+
+    if not lyrics_data:
+        return jsonify({'error': 'Lyrics not found'}), 404
+
+    db.execute(
+        'UPDATE songs SET lyrics = ?, synced_lyrics = ? WHERE id = ? AND user_id = ?',
+        (
+            lyrics_data.get('lyrics', ''),
+            lyrics_data.get('synced_lyrics', ''),
+            song_id,
+            current_user.id,
+        )
+    )
+    db.commit()
+
+    return jsonify({
+        'lyrics': lyrics_data.get('lyrics', ''),
+        'synced_lyrics': lyrics_data.get('synced_lyrics', ''),
+    })
 
 @app.route('/api/dashboard')
 @login_required
@@ -583,8 +751,6 @@ def delete_user(user_id):
 @login_required
 def reset_user_password(user_id):
     """Reset user password (admin only)"""
-    from werkzeug.security import generate_password_hash
-    
     if not is_admin():
         return jsonify({'error': 'Admin access required'}), 403
     
@@ -597,8 +763,7 @@ def reset_user_password(user_id):
     if len(new_password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters'}), 400
     
-    new_hash = generate_password_hash(new_password)
-    success = update_user_password(DATABASE_PATH, user_id, new_hash)
+    success = update_user_password(DATABASE_PATH, user_id, new_password)
     
     if not success:
         return jsonify({'error': 'User not found'}), 404
