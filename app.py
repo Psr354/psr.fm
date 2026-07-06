@@ -197,7 +197,7 @@ def me():
     return jsonify({
         'username': current_user.username,
         'id': current_user.id,
-        'can_add_users': current_user_can_manage_accounts()
+        'can_add_users': is_admin()
     })
 
 @app.route('/api/users', methods=['POST'])
