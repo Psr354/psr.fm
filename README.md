@@ -126,8 +126,6 @@ echo "SECRET_KEY=$(openssl rand -hex 32)" > .env
 touch database.db
 ```
 
-> 📝 **Note:** The `downloads/`, `static/album_art/`, and `logs/` folders will be **created automatically** by the application on first run.
-
 ### 4. Run with Docker
 
 ```bash
