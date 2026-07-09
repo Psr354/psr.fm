@@ -69,6 +69,8 @@ def process_download(task, db_path, download_dir, album_art_dir):
         artist = info.get('uploader', 'Unknown')
         thumbnail_url = info.get('thumbnail', '')
         duration = info.get('duration', 0) or 0
+        source_id = info.get('id') or ''
+        source_url = info.get('webpage_url') or url
 
     if duration and duration > MAX_DOWNLOAD_DURATION_SECONDS:
         raise Exception('Video exceeds the 10 minute limit')
@@ -104,8 +106,13 @@ def process_download(task, db_path, download_dir, album_art_dir):
             
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
-    cursor.execute('INSERT INTO songs (title, artist, filename, album_art, duration_seconds, user_id) VALUES (?, ?, ?, ?, ?, ?)',
-                 (title, artist, expected_file, album_art_filename, duration_seconds, user_id))
+    cursor.execute(
+        '''
+        INSERT INTO songs (title, artist, filename, album_art, duration_seconds, source_url, source_id, user_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''',
+        (title, artist, expected_file, album_art_filename, duration_seconds, source_url, source_id, user_id)
+    )
     song_id = cursor.lastrowid
     
     for pid in playlist_ids:
@@ -131,7 +138,7 @@ def process_download(task, db_path, download_dir, album_art_dir):
         print(f"[WARN] lyrics lookup failed for {song_id}: {exc}")
 
     if socketio_instance:
-        socketio_instance.emit('song_added', {'id': song_id, 'playlist_ids': playlist_ids, 'title': title, 'artist': artist, 'filename': expected_file, 'album_art': album_art_filename, 'duration_seconds': duration_seconds})
+        socketio_instance.emit('song_added', {'id': song_id, 'playlist_ids': playlist_ids, 'title': title, 'artist': artist, 'filename': expected_file, 'album_art': album_art_filename, 'duration_seconds': duration_seconds, 'source_url': source_url, 'source_id': source_id})
 
 def start_worker(db_path, download_dir, album_art_dir, sio):
     threading.Thread(target=download_worker, args=(db_path, download_dir, album_art_dir, sio), daemon=True).start()

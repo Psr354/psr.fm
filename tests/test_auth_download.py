@@ -46,16 +46,25 @@ class AuthAndDownloadTests(unittest.TestCase):
         finally:
             conn.close()
 
-    def _create_song(self, user_id=1, title='Test Track', artist='Test Artist', duration_seconds=123):
+    def _create_song(
+        self,
+        user_id=1,
+        title='Test Track',
+        artist='Test Artist',
+        duration_seconds=123,
+        filename='test-track.mp3',
+        source_url=None,
+        source_id=None,
+    ):
         conn = sqlite3.connect(self.app_module.DATABASE_PATH)
         try:
             cursor = conn.cursor()
             cursor.execute(
                 '''
-                INSERT INTO songs (title, artist, filename, duration_seconds, user_id)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO songs (title, artist, filename, duration_seconds, source_url, source_id, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ''',
-                (title, artist, 'test-track.mp3', duration_seconds, user_id),
+                (title, artist, filename, duration_seconds, source_url, source_id, user_id),
             )
             conn.commit()
             return cursor.lastrowid
@@ -163,6 +172,101 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(captured_tasks[0]['playlist_ids'], [playlist_id])
         self.assertEqual(captured_tasks[0]['user_id'], 1)
         self.assertEqual(captured_tasks[0]['url'], 'https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+
+    def test_download_existing_library_song_adds_without_queueing(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+        playlist_id = self._create_playlist()
+        self._create_song(
+            user_id=2,
+            title='Shared Track',
+            artist='Shared Artist',
+            filename='shared-track.mp3',
+            source_url='https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+            source_id='dQw4w9WgXcQ',
+        )
+
+        with patch.object(self.app_module.download_queue, 'put') as queue_put:
+            response = client.post(
+                '/api/download',
+                headers={'X-CSRF-Token': csrf_token},
+                json={
+                    'url': 'https://youtu.be/dQw4w9WgXcQ',
+                    'playlist_ids': [playlist_id],
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['status'], 'added_from_library')
+        queue_put.assert_not_called()
+
+        songs_response = client.get(f'/api/songs?playlist_id={playlist_id}')
+        self.assertEqual(songs_response.status_code, 200)
+        songs = songs_response.get_json()
+        self.assertEqual(len(songs), 1)
+        self.assertEqual(songs[0]['title'], 'Shared Track')
+
+    def test_library_song_can_be_added_to_current_user_playlist(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+        playlist_id = self._create_playlist()
+        source_song_id = self._create_song(
+            user_id=2,
+            title='Library Track',
+            artist='Library Artist',
+            filename='library-track.mp3',
+            source_url='https://www.youtube.com/watch?v=abc12345678',
+            source_id='abc12345678',
+        )
+
+        library_response = client.get('/api/library-songs')
+        self.assertEqual(library_response.status_code, 200)
+        self.assertEqual(library_response.get_json()[0]['id'], source_song_id)
+
+        add_response = client.post(
+            f'/api/library-songs/{source_song_id}/add',
+            headers={'X-CSRF-Token': csrf_token},
+            json={'playlist_ids': [playlist_id]},
+        )
+        self.assertEqual(add_response.status_code, 200)
+        self.assertTrue(add_response.get_json()['created'])
+
+        songs_response = client.get(f'/api/songs?playlist_id={playlist_id}')
+        self.assertEqual(songs_response.status_code, 200)
+        self.assertEqual(songs_response.get_json()[0]['source_id'], 'abc12345678')
+
+    def test_owned_song_can_be_added_to_another_playlist(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+        playlist_a = self._create_playlist(name='A')
+        playlist_b = self._create_playlist(name='B')
+        song_id = self._create_song(title='Reusable Track')
+        self._add_song_to_playlist(playlist_a, song_id, 0)
+
+        add_response = client.post(
+            f'/api/songs/{song_id}/playlists',
+            headers={'X-CSRF-Token': csrf_token},
+            json={'playlist_ids': [playlist_b]},
+        )
+
+        self.assertEqual(add_response.status_code, 200)
+        self.assertEqual(add_response.get_json()['playlist_ids'], [playlist_b])
+
+        songs_response = client.get(f'/api/songs?playlist_id={playlist_b}')
+        self.assertEqual(songs_response.status_code, 200)
+        self.assertEqual(songs_response.get_json()[0]['id'], song_id)
 
     def test_playlist_song_order_can_be_reordered(self):
         client = self.app_module.app.test_client()

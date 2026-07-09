@@ -12,6 +12,7 @@ import io
 import time
 from threading import Lock
 from dotenv import load_dotenv
+from urllib.parse import parse_qs, urlparse
 
 from services.database import (
     init_db, get_db_connection,
@@ -139,6 +140,99 @@ def get_owned_song(db, song_id):
         'SELECT * FROM songs WHERE id = ? AND user_id = ?',
         (song_id, current_user.id)
     ).fetchone()
+
+
+def extract_youtube_video_id(url):
+    parsed = urlparse((url or '').strip())
+    host = parsed.netloc.lower()
+    if host.startswith('www.'):
+        host = host[4:]
+
+    if host == 'youtu.be':
+        video_id = parsed.path.strip('/').split('/')[0]
+        return video_id or ''
+
+    if host in {'youtube.com', 'm.youtube.com'}:
+        if parsed.path == '/watch':
+            return parse_qs(parsed.query).get('v', [''])[0]
+        path_parts = [part for part in parsed.path.split('/') if part]
+        if len(path_parts) >= 2 and path_parts[0] in {'shorts', 'embed', 'live'}:
+            return path_parts[1]
+
+    return ''
+
+
+def get_global_song(db, song_id):
+    return db.execute('SELECT * FROM songs WHERE id = ?', (song_id,)).fetchone()
+
+
+def add_global_song_to_playlists(db, source_song, playlist_ids):
+    existing_song = None
+    if source_song['source_id']:
+        existing_song = db.execute(
+            'SELECT * FROM songs WHERE user_id = ? AND source_id = ? ORDER BY id ASC LIMIT 1',
+            (current_user.id, source_song['source_id'])
+        ).fetchone()
+    if not existing_song:
+        existing_song = db.execute(
+            '''
+            SELECT * FROM songs
+            WHERE user_id = ? AND filename = ?
+            ORDER BY id ASC LIMIT 1
+            ''',
+            (current_user.id, source_song['filename'])
+        ).fetchone()
+
+    if existing_song:
+        song_id = existing_song['id']
+        created = False
+    else:
+        cursor = db.execute(
+            '''
+            INSERT INTO songs (
+                title, artist, filename, album_art, duration_seconds,
+                source_url, source_id, lyrics, synced_lyrics, user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                source_song['title'],
+                source_song['artist'],
+                source_song['filename'],
+                source_song['album_art'],
+                source_song['duration_seconds'],
+                source_song['source_url'],
+                source_song['source_id'],
+                source_song['lyrics'],
+                source_song['synced_lyrics'],
+                current_user.id,
+            )
+        )
+        song_id = cursor.lastrowid
+        created = True
+
+    added_playlist_ids = []
+    skipped_playlist_ids = []
+    for playlist_id in playlist_ids:
+        cursor = db.execute(
+            'SELECT 1 FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
+            (playlist_id, song_id)
+        )
+        if cursor.fetchone():
+            skipped_playlist_ids.append(playlist_id)
+            continue
+        cursor = db.execute(
+            'SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_songs WHERE playlist_id = ?',
+            (playlist_id,)
+        )
+        next_position = cursor.fetchone()[0]
+        db.execute(
+            'INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
+            (playlist_id, song_id, next_position)
+        )
+        added_playlist_ids.append(playlist_id)
+
+    return song_id, created, added_playlist_ids, skipped_playlist_ids
 
 
 def check_lyrics_rate_limit(user_id):
@@ -468,8 +562,144 @@ def download_song():
     if len(owned_playlist_ids) != len(playlist_ids):
         return jsonify({'error': 'One or more playlists were not found'}), 404
 
+    source_id = extract_youtube_video_id(url)
+    if source_id:
+        source_song = db.execute(
+            'SELECT * FROM songs WHERE source_id = ? ORDER BY created_at ASC, id ASC LIMIT 1',
+            (source_id,)
+        ).fetchone()
+        if source_song:
+            song_id, created, added_playlist_ids, skipped_playlist_ids = add_global_song_to_playlists(
+                db,
+                source_song,
+                owned_playlist_ids,
+            )
+            db.commit()
+            return jsonify({
+                'status': 'added_from_library',
+                'song_id': song_id,
+                'created': created,
+                'playlist_ids': added_playlist_ids,
+                'skipped_playlist_ids': skipped_playlist_ids,
+                'title': source_song['title'],
+                'artist': source_song['artist'],
+            })
+
     download_queue.put({'url': url, 'playlist_ids': owned_playlist_ids, 'user_id': current_user.id})
     return jsonify({'status': 'processing', 'url': url})
+
+
+@app.route('/api/library-songs', methods=['GET'])
+@login_required
+def get_library_songs():
+    query = request.args.get('q', '').strip()
+    search_param = f"%{query}%"
+    db = get_db()
+    params = [current_user.id]
+    where_clause = ''
+    if query:
+        where_clause = 'WHERE s.title LIKE ? OR s.artist LIKE ?'
+        params.extend([search_param, search_param])
+
+    cursor = db.execute(
+        f'''
+        WITH grouped AS (
+            SELECT
+                MIN(s.id) AS id,
+                COUNT(DISTINCT s.user_id) AS owner_count,
+                MAX(CASE WHEN s.user_id = ? THEN 1 ELSE 0 END) AS in_my_library,
+                MAX(s.created_at) AS latest_created_at
+            FROM songs s
+            {where_clause}
+            GROUP BY CASE
+                WHEN s.source_id IS NOT NULL AND s.source_id != '' THEN 'src:' || s.source_id
+                ELSE 'file:' || s.filename
+            END
+        )
+        SELECT
+            s.id, s.title, s.artist, s.filename, s.album_art, s.duration_seconds,
+            s.source_url, s.source_id, grouped.owner_count, grouped.in_my_library
+        FROM grouped
+        JOIN songs s ON s.id = grouped.id
+        ORDER BY grouped.latest_created_at DESC, s.title COLLATE NOCASE ASC
+        LIMIT 100
+        ''',
+        tuple(params)
+    )
+    return jsonify([dict(row) for row in cursor.fetchall()])
+
+
+@app.route('/api/library-songs/check-url')
+@login_required
+def check_library_song_url():
+    url = request.args.get('url', '').strip()
+    is_valid, validation_error = validate_youtube_url(url)
+    if not is_valid:
+        return jsonify({'matched': False, 'error': validation_error}), 400
+
+    source_id = extract_youtube_video_id(url)
+    if not source_id:
+        return jsonify({'matched': False})
+
+    db = get_db()
+    song = db.execute(
+        '''
+        SELECT id, title, artist, filename, album_art, duration_seconds, source_url, source_id
+        FROM songs
+        WHERE source_id = ?
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+        ''',
+        (source_id,)
+    ).fetchone()
+    if not song:
+        return jsonify({'matched': False, 'source_id': source_id})
+
+    return jsonify({'matched': True, 'song': dict(song)})
+
+
+@app.route('/api/library-songs/<int:song_id>/add', methods=['POST'])
+@login_required
+def add_library_song(song_id):
+    data = request.get_json() or {}
+    playlist_ids = data.get('playlist_ids', [])
+    if not playlist_ids:
+        return jsonify({'error': 'Select at least one playlist'}), 400
+
+    try:
+        playlist_ids = sorted({int(pid) for pid in playlist_ids})
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid playlist data'}), 400
+
+    db = get_db()
+    placeholders = ','.join('?' for _ in playlist_ids)
+    cursor = db.execute(
+        f'SELECT id FROM playlists WHERE user_id = ? AND id IN ({placeholders})',
+        (current_user.id, *playlist_ids)
+    )
+    owned_playlist_ids = [row['id'] for row in cursor.fetchall()]
+    if len(owned_playlist_ids) != len(playlist_ids):
+        return jsonify({'error': 'One or more playlists were not found'}), 404
+
+    source_song = get_global_song(db, song_id)
+    if not source_song:
+        return jsonify({'error': 'Library song not found'}), 404
+
+    new_song_id, created, added_playlist_ids, skipped_playlist_ids = add_global_song_to_playlists(
+        db,
+        source_song,
+        owned_playlist_ids,
+    )
+    db.commit()
+    return jsonify({
+        'status': 'success',
+        'song_id': new_song_id,
+        'created': created,
+        'playlist_ids': added_playlist_ids,
+        'skipped_playlist_ids': skipped_playlist_ids,
+        'title': source_song['title'],
+        'artist': source_song['artist'],
+    })
 
 @app.route('/api/songs', methods=['GET'])
 @login_required
@@ -504,19 +734,92 @@ def delete_song(song_id):
     if not song:
         return jsonify({'error': 'Not found'}), 404
 
-    mp3 = os.path.join(LIBRARY_DIR, song['filename'])
-    if os.path.exists(mp3):
-        os.remove(mp3)
+    filename_ref_count = db.execute(
+        'SELECT COUNT(*) AS count FROM songs WHERE filename = ?',
+        (song['filename'],)
+    ).fetchone()['count']
+    album_art_ref_count = 0
     if song['album_art']:
-        art = os.path.join(ALBUM_ART_DIR, song['album_art'])
-        if os.path.exists(art):
-            os.remove(art)
+        album_art_ref_count = db.execute(
+            'SELECT COUNT(*) AS count FROM songs WHERE album_art = ?',
+            (song['album_art'],)
+        ).fetchone()['count']
 
     cursor.execute('DELETE FROM playlist_songs WHERE song_id = ?', (song_id,))
     cursor.execute('DELETE FROM listening_logs WHERE song_id = ?', (song_id,))
     cursor.execute('DELETE FROM songs WHERE id = ?', (song_id,))
     db.commit()
+
+    if filename_ref_count <= 1:
+        mp3 = os.path.join(LIBRARY_DIR, song['filename'])
+        if os.path.exists(mp3):
+            os.remove(mp3)
+    if song['album_art'] and album_art_ref_count <= 1:
+        art = os.path.join(ALBUM_ART_DIR, song['album_art'])
+        if os.path.exists(art):
+            os.remove(art)
+
     return jsonify({'status': 'success'})
+
+
+@app.route('/api/songs/<int:song_id>/playlists', methods=['POST'])
+@login_required
+def add_owned_song_to_playlists(song_id):
+    data = request.get_json() or {}
+    playlist_ids = data.get('playlist_ids', [])
+    if not playlist_ids:
+        return jsonify({'error': 'Select at least one playlist'}), 400
+
+    try:
+        playlist_ids = sorted({int(pid) for pid in playlist_ids})
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid playlist data'}), 400
+
+    db = get_db()
+    song = get_owned_song(db, song_id)
+    if not song:
+        return jsonify({'error': 'Song not found'}), 404
+
+    placeholders = ','.join('?' for _ in playlist_ids)
+    cursor = db.execute(
+        f'SELECT id FROM playlists WHERE user_id = ? AND id IN ({placeholders})',
+        (current_user.id, *playlist_ids)
+    )
+    owned_playlist_ids = [row['id'] for row in cursor.fetchall()]
+    if len(owned_playlist_ids) != len(playlist_ids):
+        return jsonify({'error': 'One or more playlists were not found'}), 404
+
+    added_playlist_ids = []
+    skipped_playlist_ids = []
+    for playlist_id in owned_playlist_ids:
+        existing = db.execute(
+            'SELECT 1 FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
+            (playlist_id, song_id)
+        ).fetchone()
+        if existing:
+            skipped_playlist_ids.append(playlist_id)
+            continue
+
+        cursor = db.execute(
+            'SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_songs WHERE playlist_id = ?',
+            (playlist_id,)
+        )
+        next_position = cursor.fetchone()[0]
+        db.execute(
+            'INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
+            (playlist_id, song_id, next_position)
+        )
+        added_playlist_ids.append(playlist_id)
+
+    db.commit()
+    return jsonify({
+        'status': 'success',
+        'song_id': song_id,
+        'playlist_ids': added_playlist_ids,
+        'skipped_playlist_ids': skipped_playlist_ids,
+        'title': song['title'],
+        'artist': song['artist'],
+    })
 
 @app.route('/audio/<filename>')
 @login_required
@@ -727,22 +1030,31 @@ def delete_user(user_id):
     if not success:
         return jsonify({'error': 'Failed to delete user'}), 500
     
-    # Delete MP3 files and album art from filesystem
+    conn = get_db_connection(DATABASE_PATH)
     for file_info in user_files:
-        mp3_path = os.path.join(LIBRARY_DIR, file_info['filename'])
-        if os.path.exists(mp3_path):
-            try:
-                os.remove(mp3_path)
-            except Exception as e:
-                print(f"[WARN] Failed to delete {mp3_path}: {e}")
-        
-        if file_info.get('album_art'):
-            art_path = os.path.join(ALBUM_ART_DIR, file_info['album_art'])
-            if os.path.exists(art_path):
-                try:
-                    os.remove(art_path)
-                except Exception as e:
-                    print(f"[WARN] Failed to delete {art_path}: {e}")
+        try:
+            filename_count = conn.execute(
+                'SELECT COUNT(*) AS count FROM songs WHERE filename = ?',
+                (file_info['filename'],)
+            ).fetchone()['count']
+            if filename_count == 0:
+                mp3_path = os.path.join(LIBRARY_DIR, file_info['filename'])
+                if os.path.exists(mp3_path):
+                    os.remove(mp3_path)
+
+            if file_info.get('album_art'):
+                album_art_count = conn.execute(
+                    'SELECT COUNT(*) AS count FROM songs WHERE album_art = ?',
+                    (file_info['album_art'],)
+                ).fetchone()['count']
+                if album_art_count == 0:
+                    art_path = os.path.join(ALBUM_ART_DIR, file_info['album_art'])
+                    if os.path.exists(art_path):
+                        os.remove(art_path)
+        except Exception as e:
+            target = file_info.get('filename') or file_info.get('album_art') or 'unknown file'
+            print(f"[WARN] Failed to delete {target}: {e}")
+    conn.close()
     
     return jsonify({'status': 'success', 'message': 'User and all data deleted'})
 

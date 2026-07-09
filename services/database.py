@@ -1,5 +1,25 @@
 import sqlite3
+from urllib.parse import parse_qs, urlparse
 from werkzeug.security import generate_password_hash
+
+
+def extract_youtube_video_id(url):
+    parsed = urlparse((url or '').strip())
+    host = parsed.netloc.lower()
+    if host.startswith('www.'):
+        host = host[4:]
+
+    if host == 'youtu.be':
+        return parsed.path.strip('/').split('/')[0] or ''
+
+    if host in {'youtube.com', 'm.youtube.com'}:
+        if parsed.path == '/watch':
+            return parse_qs(parsed.query).get('v', [''])[0]
+        path_parts = [part for part in parsed.path.split('/') if part]
+        if len(path_parts) >= 2 and path_parts[0] in {'shorts', 'embed', 'live'}:
+            return path_parts[1]
+
+    return ''
 
 
 def get_db_connection(db_path):
@@ -72,6 +92,8 @@ def init_db(db_path):
             filename TEXT NOT NULL,
             album_art TEXT,
             duration_seconds INTEGER,
+            source_url TEXT,
+            source_id TEXT,
             play_count INTEGER DEFAULT 0,
             lyrics TEXT,
             synced_lyrics TEXT,
@@ -113,7 +135,11 @@ def init_db(db_path):
                 filename TEXT NOT NULL,
                 album_art TEXT,
                 duration_seconds INTEGER,
+                source_url TEXT,
+                source_id TEXT,
                 play_count INTEGER DEFAULT 0,
+                lyrics TEXT,
+                synced_lyrics TEXT,
                 user_id INTEGER NOT NULL DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -121,8 +147,8 @@ def init_db(db_path):
         
         cursor.execute('''
             INSERT INTO songs_new 
-            SELECT id, title, artist, filename, album_art, duration_seconds, 
-                   COALESCE(play_count, 0), 1, created_at 
+            SELECT id, title, artist, filename, album_art, duration_seconds,
+                   NULL, NULL, COALESCE(play_count, 0), NULL, NULL, 1, created_at
             FROM songs
         ''')
         
@@ -136,9 +162,29 @@ def init_db(db_path):
             cursor.execute("ALTER TABLE songs ADD COLUMN lyrics TEXT")
         if 'synced_lyrics' not in song_cols:
             cursor.execute("ALTER TABLE songs ADD COLUMN synced_lyrics TEXT")
+        if 'source_url' not in song_cols:
+            cursor.execute("ALTER TABLE songs ADD COLUMN source_url TEXT")
+        if 'source_id' not in song_cols:
+            cursor.execute("ALTER TABLE songs ADD COLUMN source_id TEXT")
         if 'user_id' not in song_cols:
             cursor.execute("ALTER TABLE songs ADD COLUMN user_id INTEGER DEFAULT 1")
             cursor.execute("UPDATE songs SET user_id = 1 WHERE user_id IS NULL")
+
+    cursor.execute(
+        '''
+        SELECT id, source_url FROM songs
+        WHERE (source_id IS NULL OR source_id = '')
+          AND source_url IS NOT NULL
+          AND source_url != ''
+        '''
+    )
+    for row in cursor.fetchall():
+        source_id = extract_youtube_video_id(row['source_url'])
+        if source_id:
+            cursor.execute(
+                'UPDATE songs SET source_id = ? WHERE id = ?',
+                (source_id, row['id'])
+            )
 
     # ==========================================
     # PLAYLIST_SONGS JUNCTION TABLE (Many-to-Many)

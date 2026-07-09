@@ -27,10 +27,11 @@
             <nav class="nav-menu">
                 <button id="home-btn" class="nav-item active"><i class="fas fa-home"></i> Home</button>
                 <button id="search-btn" class="nav-item"><i class="fas fa-search"></i> Search</button>
+                <button id="library-btn" class="nav-item"><i class="fas fa-record-vinyl"></i> Library Songs</button>
                 <button id="global-download-btn" class="nav-item nav-item-accent"><i class="fas fa-download"></i> Download Song</button>
-		<button id="users-btn" class="nav-item nav-item-accent" style="display: none;">
-   			 <i class="fas fa-users-cog"></i> User Management
-		</button>
+                <button id="users-btn" class="nav-item nav-item-accent" style="display: none;">
+                    <i class="fas fa-users-cog"></i> User Management
+                </button>
             </nav>
 
             <div class="playlist-section">
@@ -99,166 +100,178 @@
                 <div class="search-container"><i class="fas fa-search"></i><input type="text" id="search-input" placeholder="Search by title or artist..."></div>
                 <div id="search-results" class="songs-list"></div>
             </div>
+
+            <div id="library-view" class="view">
+                <div class="page-heading simple-heading">
+                    <div>
+                        <p class="eyebrow">Shared music</p>
+                        <h2>Library Songs</h2>
+                        <p class="page-subtitle">All downloaded songs on this server. Add them without pasting a link again.</p>
+                    </div>
+                </div>
+                <div class="search-container"><i class="fas fa-search"></i><input type="text" id="library-search-input" placeholder="Search all downloaded songs..."></div>
+                <div id="library-songs-list" class="songs-list library-songs-list"></div>
+            </div>
         </main>
     </div>
 
-<div id="users-view" class="view admin-view">
-    <div class="admin-toolbar">
-        <div>
-            <div class="eyebrow admin-eyebrow">Admin Panel</div>
-            <h2>User Management</h2>
-            <p class="page-subtitle">Manage server access, roles, and account recovery.</p>
-        </div>
-        <button id="add-user-btn-main" class="btn-primary compact-action admin-add-user">
-            <i class="fas fa-user-plus"></i> Add New User
-        </button>
-    </div>
-
-    <!-- Stats Summary -->
-    <div class="user-stats-grid" id="user-stats-grid">
-        <div class="user-stat-card">
-            <div class="user-stat-icon" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">
-                <i class="fas fa-users"></i>
-            </div>
-            <div class="user-stat-info">
-                <div class="user-stat-value" id="stat-total-users">0</div>
-                <div class="user-stat-label">Total Users</div>
-            </div>
-        </div>
-        <div class="user-stat-card">
-            <div class="user-stat-icon" style="background: rgba(29, 185, 84, 0.15); color: var(--accent-color);">
-                <i class="fas fa-user-shield"></i>
-            </div>
-            <div class="user-stat-info">
-                <div class="user-stat-value" id="stat-admins">0</div>
-                <div class="user-stat-label">Administrators</div>
-            </div>
-        </div>
-        <div class="user-stat-card">
-            <div class="user-stat-icon" style="background: rgba(192, 132, 252, 0.15); color: #c084fc;">
-                <i class="fas fa-user"></i>
-            </div>
-            <div class="user-stat-info">
-                <div class="user-stat-value" id="stat-regular-users">0</div>
-                <div class="user-stat-label">Regular Users</div>
-            </div>
-        </div>
-        <div class="user-stat-card">
-            <div class="user-stat-icon" style="background: rgba(251, 191, 36, 0.15); color: #fbbf24;">
-                <i class="fas fa-music"></i>
-            </div>
-            <div class="user-stat-info">
-                <div class="user-stat-value" id="stat-total-songs">0</div>
-                <div class="user-stat-label">Total Songs</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Search & Filter Bar -->
-    <div class="user-filter-bar">
-        <div class="user-search-wrapper">
-            <i class="fas fa-search"></i>
-            <input type="text" id="user-search-input" placeholder="Search users by username...">
-        </div>
-        <div class="user-filter-group">
-            <button class="user-filter-btn active" data-filter="all">All</button>
-            <button class="user-filter-btn" data-filter="admin">
-                <i class="fas fa-shield-alt"></i> Admins
-            </button>
-            <button class="user-filter-btn" data-filter="user">
-                <i class="fas fa-user"></i> Users
-            </button>
-        </div>
-    </div>
-
-    <!-- Users Table -->
-    <div class="users-table-panel">
-        <div class="users-table-titlebar">
+    <div id="users-view" class="view admin-view">
+        <div class="admin-toolbar">
             <div>
-                <h3>Accounts</h3>
-                <p>Role and recovery controls for every user.</p>
+                <div class="eyebrow admin-eyebrow">Admin Panel</div>
+                <h2>User Management</h2>
+                <p class="page-subtitle">Manage server access, roles, and account recovery.</p>
             </div>
-            <i class="fas fa-lock"></i>
+            <button id="add-user-btn-main" class="btn-primary compact-action admin-add-user">
+                <i class="fas fa-user-plus"></i> Add New User
+            </button>
         </div>
-    <div class="users-table-wrapper">
-        <table class="users-table">
-            <thead>
-                <tr>
-                    <th>User</th>
-                    <th>Role</th>
-                    <th>Playlists</th>
-                    <th>Songs</th>
-                    <th>Joined</th>
-                    <th style="text-align: right;">Actions</th>
-                </tr>
-            </thead>
-            <tbody id="users-table-body">
-                <tr>
-                    <td colspan="6">
-                        <div class="users-loading">
-                            <i class="fas fa-spinner fa-spin"></i>
-                            <span>Loading users...</span>
+
+        <!-- Stats Summary -->
+        <div class="user-stats-grid" id="user-stats-grid">
+            <div class="user-stat-card">
+                <div class="user-stat-icon" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">
+                    <i class="fas fa-users"></i>
+                </div>
+                <div class="user-stat-info">
+                    <div class="user-stat-value" id="stat-total-users">0</div>
+                    <div class="user-stat-label">Total Users</div>
+                </div>
+            </div>
+            <div class="user-stat-card">
+                <div class="user-stat-icon" style="background: rgba(29, 185, 84, 0.15); color: var(--accent-color);">
+                    <i class="fas fa-user-shield"></i>
+                </div>
+                <div class="user-stat-info">
+                    <div class="user-stat-value" id="stat-admins">0</div>
+                    <div class="user-stat-label">Administrators</div>
+                </div>
+            </div>
+            <div class="user-stat-card">
+                <div class="user-stat-icon" style="background: rgba(192, 132, 252, 0.15); color: #c084fc;">
+                    <i class="fas fa-user"></i>
+                </div>
+                <div class="user-stat-info">
+                    <div class="user-stat-value" id="stat-regular-users">0</div>
+                    <div class="user-stat-label">Regular Users</div>
+                </div>
+            </div>
+            <div class="user-stat-card">
+                <div class="user-stat-icon" style="background: rgba(251, 191, 36, 0.15); color: #fbbf24;">
+                    <i class="fas fa-music"></i>
+                </div>
+                <div class="user-stat-info">
+                    <div class="user-stat-value" id="stat-total-songs">0</div>
+                    <div class="user-stat-label">Total Songs</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Search & Filter Bar -->
+        <div class="user-filter-bar">
+            <div class="user-search-wrapper">
+                <i class="fas fa-search"></i>
+                <input type="text" id="user-search-input" placeholder="Search users by username...">
+            </div>
+            <div class="user-filter-group">
+                <button class="user-filter-btn active" data-filter="all">All</button>
+                <button class="user-filter-btn" data-filter="admin">
+                    <i class="fas fa-shield-alt"></i> Admins
+                </button>
+                <button class="user-filter-btn" data-filter="user">
+                    <i class="fas fa-user"></i> Users
+                </button>
+            </div>
+        </div>
+
+        <!-- Users Table -->
+        <div class="users-table-panel">
+            <div class="users-table-titlebar">
+                <div>
+                    <h3>Accounts</h3>
+                    <p>Role and recovery controls for every user.</p>
+                </div>
+                <i class="fas fa-lock"></i>
+            </div>
+            <div class="users-table-wrapper">
+                <table class="users-table">
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Role</th>
+                            <th>Playlists</th>
+                            <th>Songs</th>
+                            <th>Joined</th>
+                            <th style="text-align: right;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-table-body">
+                        <tr>
+                            <td colspan="6">
+                                <div class="users-loading">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <span>Loading users...</span>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Confirm Modal -->
+    <div id="confirm-modal" class="modal">
+        <div class="modal-content confirm-modal-content">
+            <div class="confirm-modal-icon" id="confirm-modal-icon">
+                <i class="fas fa-exclamation-triangle"></i>
+            </div>
+            <h3 id="confirm-modal-title">Are you sure?</h3>
+            <p id="confirm-modal-message" class="confirm-modal-message"></p>
+            <div id="confirm-modal-input-wrapper" class="confirm-modal-input-wrapper" style="display: none;">
+                <label>Type <strong id="confirm-modal-keyword"></strong> to confirm:</label>
+                <input type="text" id="confirm-modal-input" placeholder="Type here...">
+            </div>
+            <div class="modal-actions">
+                <button id="confirm-modal-cancel" class="btn-secondary">Cancel</button>
+                <button id="confirm-modal-confirm" class="btn-danger">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Role Change Modal -->
+    <div id="role-modal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <h3>Change User Role</h3>
+            <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">
+                Select new role for <strong id="role-username-display"></strong>
+            </p>
+            <div class="role-options">
+                <label class="role-option">
+                    <input type="radio" name="role-choice" value="user">
+                    <div class="role-option-content">
+                        <div class="role-option-title">
+                            <i class="fas fa-user"></i> Regular User
                         </div>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-    </div>
-    </div>
-</div>
-
-<!-- Custom Confirm Modal -->
-<div id="confirm-modal" class="modal">
-    <div class="modal-content confirm-modal-content">
-        <div class="confirm-modal-icon" id="confirm-modal-icon">
-            <i class="fas fa-exclamation-triangle"></i>
-        </div>
-        <h3 id="confirm-modal-title">Are you sure?</h3>
-        <p id="confirm-modal-message" class="confirm-modal-message"></p>
-        <div id="confirm-modal-input-wrapper" class="confirm-modal-input-wrapper" style="display: none;">
-            <label>Type <strong id="confirm-modal-keyword"></strong> to confirm:</label>
-            <input type="text" id="confirm-modal-input" placeholder="Type here...">
-        </div>
-        <div class="modal-actions">
-            <button id="confirm-modal-cancel" class="btn-secondary">Cancel</button>
-            <button id="confirm-modal-confirm" class="btn-danger">Confirm</button>
-        </div>
-    </div>
-</div>
-
-<!-- Role Change Modal -->
-<div id="role-modal" class="modal">
-    <div class="modal-content" style="max-width: 400px;">
-        <h3>Change User Role</h3>
-        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">
-            Select new role for <strong id="role-username-display"></strong>
-        </p>
-        <div class="role-options">
-            <label class="role-option">
-                <input type="radio" name="role-choice" value="user">
-                <div class="role-option-content">
-                    <div class="role-option-title">
-                        <i class="fas fa-user"></i> Regular User
+                        <div class="role-option-desc">Can manage own playlists and songs</div>
                     </div>
-                    <div class="role-option-desc">Can manage own playlists and songs</div>
-                </div>
-            </label>
-            <label class="role-option">
-                <input type="radio" name="role-choice" value="admin">
-                <div class="role-option-content">
-                    <div class="role-option-title">
-                        <i class="fas fa-user-shield"></i> Administrator
+                </label>
+                <label class="role-option">
+                    <input type="radio" name="role-choice" value="admin">
+                    <div class="role-option-content">
+                        <div class="role-option-title">
+                            <i class="fas fa-user-shield"></i> Administrator
+                        </div>
+                        <div class="role-option-desc">Full access including user management</div>
                     </div>
-                    <div class="role-option-desc">Full access including user management</div>
-                </div>
-            </label>
-        </div>
-        <div class="modal-actions">
-            <button id="cancel-role-change" class="btn-secondary">Cancel</button>
-            <button id="confirm-role-change" class="btn-primary">Save Changes</button>
+                </label>
+            </div>
+            <div class="modal-actions">
+                <button id="cancel-role-change" class="btn-secondary">Cancel</button>
+                <button id="confirm-role-change" class="btn-primary">Save Changes</button>
+            </div>
         </div>
     </div>
-</div>
 
     <div class="toast-container" id="toast-container"></div>
     <div id="download-progress-wrapper" class="download-progress-wrapper">
@@ -282,6 +295,7 @@
         <div class="modal-content">
             <h3>Download Song</h3>
             <input type="text" id="global-url-input" placeholder="Paste YouTube URL...">
+            <div id="download-library-warning" class="library-warning" style="display: none;"></div>
             <p class="field-hint">Add to playlists:</p>
             <div id="playlist-checkboxes" class="checkbox-list"></div>
             <div class="modal-actions"><button id="cancel-global-download-btn" class="btn-secondary">Cancel</button><button id="save-global-download-btn" class="btn-primary">Download</button></div>
@@ -414,29 +428,28 @@
         </div>
     </div>
 
-<!-- Reset Password Modal -->
-<div id="reset-password-modal" class="modal">
-    <div class="modal-content" style="max-width: 400px;">
-        <h3>Reset Password</h3>
-        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">
-            Set a new password for user: <strong id="reset-username-display"></strong>
-        </p>
-        <div class="form-group">
-            <label>New Password (min 6 characters)</label>
-            <input type="password" id="reset-password-input" placeholder="Enter new password">
-        </div>
-        <div class="form-group">
-            <label>Confirm Password</label>
-            <input type="password" id="reset-password-confirm" placeholder="Confirm new password">
-        </div>
-        <div id="reset-password-error" class="error-message" style="display: none;"></div>
-        <div class="modal-actions">
-            <button id="cancel-reset-password" class="btn-secondary">Cancel</button>
-            <button id="confirm-reset-password" class="btn-primary">Reset Password</button>
+    <!-- Reset Password Modal -->
+    <div id="reset-password-modal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <h3>Reset Password</h3>
+            <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">
+                Set a new password for user: <strong id="reset-username-display"></strong>
+            </p>
+            <div class="form-group">
+                <label>New Password (min 6 characters)</label>
+                <input type="password" id="reset-password-input" placeholder="Enter new password">
+            </div>
+            <div class="form-group">
+                <label>Confirm Password</label>
+                <input type="password" id="reset-password-confirm" placeholder="Confirm new password">
+            </div>
+            <div id="reset-password-error" class="error-message" style="display: none;"></div>
+            <div class="modal-actions">
+                <button id="cancel-reset-password" class="btn-secondary">Cancel</button>
+                <button id="confirm-reset-password" class="btn-primary">Reset Password</button>
+            </div>
         </div>
     </div>
-</div>
-
 
 </body>
 </html>

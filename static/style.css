@@ -382,6 +382,50 @@ body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color
 .checkbox-row:hover { background: var(--bg-highlight); }
 .checkbox-row input { width: 18px; height: 18px; accent-color: var(--accent-color); flex-shrink: 0; }
 .empty-compact { color: var(--text-secondary); font-size: 13px; padding: 8px; }
+.library-warning {
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid rgba(251, 191, 36, 0.28);
+    border-radius: 8px;
+    background: rgba(251, 191, 36, 0.09);
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.45;
+}
+.library-warning i { color: var(--amber-accent); margin-top: 2px; }
+.library-warning strong { display: block; margin-bottom: 2px; }
+.library-warning span { color: var(--text-secondary); }
+.library-song-item { cursor: default; }
+.library-song-meta {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 124px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+}
+.library-song-meta i { color: var(--cyan-accent); margin-right: 4px; }
+.in-library-pill {
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(29, 185, 84, 0.12);
+    color: var(--accent-color);
+    border: 1px solid rgba(29, 185, 84, 0.24);
+}
+.library-add-btn {
+    flex-shrink: 0;
+    padding: 10px 14px;
+}
+.song-add-playlist {
+    flex-shrink: 0;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
 
 .search-container { margin-bottom: 32px; position: relative; max-width: 520px; }
 .search-container i { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: var(--text-muted); }
@@ -472,6 +516,9 @@ body, .app-container {
     .song-art { width: 44px; height: 44px; }
     .song-duration { display: none; }
     .song-stats { display: none; }
+    .library-song-meta { display: none; }
+    .library-add-btn { padding: 10px 12px; }
+    .song-add-playlist { padding: 10px 12px; }
     .section-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
     .download-progress-wrapper { right: 16px; left: 16px; bottom: 154px; width: auto; }
     .queue-popover { left: 16px; right: 16px; width: auto; bottom: 154px; }

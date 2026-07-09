@@ -62,7 +62,10 @@ document.addEventListener('DOMContentLoaded', () => {
         currentLyricIndex: -1,
         lyricsLoading: false,
         currentSongMeta: null,
-        lyricsRequestToken: 0
+        lyricsRequestToken: 0,
+        matchedLibrarySong: null,
+        pendingLibrarySong: null,
+        librarySongs: []
     };
 
     // ==========================================
@@ -108,7 +111,8 @@ document.addEventListener('DOMContentLoaded', () => {
         views: {
             dashboard: document.getElementById('dashboard-view'),
             playlist: document.getElementById('playlist-view'),
-            search: document.getElementById('search-view')
+            search: document.getElementById('search-view'),
+            library: document.getElementById('library-view')
         },
         playlistCoverImg: document.getElementById('playlist-cover-img'),
         playlistTitle: document.getElementById('playlist-title'),
@@ -390,7 +394,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (el.lyricsTitle) el.lyricsTitle.textContent = song?.title || 'Lyrics';
             if (el.lyricsSubtitle) {
-                el.lyricsSubtitle.textContent = song?.artist ? `${song.artist}${song.duration_seconds ? ` • ${formatTime(song.duration_seconds)}` : ''}` : 'Cached lyrics';
+                el.lyricsSubtitle.textContent = song?.artist ? `${song.artist}${song.duration_seconds ? ` - ${formatTime(song.duration_seconds)}` : ''}` : 'Cached lyrics';
             }
 
             if (state.lyricsPanelOpen) {
@@ -792,9 +796,9 @@ function showDeleteConfirm(userId, username) {
             You are about to delete user <strong style="color: var(--danger-color);">${escapeHtml(username)}</strong>.<br><br>
             This will permanently delete:
             <div style="text-align: left; margin-top: 8px; padding-left: 20px;">
-                • All their playlists<br>
-                • All their songs & MP3 files<br>
-                • All listening history
+                &bull; All their playlists<br>
+                &bull; All their songs & MP3 files<br>
+                &bull; All listening history
             </div>
             <br><strong>This action cannot be undone.</strong>
         `,
@@ -1097,22 +1101,22 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     });
 
     document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        // Close all modals
-        document.querySelectorAll('.modal').forEach(modalEl => {
-            modalEl.style.display = 'none';
-        });
-        
-        // Close popovers
-        if (el.loopPopover) el.loopPopover.classList.remove('active');
-        
-        // ✅ Exit User Management view
-        const usersViewActive = el.usersView?.classList.contains('active');
-        if (usersViewActive) {
-            showView('dashboard');
+        if (e.key === 'Escape') {
+            // Close all modals
+            document.querySelectorAll('.modal').forEach(modalEl => {
+                modalEl.style.display = 'none';
+            });
+
+            // Close popovers
+            if (el.loopPopover) el.loopPopover.classList.remove('active');
+
+            // Exit User Management view
+            const usersViewActive = el.usersView?.classList.contains('active');
+            if (usersViewActive) {
+                showView('dashboard');
+            }
         }
-    }
-});
+    });
     // ==========================================
     // MOBILE MENU
     // ==========================================
@@ -1130,6 +1134,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     // ==========================================
     document.getElementById('home-btn')?.addEventListener('click', () => showView('dashboard'));
     document.getElementById('search-btn')?.addEventListener('click', () => showView('search'));
+    document.getElementById('library-btn')?.addEventListener('click', () => showView('library'));
 
     // ==========================================
     // DOWNLOAD MODAL
@@ -1137,8 +1142,33 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     const globalDownloadBtn = document.getElementById('global-download-btn');
     const globalDownloadModal = document.getElementById('global-download-modal');
     const globalUrlInput = document.getElementById('global-url-input');
+    const libraryWarning = document.getElementById('download-library-warning');
+    const downloadModalTitle = globalDownloadModal?.querySelector('h3');
+    const downloadSubmitBtn = document.getElementById('save-global-download-btn');
 
-    async function openDownloadModal() {
+    function setLibraryWarning(song) {
+        state.matchedLibrarySong = song || null;
+        if (!libraryWarning) return;
+        if (!song) {
+            libraryWarning.style.display = 'none';
+            libraryWarning.innerHTML = '';
+            if (!state.pendingLibrarySong && downloadSubmitBtn) downloadSubmitBtn.innerText = 'Download';
+            return;
+        }
+        if (!state.pendingLibrarySong && downloadSubmitBtn) downloadSubmitBtn.innerText = 'Add';
+        libraryWarning.style.display = 'flex';
+        libraryWarning.innerHTML = `
+            <i class="fas fa-circle-info"></i>
+            <div>
+                <strong>${escapeHtml(song.notice_title || 'This song is already in Library Songs.')}</strong>
+                <span>${escapeHtml(song.title)}${song.artist ? ` - ${escapeHtml(song.artist)}` : ''}</span>
+            </div>
+        `;
+    }
+
+    async function openDownloadModal(librarySong = null) {
+        state.pendingLibrarySong = librarySong;
+        state.matchedLibrarySong = librarySong;
         const playlists = await (await fetch('/api/playlists')).json();
         const list = document.getElementById('playlist-checkboxes');
         if (!list) return;
@@ -1150,26 +1180,37 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                 list.innerHTML += `<label class="checkbox-row"><input type="checkbox" value="${p.id}"><span>${escapeHtml(p.name)}</span></label>`;
             });
         }
+        if (downloadModalTitle) downloadModalTitle.innerText = librarySong ? (librarySong.modal_title || 'Add from Library Songs') : 'Download Song';
+        if (downloadSubmitBtn) downloadSubmitBtn.innerText = librarySong ? 'Add' : 'Download';
+        if (globalUrlInput) {
+            globalUrlInput.value = librarySong ? (librarySong.source_url || `${librarySong.title} - ${librarySong.artist || 'Unknown'}`) : '';
+            globalUrlInput.disabled = Boolean(librarySong);
+        }
+        setLibraryWarning(librarySong);
         if (globalDownloadModal) globalDownloadModal.style.display = 'flex';
         if (globalUrlInput) globalUrlInput.focus();
     }
 
-    globalDownloadBtn?.addEventListener('click', openDownloadModal);
-    document.getElementById('dashboard-download-btn')?.addEventListener('click', openDownloadModal);
+    globalDownloadBtn?.addEventListener('click', () => openDownloadModal());
+    document.getElementById('dashboard-download-btn')?.addEventListener('click', () => openDownloadModal());
     document.addEventListener('click', (e) => {
         if (e.target.closest('[data-open-download]')) openDownloadModal();
     });
 
     document.getElementById('cancel-global-download-btn')?.addEventListener('click', () => {
         if (globalDownloadModal) globalDownloadModal.style.display = 'none';
+        if (globalUrlInput) globalUrlInput.disabled = false;
+        state.pendingLibrarySong = null;
+        setLibraryWarning(null);
     });
 
     async function submitDownload() {
         const url = globalUrlInput?.value.trim();
         const checked = Array.from(document.querySelectorAll('#playlist-checkboxes input:checked')).map(cb => parseInt(cb.value));
-        if (!url) return showToast('URL is required', 'error');
+        if (!url && !state.pendingLibrarySong) return showToast('URL is required', 'error');
         if (checked.length === 0) return showToast('Select at least one playlist', 'error');
 
+        const librarySong = state.pendingLibrarySong || state.matchedLibrarySong;
         const downloadBtn = document.getElementById('save-global-download-btn');
         if (downloadBtn) {
             downloadBtn.disabled = true;
@@ -1178,10 +1219,11 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
         let res, data;
         try {
-            res = await fetch('/api/download', {
+            const endpoint = librarySong ? (librarySong.add_endpoint || `/api/library-songs/${librarySong.id}/add`) : '/api/download';
+            res = await fetch(endpoint, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({url, playlist_ids: checked})
+                body: JSON.stringify(librarySong ? {playlist_ids: checked} : {url, playlist_ids: checked})
             });
             data = await res.json().catch(() => ({}));
         } catch (err) {
@@ -1190,14 +1232,29 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         } finally {
             if (downloadBtn) {
                 downloadBtn.disabled = false;
-                downloadBtn.innerText = 'Download';
+                downloadBtn.innerText = librarySong ? 'Add' : 'Download';
             }
         }
 
         if (!res.ok) return showToast(data.error || 'Download request failed', 'error');
 
         if (globalDownloadModal) globalDownloadModal.style.display = 'none';
-        if (globalUrlInput) globalUrlInput.value = '';
+        if (globalUrlInput) {
+            globalUrlInput.value = '';
+            globalUrlInput.disabled = false;
+        }
+        state.pendingLibrarySong = null;
+        setLibraryWarning(null);
+
+        if (data.status === 'added_from_library' || librarySong) {
+            const skipped = data.skipped_playlist_ids?.length || 0;
+            showToast(skipped ? 'Song already existed in some playlists' : 'Added to selected playlists', 'success');
+            if (state.currentPlaylist) openPlaylist(state.currentPlaylist);
+            loadDashboard();
+            loadLibrarySongs();
+            return;
+        }
+
         showToast('Downloading to selected playlists!', 'success');
         if (el.downloadWrapper) el.downloadWrapper.classList.add('active');
     }
@@ -1206,6 +1263,21 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     globalUrlInput?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') submitDownload();
     });
+    globalUrlInput?.addEventListener('input', debounce(async (e) => {
+        if (state.pendingLibrarySong) return;
+        const url = e.target.value.trim();
+        if (!url || !url.includes('youtu')) {
+            setLibraryWarning(null);
+            return;
+        }
+        try {
+            const res = await fetch(`/api/library-songs/check-url?url=${encodeURIComponent(url)}`);
+            const data = await res.json().catch(() => ({}));
+            setLibraryWarning(res.ok && data.matched ? data.song : null);
+        } catch (err) {
+            setLibraryWarning(null);
+        }
+    }, 350));
 
     // ==========================================
     // QUEUE MANAGEMENT
@@ -1283,6 +1355,10 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         } else if (viewName === 'search') {
             document.getElementById('search-btn')?.classList.add('active');
             document.getElementById('search-input')?.focus();
+        } else if (viewName === 'library') {
+            document.getElementById('library-btn')?.classList.add('active');
+            document.getElementById('library-search-input')?.focus();
+            loadLibrarySongs();
         } else if (viewName === 'users') {
             if (el.usersBtn) el.usersBtn.classList.add('active');
         }
@@ -1317,6 +1393,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
         loadDashboard();
         loadPlaylists();
+        loadLibrarySongs();
     });
 
     socket.on('download_error', (data) => {
@@ -1714,6 +1791,66 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
     }, 300));
 
+    async function loadLibrarySongs(query = '') {
+        const libraryList = document.getElementById('library-songs-list');
+        if (!libraryList) return;
+        try {
+            const suffix = query ? `?q=${encodeURIComponent(query)}` : '';
+            const songs = await (await fetch(`/api/library-songs${suffix}`)).json();
+            state.librarySongs = songs;
+            renderLibrarySongs(songs);
+        } catch (err) {
+            renderEmptyState(libraryList, {
+                icon: 'fa-triangle-exclamation',
+                title: 'Library unavailable',
+                body: 'Try opening Library Songs again in a moment.'
+            });
+        }
+    }
+
+    function renderLibrarySongs(songs) {
+        const container = document.getElementById('library-songs-list');
+        if (!container) return;
+
+        container.innerHTML = '';
+        if (!songs.length) {
+            renderEmptyState(container, {
+                icon: 'fa-record-vinyl',
+                title: 'No songs in Library Songs yet',
+                body: 'Downloaded songs from every account will appear here.'
+            });
+            return;
+        }
+
+        songs.forEach((song) => {
+            const div = document.createElement('div');
+            div.className = 'song-item library-song-item';
+            div.setAttribute('data-id', String(song.id));
+            div.innerHTML = `
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
+                <div class="song-info">
+                    <div class="song-title">${escapeHtml(song.title)}</div>
+                    <div class="song-artist">${escapeHtml(song.artist || 'Unknown')}</div>
+                </div>
+                <div class="library-song-meta">
+                    <span><i class="fas fa-users"></i> Added by ${song.owner_count || 1} user${Number(song.owner_count || 1) === 1 ? '' : 's'}</span>
+                    ${song.in_my_library ? '<span class="in-library-pill">Already in your library</span>' : ''}
+                </div>
+                <div class="song-duration">${formatTime(song.duration_seconds)}</div>
+                <button class="btn-primary compact library-add-btn" data-id="${song.id}"><i class="fas fa-plus"></i> Add</button>
+            `;
+            div.querySelector('.library-add-btn')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openDownloadModal(song);
+            });
+            container.appendChild(div);
+        });
+    }
+
+    document.getElementById('library-search-input')?.addEventListener('input', debounce((e) => {
+        loadLibrarySongs(e.target.value.trim());
+    }, 300));
+
     // ==========================================
     // PLAYLISTS
     // ==========================================
@@ -1776,7 +1913,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     function updatePlaylistMeta() {
         if (!el.playlistMeta) return;
         const totalSec = state.currentPlaylistSongs.reduce((acc, s) => acc + (s.duration_seconds || 0), 0);
-        el.playlistMeta.innerText = `${state.currentPlaylistSongs.length} songs • ${formatTime(totalSec)}`;
+        el.playlistMeta.innerText = `${state.currentPlaylistSongs.length} songs - ${formatTime(totalSec)}`;
     }
 
     async function savePlaylistSongOrder(songIds) {
@@ -1901,6 +2038,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         const activeView = document.querySelector('.view.active');
         const isContainerInActiveView = activeView && activeView.contains(container);
         const canReorder = containerId === 'playlist-songs-list' && Boolean(state.currentPlaylistId);
+        const canAddToPlaylist = containerId === 'search-results';
 
         songs.forEach((song, index) => {
             const div = document.createElement('div');
@@ -1923,13 +2061,31 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                 <div class="eq-container"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>
                 <div class="song-info"><div class="song-title">${escapeHtml(song.title)}</div><div class="song-artist">${escapeHtml(song.artist || 'Unknown')}</div></div>
                 <div class="song-duration">${formatTime(song.duration_seconds)}</div>
+                ${canAddToPlaylist ? `<button class="btn-secondary compact song-add-playlist" data-id="${song.id}"><i class="fas fa-plus"></i> Add</button>` : ''}
                 ${showDelete ? `<button class="icon-btn delete-song" data-id="${song.id}"><i class="fas fa-trash"></i></button>` : ''}
             `;
             div.addEventListener('click', (e) => {
-                if (!e.target.closest('.delete-song') && !e.target.closest('.drag-handle')) playSong(songs, index);
+                if (!e.target.closest('.delete-song') && !e.target.closest('.drag-handle') && !e.target.closest('.song-add-playlist')) playSong(songs, index);
             });
             container.appendChild(div);
         });
+
+        if (canAddToPlaylist) {
+            container.querySelectorAll('.song-add-playlist').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const songId = Number.parseInt(e.currentTarget.getAttribute('data-id'), 10);
+                    const song = songs.find(item => item.id === songId);
+                    if (!song) return;
+                    openDownloadModal({
+                        ...song,
+                        add_endpoint: `/api/songs/${song.id}/playlists`,
+                        modal_title: 'Add to Playlist',
+                        notice_title: 'Add this song to another playlist.'
+                    });
+                });
+            });
+        }
 
         if (canReorder) {
             attachPlaylistReorder(container);
