@@ -58,9 +58,12 @@ document.addEventListener('DOMContentLoaded', () => {
         lyricsPanelOpen: false,
         syncedLyrics: [],
         plainLyrics: '',
+        rawSyncedLyrics: '',
+        lyricsStatusValue: 'none',
         currentLyricsSongId: null,
         currentLyricIndex: -1,
         lyricsLoading: false,
+        lyricsEditing: false,
         currentSongMeta: null,
         lyricsRequestToken: 0,
         matchedLibrarySong: null,
@@ -104,8 +107,14 @@ document.addEventListener('DOMContentLoaded', () => {
         lyricsSubtitle: document.getElementById('lyrics-subtitle'),
         lyricsStatus: document.getElementById('lyrics-status'),
         lyricsBody: document.getElementById('lyrics-body'),
+        lyricsEditor: document.getElementById('lyrics-editor'),
+        lyricsPlainInput: document.getElementById('lyrics-plain-input'),
+        lyricsSyncedInput: document.getElementById('lyrics-synced-input'),
         lyricsCloseBtn: document.getElementById('lyrics-close-btn'),
         lyricsRetryBtn: document.getElementById('lyrics-retry-btn'),
+        lyricsEditBtn: document.getElementById('lyrics-edit-btn'),
+        lyricsCancelEditBtn: document.getElementById('lyrics-cancel-edit-btn'),
+        lyricsSaveBtn: document.getElementById('lyrics-save-btn'),
         sidebar: document.querySelector('.sidebar'),
         mobileMenuBtn: document.getElementById('mobile-menu-btn'),
         views: {
@@ -159,20 +168,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function parseLRC(lrc) {
         if (!lrc) return [];
-        return String(lrc)
-            .split(/\r?\n/)
-            .map((line) => {
-                const match = line.trim().match(/^\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]\s*(.*)$/);
-                if (!match) return null;
+        const timestampPattern = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
+        const lines = [];
+        String(lrc).split(/\r?\n/).forEach((rawLine) => {
+            const line = rawLine.trim();
+            if (!line) return;
+            const matches = [...line.matchAll(timestampPattern)];
+            if (!matches.length) return;
+            const lastMatch = matches[matches.length - 1];
+            const text = line.slice(lastMatch.index + lastMatch[0].length).trim();
+            matches.forEach((match) => {
                 const minutes = parseInt(match[1], 10);
                 const seconds = parseInt(match[2], 10);
                 const fraction = (match[3] || '0').padEnd(3, '0').slice(0, 3);
-                return {
+                lines.push({
                     timestamp: minutes * 60 + seconds + parseInt(fraction, 10) / 1000,
-                    text: match[4] || ''
-                };
-            })
-            .filter(Boolean)
+                    text
+                });
+            });
+        });
+        return lines
             .sort((a, b) => a.timestamp - b.timestamp);
     }
 
@@ -236,6 +251,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (el.lyricsStatus) el.lyricsStatus.textContent = message;
     }
 
+    function setLyricsEditing(isEditing) {
+        state.lyricsEditing = isEditing;
+        if (el.lyricsBody) el.lyricsBody.style.display = isEditing ? 'none' : '';
+        if (el.lyricsEditor) el.lyricsEditor.style.display = isEditing ? 'flex' : 'none';
+        if (el.lyricsEditBtn) el.lyricsEditBtn.style.display = isEditing || !state.currentLyricsSongId ? 'none' : '';
+        if (el.lyricsCancelEditBtn) el.lyricsCancelEditBtn.style.display = isEditing ? '' : 'none';
+        if (el.lyricsSaveBtn) el.lyricsSaveBtn.style.display = isEditing ? '' : 'none';
+        if (el.lyricsRetryBtn) el.lyricsRetryBtn.style.display = isEditing ? 'none' : '';
+        if (isEditing) {
+            if (el.lyricsPlainInput) el.lyricsPlainInput.value = state.plainLyrics || '';
+            if (el.lyricsSyncedInput) el.lyricsSyncedInput.value = state.rawSyncedLyrics || '';
+            el.lyricsPlainInput?.focus();
+            setLyricsStatus('Editing lyrics for this song.');
+        }
+    }
+
     function openLyricsPanel() {
         state.lyricsPanelOpen = true;
         el.lyricsPanel?.classList.add('open');
@@ -265,6 +296,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const hasSynced = Array.isArray(state.syncedLyrics) && state.syncedLyrics.length > 0;
         const hasPlain = Boolean(state.plainLyrics && state.plainLyrics.trim());
+        if (state.lyricsEditing) {
+            setLyricsEditing(true);
+            return;
+        }
 
         if (!state.currentLyricsSongId) {
             el.lyricsTitle.textContent = 'Select a song';
@@ -276,6 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
             setLyricsStatus('Choose a track to load lyrics.');
+            if (el.lyricsEditBtn) el.lyricsEditBtn.style.display = 'none';
             return;
         }
 
@@ -311,7 +347,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 <p>No lyrics found for this song.</p>
             </div>
         `;
-        setLyricsStatus('No lyrics cached yet. Try again to fetch from LRCLIB.');
+        setLyricsStatus(state.lyricsStatusValue === 'not_found'
+            ? 'Lyrics were not found. You can add them manually.'
+            : 'No lyrics cached yet. Try again to fetch from LRCLIB.');
+        if (el.lyricsEditBtn) el.lyricsEditBtn.style.display = '';
     }
 
     function updateSyncedLyrics(forceScroll = false) {
@@ -358,8 +397,11 @@ document.addEventListener('DOMContentLoaded', () => {
         state.currentLyricsSongId = songId;
         state.syncedLyrics = [];
         state.plainLyrics = '';
+        state.rawSyncedLyrics = '';
+        state.lyricsStatusValue = 'none';
         state.currentLyricIndex = -1;
         state.lyricsLoading = true;
+        setLyricsEditing(false);
 
         if (el.lyricsTitle) el.lyricsTitle.textContent = 'Loading...';
         setLyricsStatus('Fetching lyrics cache...');
@@ -386,7 +428,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             state.plainLyrics = data.lyrics || '';
-            state.syncedLyrics = parseLRC(data.synced_lyrics || '');
+            state.rawSyncedLyrics = data.synced_lyrics || '';
+            state.syncedLyrics = parseLRC(state.rawSyncedLyrics);
+            state.lyricsStatusValue = data.lyrics_status || 'none';
 
             const song = state.currentSongMeta && String(state.currentSongMeta.id) === String(songId)
                 ? state.currentSongMeta
@@ -407,18 +451,55 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             state.syncedLyrics = [];
             state.plainLyrics = '';
+            state.rawSyncedLyrics = '';
+            state.lyricsStatusValue = 'not_found';
             if (el.lyricsTitle) el.lyricsTitle.textContent = 'Lyrics';
-            setLyricsStatus('No lyrics found. Try Again to re-fetch.');
+            setLyricsStatus('No lyrics found. You can add them manually.');
             if (state.lyricsPanelOpen) {
                 el.lyricsBody.innerHTML = `
                     <div class="lyrics-empty">
                         <i class="fas fa-compact-disc"></i>
-                        <p>No lyrics found.</p>
+                        <p>No lyrics found. Add lyrics manually or try again.</p>
                     </div>
                 `;
             }
         } finally {
             state.lyricsLoading = false;
+        }
+    }
+
+    async function saveManualLyrics() {
+        if (!state.currentLyricsSongId) return;
+        const lyrics = el.lyricsPlainInput?.value || '';
+        const syncedLyrics = el.lyricsSyncedInput?.value || '';
+        if (el.lyricsSaveBtn) {
+            el.lyricsSaveBtn.disabled = true;
+            el.lyricsSaveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        }
+        try {
+            const res = await fetch(`/api/songs/${state.currentLyricsSongId}/lyrics`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({lyrics, synced_lyrics: syncedLyrics})
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Failed to save lyrics');
+
+            state.plainLyrics = data.lyrics || '';
+            state.rawSyncedLyrics = data.synced_lyrics || '';
+            state.syncedLyrics = parseLRC(state.rawSyncedLyrics);
+            state.lyricsStatusValue = data.lyrics_status || 'manual';
+            setLyricsEditing(false);
+            renderLyricsPanel();
+            updateSyncedLyrics(true);
+            showToast('Lyrics saved', 'success');
+        } catch (err) {
+            showToast(err.message || 'Failed to save lyrics', 'error');
+        } finally {
+            if (el.lyricsSaveBtn) {
+                el.lyricsSaveBtn.disabled = false;
+                el.lyricsSaveBtn.innerHTML = '<i class="fas fa-check"></i> Save';
+            }
         }
     }
 
@@ -1656,7 +1737,16 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     });
 
     el.lyricsCloseBtn?.addEventListener('click', closeLyricsPanel);
+    el.lyricsEditBtn?.addEventListener('click', () => {
+        if (state.currentLyricsSongId) setLyricsEditing(true);
+    });
+    el.lyricsCancelEditBtn?.addEventListener('click', () => {
+        setLyricsEditing(false);
+        renderLyricsPanel();
+    });
+    el.lyricsSaveBtn?.addEventListener('click', saveManualLyrics);
     el.lyricsRetryBtn?.addEventListener('click', () => {
+        setLyricsEditing(false);
         if (state.currentPlayingSongId) {
             loadLyrics(state.currentPlayingSongId, true);
         }

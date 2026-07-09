@@ -378,8 +378,17 @@
                 <p>No lyrics loaded yet.</p>
             </div>
         </div>
+        <div id="lyrics-editor" class="lyrics-editor" style="display: none;">
+            <label for="lyrics-plain-input">Plain lyrics</label>
+            <textarea id="lyrics-plain-input" placeholder="Paste plain lyrics here..."></textarea>
+            <label for="lyrics-synced-input">Synced LRC lyrics</label>
+            <textarea id="lyrics-synced-input" placeholder="[00:12.34] Lyric line"></textarea>
+        </div>
         <div class="lyrics-actions">
-            <button id="lyrics-retry-btn" class="btn-secondary compact">Try Again</button>
+            <button id="lyrics-edit-btn" class="btn-secondary compact"><i class="fas fa-pen"></i> Edit</button>
+            <button id="lyrics-cancel-edit-btn" class="btn-secondary compact" style="display: none;"><i class="fas fa-times"></i> Cancel</button>
+            <button id="lyrics-save-btn" class="btn-primary compact" style="display: none;"><i class="fas fa-check"></i> Save</button>
+            <button id="lyrics-retry-btn" class="btn-secondary compact"><i class="fas fa-rotate-right"></i> Try Again</button>
         </div>
     </aside>
 

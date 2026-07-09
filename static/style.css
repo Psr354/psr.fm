@@ -350,10 +350,95 @@ body { font-family: 'Inter', sans-serif; background-color: var(--bg-main); color
     border-radius: 8px;
 }
 
+.lyrics-editor {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.lyrics-editor label {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+}
+
+.lyrics-editor textarea {
+    width: 100%;
+    min-height: 120px;
+    flex: 1;
+    resize: vertical;
+    border: 1px solid rgba(29, 185, 84, 0.18);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.24);
+    color: var(--text-primary);
+    padding: 12px;
+    line-height: 1.55;
+    font: 13px/1.55 'Inter', sans-serif;
+    outline: none;
+}
+
+.lyrics-editor textarea:focus {
+    border-color: rgba(29, 185, 84, 0.55);
+    box-shadow: 0 0 0 3px rgba(29, 185, 84, 0.1);
+}
+
 .lyrics-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(29, 185, 84, 0.16);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent);
+}
+
+.lyrics-actions button {
+    min-height: 38px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+#lyrics-edit-btn {
+    border-color: rgba(56, 189, 248, 0.42);
+    color: #7dd3fc;
+    background: rgba(56, 189, 248, 0.08);
+}
+
+#lyrics-edit-btn:hover {
+    border-color: rgba(56, 189, 248, 0.72);
+    background: rgba(56, 189, 248, 0.15);
+    color: #e0f2fe;
+}
+
+#lyrics-retry-btn {
+    border-color: rgba(29, 185, 84, 0.4);
+    color: #07150b;
+    background: var(--accent-color);
+}
+
+#lyrics-retry-btn:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+    color: #041107;
+    box-shadow: 0 8px 18px rgba(29, 185, 84, 0.22);
+}
+
+#lyrics-cancel-edit-btn {
+    border-color: rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.035);
+}
+
+#lyrics-save-btn {
+    padding-left: 18px;
+    padding-right: 18px;
 }
 
 .toast-container { position: fixed; bottom: 110px; right: 24px; display: flex; flex-direction: column; gap: 12px; z-index: 1000; pointer-events: none; }

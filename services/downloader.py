@@ -133,7 +133,10 @@ def process_download(task, db_path, download_dir, album_art_dir):
                 song_id,
                 lyrics_data.get('lyrics', ''),
                 lyrics_data.get('synced_lyrics', ''),
+                'found',
             )
+        else:
+            update_song_lyrics(db_path, song_id, '', '', 'not_found')
     except Exception as exc:
         print(f"[WARN] lyrics lookup failed for {song_id}: {exc}")
 

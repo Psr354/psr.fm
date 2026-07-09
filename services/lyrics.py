@@ -17,7 +17,8 @@ _last_request_time = 0.0
 _BRACKETED_SUFFIX_RE = re.compile(r'\s*[\[(](?:official|video|lyrics?|audio|mv|clean|explicit|visualizer|hd|4k)[^\])]*[\])]', re.IGNORECASE)
 _FEAT_RE = re.compile(r'\s*(?:\(|\[)?\b(?:feat\.?|ft\.?|featuring)\b[^\])]*', re.IGNORECASE)
 _WHITESPACE_RE = re.compile(r'\s+')
-_LRC_LINE_RE = re.compile(r'^\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]\s*(.*)$')
+_LRC_TIMESTAMP_RE = re.compile(r'\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]')
+_ARTIST_TITLE_RE = re.compile(r'^\s*(?P<artist>[^-–—:|]+)\s*[-–—:|]\s*(?P<title>.+?)\s*$')
 
 
 def _throttled_request(method, url, **kwargs):
@@ -63,17 +64,43 @@ def parse_lrc(lrc_content):
         line = raw_line.strip()
         if not line:
             continue
-        match = _LRC_LINE_RE.match(line)
-        if not match:
+        matches = list(_LRC_TIMESTAMP_RE.finditer(line))
+        if not matches:
             continue
-        minutes = int(match.group(1))
-        seconds = int(match.group(2))
-        fraction = match.group(3) or '0'
-        milliseconds = int(fraction.ljust(3, '0')[:3])
-        timestamp = minutes * 60 + seconds + milliseconds / 1000
-        text = match.group(4).strip()
-        lines.append({'timestamp': timestamp, 'text': text})
-    return lines
+        text = line[matches[-1].end():].strip()
+        for match in matches:
+            minutes = int(match.group(1))
+            seconds = int(match.group(2))
+            fraction = match.group(3) or '0'
+            milliseconds = int(fraction.ljust(3, '0')[:3])
+            timestamp = minutes * 60 + seconds + milliseconds / 1000
+            lines.append({'timestamp': timestamp, 'text': text})
+    return sorted(lines, key=lambda item: item['timestamp'])
+
+
+def _build_search_variants(title, artist):
+    clean_title = clean_text(title)
+    clean_artist = clean_text(artist)
+    variants = []
+
+    if clean_title:
+        variants.append((clean_title, clean_artist))
+
+    match = _ARTIST_TITLE_RE.match(str(title or ''))
+    if match:
+        split_artist = clean_text(match.group('artist'))
+        split_title = clean_text(match.group('title'))
+        if split_title:
+            variants.append((split_title, split_artist or clean_artist))
+
+    unique = []
+    seen = set()
+    for variant_title, variant_artist in variants:
+        key = (variant_title.lower(), variant_artist.lower())
+        if variant_title and key not in seen:
+            seen.add(key)
+            unique.append((variant_title, variant_artist))
+    return unique
 
 
 def _normalize_lyrics_record(record):
@@ -103,11 +130,7 @@ def _score_candidate(candidate, title, artist, duration):
     return (duration_diff, title_score, artist_score)
 
 
-def search_lyrics(title, artist, duration):
-    clean_title = clean_text(title)
-    clean_artist = clean_text(artist)
-    if not clean_title:
-        return None
+def _search_lyrics_variant(clean_title, clean_artist, duration):
 
     params = {'track_name': clean_title, 'duration': int(duration or 0)}
     if clean_artist:
@@ -160,3 +183,15 @@ def search_lyrics(title, artist, duration):
         return None
 
     return _normalize_lyrics_record(best_candidate)
+
+
+def search_lyrics(title, artist, duration):
+    variants = _build_search_variants(title, artist)
+    if not variants:
+        return None
+
+    for clean_title, clean_artist in variants:
+        result = _search_lyrics_variant(clean_title, clean_artist, duration)
+        if result:
+            return result
+    return None

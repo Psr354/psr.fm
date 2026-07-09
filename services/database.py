@@ -97,6 +97,8 @@ def init_db(db_path):
             play_count INTEGER DEFAULT 0,
             lyrics TEXT,
             synced_lyrics TEXT,
+            lyrics_status TEXT DEFAULT 'none',
+            lyrics_updated_at TIMESTAMP,
             user_id INTEGER NOT NULL DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -140,6 +142,8 @@ def init_db(db_path):
                 play_count INTEGER DEFAULT 0,
                 lyrics TEXT,
                 synced_lyrics TEXT,
+                lyrics_status TEXT DEFAULT 'none',
+                lyrics_updated_at TIMESTAMP,
                 user_id INTEGER NOT NULL DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -148,7 +152,7 @@ def init_db(db_path):
         cursor.execute('''
             INSERT INTO songs_new 
             SELECT id, title, artist, filename, album_art, duration_seconds,
-                   NULL, NULL, COALESCE(play_count, 0), NULL, NULL, 1, created_at
+                   NULL, NULL, COALESCE(play_count, 0), NULL, NULL, 'none', NULL, 1, created_at
             FROM songs
         ''')
         
@@ -162,6 +166,20 @@ def init_db(db_path):
             cursor.execute("ALTER TABLE songs ADD COLUMN lyrics TEXT")
         if 'synced_lyrics' not in song_cols:
             cursor.execute("ALTER TABLE songs ADD COLUMN synced_lyrics TEXT")
+        if 'lyrics_status' not in song_cols:
+            cursor.execute("ALTER TABLE songs ADD COLUMN lyrics_status TEXT DEFAULT 'none'")
+            cursor.execute(
+                '''
+                UPDATE songs
+                SET lyrics_status = CASE
+                    WHEN COALESCE(lyrics, '') != '' OR COALESCE(synced_lyrics, '') != '' THEN 'found'
+                    ELSE 'none'
+                END
+                WHERE lyrics_status IS NULL OR lyrics_status = ''
+                '''
+            )
+        if 'lyrics_updated_at' not in song_cols:
+            cursor.execute("ALTER TABLE songs ADD COLUMN lyrics_updated_at TIMESTAMP")
         if 'source_url' not in song_cols:
             cursor.execute("ALTER TABLE songs ADD COLUMN source_url TEXT")
         if 'source_id' not in song_cols:
@@ -419,13 +437,17 @@ def update_user_role(database_path, user_id, new_role):
         conn.close()
 
 
-def update_song_lyrics(database_path, song_id, lyrics, synced_lyrics):
+def update_song_lyrics(database_path, song_id, lyrics, synced_lyrics, status='found'):
     conn = get_db_connection(database_path)
     try:
         cursor = conn.cursor()
         cursor.execute(
-            'UPDATE songs SET lyrics = ?, synced_lyrics = ? WHERE id = ?',
-            (lyrics, synced_lyrics, song_id)
+            '''
+            UPDATE songs
+            SET lyrics = ?, synced_lyrics = ?, lyrics_status = ?, lyrics_updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            ''',
+            (lyrics, synced_lyrics, status, song_id)
         )
         conn.commit()
         return cursor.rowcount > 0

@@ -299,9 +299,10 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_lyrics_helpers_parse_and_clean(self):
         self.assertEqual(clean_text('Song Title (Official Video) feat. Guest'), 'Song Title')
-        parsed = parse_lrc('[00:01.00] Hello\n[00:05.50] World')
-        self.assertEqual(len(parsed), 2)
-        self.assertAlmostEqual(parsed[1]['timestamp'], 5.5, places=1)
+        parsed = parse_lrc('[00:01.00][00:03.00] Hello\n[00:05.50] World')
+        self.assertEqual(len(parsed), 3)
+        self.assertAlmostEqual(parsed[1]['timestamp'], 3.0, places=1)
+        self.assertAlmostEqual(parsed[2]['timestamp'], 5.5, places=1)
 
     def test_lyrics_endpoints(self):
         client = self.app_module.app.test_client()
@@ -314,7 +315,10 @@ class AuthAndDownloadTests(unittest.TestCase):
 
         get_response = client.get(f'/api/songs/{song_id}/lyrics')
         self.assertEqual(get_response.status_code, 200)
-        self.assertEqual(get_response.get_json(), {'lyrics': '', 'synced_lyrics': ''})
+        get_data = get_response.get_json()
+        self.assertEqual(get_data['lyrics'], '')
+        self.assertEqual(get_data['synced_lyrics'], '')
+        self.assertEqual(get_data['lyrics_status'], 'none')
 
         with patch.object(self.app_module, 'search_lyrics', return_value={
             'lyrics': 'Plain lyrics',
@@ -331,6 +335,22 @@ class AuthAndDownloadTests(unittest.TestCase):
         refreshed = client.get(f'/api/songs/{song_id}/lyrics')
         self.assertEqual(refreshed.get_json()['lyrics'], 'Plain lyrics')
         self.assertTrue(refreshed.get_json()['synced_lyrics'].startswith('[00:01.00]'))
+        self.assertEqual(refreshed.get_json()['lyrics_status'], 'found')
+
+        manual_response = client.put(
+            f'/api/songs/{song_id}/lyrics',
+            headers={'X-CSRF-Token': csrf_token},
+            json={
+                'lyrics': 'Manual plain',
+                'synced_lyrics': '[00:02.00] Manual synced',
+            },
+        )
+        self.assertEqual(manual_response.status_code, 200)
+        self.assertEqual(manual_response.get_json()['lyrics_status'], 'manual')
+
+        manual_refreshed = client.get(f'/api/songs/{song_id}/lyrics')
+        self.assertEqual(manual_refreshed.get_json()['lyrics'], 'Manual plain')
+        self.assertEqual(manual_refreshed.get_json()['lyrics_status'], 'manual')
 
     def test_lyrics_manual_refresh_rate_limit(self):
         client = self.app_module.app.test_client()
