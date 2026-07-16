@@ -1,4 +1,4 @@
- services:
+services:
   psr_fm:
     build: .
     container_name: psr_fm_app

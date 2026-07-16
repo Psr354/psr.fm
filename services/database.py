@@ -116,9 +116,9 @@ def init_db(db_path):
                 song_id INTEGER, 
                 added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 position INTEGER DEFAULT 0,
-                  PRIMARY KEY (playlist_id, song_id),
-                  FOREIGN KEY (playlist_id) REFERENCES playlists (id) ON DELETE CASCADE,
-                  FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE CASCADE
+            PRIMARY KEY (playlist_id, song_id),
+            FOREIGN KEY (playlist_id) REFERENCES playlists (id) ON DELETE CASCADE,
+            FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE CASCADE
             )
         ''')
         

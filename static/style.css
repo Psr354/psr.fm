@@ -154,6 +154,7 @@ button { touch-action: manipulation; }
 .btn-danger:hover { background-color: var(--danger-color); color: white; }
 .icon-btn { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 16px; width: 44px; height: 44px; padding: 0; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 44px; border-radius: 50%; transition: 0.2s; }
 .icon-btn:hover { color: var(--text-primary); background-color: var(--bg-highlight); }
+.download-song:hover { color: var(--cyan-accent) !important; background-color: rgba(56, 189, 248, 0.12) !important; }
 
 .player-bar { height: 90px; background: rgba(0,0,0,0.96); border-top: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; padding: 0 24px; z-index: 10; backdrop-filter: blur(14px); }
 .now-playing { display: flex; align-items: center; gap: 16px; width: 30%; min-width: 200px; }

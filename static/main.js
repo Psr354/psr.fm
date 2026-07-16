@@ -208,6 +208,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return parseFloat((b / Math.pow(1024, i)).toFixed(2)) + ' ' + ['Bytes', 'KB', 'MB', 'GB', 'TB'][i];
     }
 
+    function triggerDownload(songId) {
+        const a = document.createElement('a');
+        a.href = `/api/songs/${songId}/download`;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    }
+
     function debounce(f, w) {
         let t;
         return (...a) => {
@@ -2271,11 +2280,16 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                     ${song.in_my_library ? '<span class="in-library-pill">Already in your library</span>' : ''}
                 </div>
                 <div class="song-duration">${formatTime(song.duration_seconds)}</div>
+                <button class="icon-btn download-song" data-id="${song.id}" title="Download"><i class="fas fa-download"></i></button>
                 <button class="btn-primary compact library-add-btn" data-id="${song.id}"><i class="fas fa-plus"></i> Add</button>
             `;
             div.querySelector('.library-add-btn')?.addEventListener('click', (e) => {
                 e.stopPropagation();
                 openDownloadModal(song);
+            });
+            div.querySelector('.download-song')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                triggerDownload(song.id);
             });
             container.appendChild(div);
         });
@@ -2496,10 +2510,13 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                 <div class="song-info"><div class="song-title">${escapeHtml(song.title)}</div><div class="song-artist">${escapeHtml(song.artist || 'Unknown')}</div></div>
                 <div class="song-duration">${formatTime(song.duration_seconds)}</div>
                 ${canAddToPlaylist ? `<button class="btn-secondary compact song-add-playlist" data-id="${song.id}"><i class="fas fa-plus"></i> Add</button>` : ''}
-                ${showDelete ? `<button class="icon-btn delete-song" data-id="${song.id}"><i class="fas fa-trash"></i></button>` : ''}
+                ${showDelete ? `
+                    <button class="icon-btn download-song" data-id="${song.id}" title="Download"><i class="fas fa-download"></i></button>
+                    <button class="icon-btn delete-song" data-id="${song.id}"><i class="fas fa-trash"></i></button>
+                ` : ''}
             `;
             div.addEventListener('click', (e) => {
-                if (!e.target.closest('.delete-song') && !e.target.closest('.drag-handle') && !e.target.closest('.song-add-playlist')) playSong(songs, index);
+                if (!e.target.closest('.delete-song') && !e.target.closest('.download-song') && !e.target.closest('.drag-handle') && !e.target.closest('.song-add-playlist')) playSong(songs, index);
             });
             container.appendChild(div);
         });
@@ -2539,6 +2556,14 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                             loadDashboard();
                         }
                     }
+                });
+            });
+
+            container.querySelectorAll('.download-song').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const songId = e.currentTarget.getAttribute('data-id');
+                    triggerDownload(songId);
                 });
             });
         }
@@ -2588,10 +2613,11 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                     <span class="song-stat-primary"><i class="fas fa-play-circle"></i> ${song.play_count || 0} plays</span>
                     <span class="song-stat-secondary"><i class="fas fa-clock"></i> ${listenedText}</span>
                 </div>
+                <button class="icon-btn download-song" data-id="${song.id}" title="Download"><i class="fas fa-download"></i></button>
                 <button class="icon-btn delete-song" data-id="${song.id}"><i class="fas fa-trash"></i></button>
             `;
             div.addEventListener('click', (e) => {
-                if (!e.target.closest('.delete-song')) playSong(songs, index);
+                if (!e.target.closest('.delete-song') && !e.target.closest('.download-song')) playSong(songs, index);
             });
             container.appendChild(div);
         });
@@ -2604,6 +2630,13 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                     showToast('Song deleted permanently');
                     loadDashboard();
                 }
+            });
+        });
+
+        container.querySelectorAll('.download-song').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                triggerDownload(e.currentTarget.getAttribute('data-id'));
             });
         });
     }

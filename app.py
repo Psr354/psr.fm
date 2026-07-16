@@ -6,6 +6,7 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash
 from flask_socketio import SocketIO
+from flask_wtf.csrf import CSRFProtect, generate_csrf, validate_csrf
 from PIL import Image
 import io
 import time
@@ -33,8 +34,6 @@ MAINTENANCE_MODE = False
 def maintenance_check():
     if MAINTENANCE_MODE:
         return render_template('maintenance.html'), 503
-
-from flask_wtf.csrf import CSRFProtect, generate_csrf, validate_csrf
 
 # Initialize CSRF token helpers. Actual API checks are handled in
 # csrf_protect_api() so login/setup can stay unauthenticated.
@@ -807,12 +806,33 @@ def stream_audio(filename):
     safe_filename = secure_filename(filename)
     db = get_db()
     song = db.execute(
-        'SELECT id FROM songs WHERE filename = ? AND user_id = ?',
+        'SELECT id, title, artist, filename FROM songs WHERE filename = ? AND user_id = ?',
         (safe_filename, current_user.id)
     ).fetchone()
     if not song:
         return jsonify({'error': 'Not found'}), 404
     return send_from_directory(LIBRARY_DIR, safe_filename, mimetype='audio/mpeg')
+
+@app.route('/api/songs/<int:song_id>/download')
+@login_required
+def download_song_file(song_id):
+    db = get_db()
+    song = get_owned_song(db, song_id)
+    if not song:
+        return jsonify({'error': 'Not found'}), 404
+
+    safe_filename = secure_filename(song['filename'])
+    download_name = f"{song['title']} - {song['artist'] or 'Unknown'}.mp3"
+    # Remove path separators that secure_filename would strip
+    download_name = secure_filename(download_name) or 'song.mp3'
+
+    return send_from_directory(
+        LIBRARY_DIR,
+        safe_filename,
+        mimetype='audio/mpeg',
+        as_attachment=True,
+        download_name=download_name
+    )
 
 @app.route('/api/search')
 @login_required
