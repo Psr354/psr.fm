@@ -2106,6 +2106,9 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             }
         }
     });
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) highlightPlayingSong();
+    });
 
     // ==========================================
     // AUDIO EVENT LISTENERS
@@ -2484,7 +2487,6 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
 
         const activeView = document.querySelector('.view.active');
-        const isContainerInActiveView = activeView && activeView.contains(container);
         const canReorder = containerId === 'playlist-songs-list' && Boolean(state.currentPlaylistId);
         const canAddToPlaylist = containerId === 'search-results';
 
@@ -2496,12 +2498,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                 div.setAttribute('draggable', 'true');
             }
             const songIdStr = String(song.id);
-            const currentIdStr = String(state.currentPlayingSongId);
             div.setAttribute('data-id', songIdStr);
-
-            if (isContainerInActiveView && songIdStr === currentIdStr && currentIdStr !== 'null' && currentIdStr !== 'undefined') {
-                div.classList.add('is-playing');
-            }
 
             div.innerHTML = `
                 ${canReorder ? '<button class="drag-handle" type="button" aria-label="Reorder song" title="Drag to reorder"><i class="fas fa-grip-lines"></i></button>' : ''}
@@ -2567,6 +2564,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                 });
             });
         }
+        if (activeView && activeView.contains(container)) highlightPlayingSong();
     }
 
     function renderTopSongs(songs, containerId) {
@@ -2583,16 +2581,11 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
 
         const activeView = document.querySelector('.view.active');
-        const isContainerInActiveView = activeView && activeView.contains(container);
 
         songs.forEach((song, index) => {
             const div = document.createElement('div');
             div.className = 'song-item';
             div.setAttribute('data-id', String(song.id));
-
-            if (isContainerInActiveView && String(song.id) === String(state.currentPlayingSongId)) {
-                div.classList.add('is-playing');
-            }
 
             const listenedMins = Math.round((song.total_listened || 0) / 60);
             let listenedText = `${listenedMins} mins`;
@@ -2632,13 +2625,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                 }
             });
         });
-
-        container.querySelectorAll('.download-song').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                triggerDownload(e.currentTarget.getAttribute('data-id'));
-            });
-        });
+        if (activeView && activeView.contains(container)) highlightPlayingSong();
     }
 
     function highlightPlayingSong() {
@@ -2653,7 +2640,9 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (!activeView) return;
 
         requestAnimationFrame(() => {
-            const activeEl = activeView.querySelector(`.song-item[data-id="${targetId}"]`);
+            document.querySelectorAll('.song-item.is-playing').forEach(el => el.classList.remove('is-playing'));
+            const activeEl = [...activeView.querySelectorAll('.song-item[data-id]')]
+                .find(item => item.dataset.id === targetId);
             if (activeEl) {
                 activeEl.classList.add('is-playing');
             }

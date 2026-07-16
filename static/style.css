@@ -782,7 +782,16 @@ h1, h2, h3, h4, .section-title, .track-title {
 .dashboard-columns .song-item { min-height: 64px; gap: 10px; padding: 8px; }
 .dashboard-columns .song-art { width: 42px; height: 42px; border-radius: 8px; }
 .dashboard-columns .song-title { font-size: 13px; }
-.dashboard-columns .song-duration, .dashboard-columns .song-stats { display: none; }
+.dashboard-columns .song-duration { display: none; }
+.dashboard-columns .song-stats {
+    display: flex;
+    min-width: 92px;
+    margin-left: 8px;
+}
+.dashboard-columns .song-stat-primary,
+.dashboard-columns .song-stat-secondary {
+    white-space: nowrap;
+}
 .dashboard-columns .delete-song { opacity: 0; }
 .dashboard-columns .song-item:hover .delete-song, .dashboard-columns .song-item:focus-within .delete-song { opacity: 1; }
 
@@ -849,6 +858,7 @@ h1, h2, h3, h4, .section-title, .track-title {
     .dashboard-columns .recent-section { grid-column: auto; }
     .dashboard-columns .content-section { padding: 14px; border-radius: 14px; }
     .dashboard-columns .delete-song { opacity: 1; }
+    .dashboard-columns .song-stats { display: flex; }
     .player-bar { height: auto; min-height: 156px; margin: 0; border-left: 0; border-right: 0; border-bottom: 0; border-radius: 16px 16px 0 0; gap: 4px; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
     .now-playing { min-height: 48px; gap: 10px; }
     .now-playing img { width: 46px; height: 46px; }
