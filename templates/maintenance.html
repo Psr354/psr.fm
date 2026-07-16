@@ -3,40 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Under Maintenance</title>
+    <title>psr.fm — Under Maintenance</title>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-            height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #fff;
-        }
-        .container { text-align: center; max-width: 600px; padding: 2rem; }
-        .icon { font-size: 4rem; margin-bottom: 1rem; }
-        h1 { font-size: 2.5rem; margin-bottom: 0.5rem; }
-        p { font-size: 1.1rem; color: #a0aec0; margin-bottom: 2rem; }
-        .bar {
-            width: 80px; height: 4px; background: #e53e3e; margin: 0 auto 1.5rem;
-            border-radius: 2px;
-        }
-        .status {
-            display: inline-block; padding: 0.5rem 1.5rem;
-            border: 1px solid #e53e3e; border-radius: 6px;
-            color: #e53e3e; font-size: 0.9rem; letter-spacing: 1px;
-        }
+        body { min-height: 100dvh; padding: 16px; display: grid; place-items: center; color: #f5f7f5; font-family: 'Manrope', system-ui, sans-serif; background: radial-gradient(circle at 50% 0%, rgba(48,214,107,.14), transparent 34%), #070908; }
+        .container { text-align: center; width: min(520px, 100%); padding: 48px 32px; border: 1px solid rgba(223,255,232,.12); border-radius: 20px; background: #0e110f; box-shadow: 0 28px 80px rgba(0,0,0,.5), inset 0 1px rgba(255,255,255,.04); }
+        .icon { width: 64px; height: 64px; margin: 0 auto 24px; display: flex; align-items: flex-end; justify-content: center; gap: 4px; padding: 16px 14px; border-radius: 18px; background: #30d66b; }
+        .icon i { width: 4px; border-radius: 4px; background: #061109; }
+        .icon i:nth-child(1) { height: 13px; } .icon i:nth-child(2) { height: 28px; } .icon i:nth-child(3) { height: 20px; }
+        h1 { margin-bottom: 10px; font-family: 'Space Grotesk', sans-serif; font-size: clamp(2rem, 7vw, 2.7rem); letter-spacing: -.04em; }
+        p { max-width: 390px; margin: 0 auto 28px; color: #a7afa9; font-size: 1rem; line-height: 1.65; }
+        .bar { width: 72px; height: 3px; margin: 0 auto 22px; border-radius: 3px; background: #30d66b; }
+        .status { display: inline-block; padding: 8px 16px; border: 1px solid rgba(48,214,107,.35); border-radius: 999px; color: #30d66b; font-size: .72rem; font-weight: 800; letter-spacing: .14em; }
+        @media (max-width: 480px) { .container { padding: 38px 22px; } }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="icon">🔧</div>
-        <h1>Under Maintenance</h1>
+    <main class="container">
+        <div class="icon" aria-hidden="true"><i></i><i></i><i></i></div>
+        <h1>Taking a short intermission.</h1>
         <div class="bar"></div>
-        <p>PSR FM is currently undergoing scheduled maintenance. We'll be back shortly.</p>
+        <p>psr.fm is receiving a little care. Your library stays safe and the music will be back shortly.</p>
         <span class="status">MAINTENANCE MODE</span>
-    </div>
+    </main>
 </body>
 </html>

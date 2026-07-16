@@ -1,5 +1,4 @@
 import os
-import sqlite3
 import shutil
 import uuid
 from flask import Flask, request, jsonify, send_from_directory, render_template, g, redirect, url_for
@@ -12,10 +11,9 @@ import io
 import time
 from threading import Lock
 from dotenv import load_dotenv
-from urllib.parse import parse_qs, urlparse
 
 from services.database import (
-    init_db, get_db_connection,
+    init_db, get_db_connection, extract_youtube_video_id,
     get_user_by_username, create_user, has_any_user,
     get_all_users, get_user_files, delete_user_cascade, update_user_password
 )
@@ -67,7 +65,7 @@ def csrf_protect_api():
             
             try:
                 validate_csrf(token)
-            except Exception as e:
+            except Exception:
                 return jsonify({'error': 'Invalid CSRF token'}), 403
 
 login_manager = LoginManager()
@@ -140,26 +138,6 @@ def get_owned_song(db, song_id):
         'SELECT * FROM songs WHERE id = ? AND user_id = ?',
         (song_id, current_user.id)
     ).fetchone()
-
-
-def extract_youtube_video_id(url):
-    parsed = urlparse((url or '').strip())
-    host = parsed.netloc.lower()
-    if host.startswith('www.'):
-        host = host[4:]
-
-    if host == 'youtu.be':
-        video_id = parsed.path.strip('/').split('/')[0]
-        return video_id or ''
-
-    if host in {'youtube.com', 'm.youtube.com'}:
-        if parsed.path == '/watch':
-            return parse_qs(parsed.query).get('v', [''])[0]
-        path_parts = [part for part in parsed.path.split('/') if part]
-        if len(path_parts) >= 2 and path_parts[0] in {'shorts', 'embed', 'live'}:
-            return path_parts[1]
-
-    return ''
 
 
 def get_global_song(db, song_id):

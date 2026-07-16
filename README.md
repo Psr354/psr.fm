@@ -16,8 +16,12 @@ Aplikasi ini cocok untuk server pribadi, keluarga, atau teman kecil-kecilan. Set
 - Playlist pribadi dengan urutan drag-and-drop.
 - Search lagu pribadi.
 - Lyrics biasa dan synced lyrics jika tersedia.
+- Share Lyrics Card untuk membuat gambar PNG dari potongan lirik dengan cover lagu dan tema warna.
 - Player dengan queue, shuffle, repeat, volume, seek, dan A-B loop.
 - Dashboard per user: recently added, top played, top listened, dan storage usage.
+- Tampilan mobile dengan drawer sidebar, tombol keluar User Management, dan player bawah yang tidak menutup konten.
+
+Dashboard menampilkan maksimal 5 lagu untuk **Recently Added**, **Top Played**, dan **Top Listened** agar halaman tetap ringan.
 
 ## Kebutuhan
 
@@ -118,6 +122,23 @@ Menu **Search** mencari lagu milik akun yang sedang login.
 
 Dari hasil search, lagu bisa langsung ditambahkan ke playlist lain dengan tombol **Add**.
 
+### Lyrics dan Share Card
+
+- Klik tombol **Lyrics** di player untuk membuka panel lirik.
+- Jika lirik tersedia, synced lyrics bisa ditap untuk seek ke bagian lagu.
+- Klik **Share** di panel lirik untuk membuat card dari potongan lirik.
+- Pilih teks lirik di modal untuk menentukan bagian yang masuk ke card.
+- Pilih tema warna, lalu klik **Download** untuk menyimpan PNG atau **Copy** untuk menyalin gambar ke clipboard.
+
+Share card otomatis memakai cover lagu jika tersedia dan menyesuaikan tinggi card dengan panjang lirik yang dipilih.
+
+### Mobile
+
+- Tombol menu membuka sidebar sebagai drawer.
+- Tap playlist langsung menutup drawer dan membuka playlist.
+- Player tetap berada di bawah layar; konten diberi jarak supaya tidak tertutup.
+- User Management punya tombol **Back** untuk kembali ke dashboard.
+
 ## Data yang Disimpan
 
 Folder penting:
@@ -130,6 +151,18 @@ Folder penting:
 | `logs/` | Log aplikasi |
 
 Sebelum update atau pindah server, backup folder-folder di atas.
+
+## Struktur Kode
+
+| Path | Fungsi |
+| --- | --- |
+| `app.py` | Route Flask, auth, API playlist/song/user, dan bootstrap aplikasi |
+| `services/database.py` | Schema SQLite, migration ringan, dan helper user/song |
+| `services/downloader.py` | Worker download YouTube, metadata, album art, dan event progress |
+| `services/lyrics.py` | Pencarian lyrics/synced lyrics via LRCLIB |
+| `static/main.js` | UI browser: player, playlist, modal, dashboard, user management |
+| `static/style.css` | Design system visual dan responsive behavior |
+| `templates/` | HTML halaman utama, login, setup, dan maintenance |
 
 ## Update Aplikasi
 
@@ -225,14 +258,14 @@ Jika masih gagal, restart Docker lalu coba lagi.
 Untuk cek cepat:
 
 ```bash
-python -m py_compile app.py services/database.py services/downloader.py services/lyrics.py services/metadata.py
+python -m py_compile app.py services/database.py services/downloader.py services/lyrics.py services/metadata.py scripts/backfill_song_sources.py scripts/fetch_lyrics_batch.py
 node --check static/main.js
 ```
 
 Untuk menjalankan test:
 
 ```bash
-docker exec psr_fm_app python -m unittest tests.test_auth_download -v
+docker compose exec -T psr_fm python -m unittest -q
 ```
 
 ## Catatan Keamanan

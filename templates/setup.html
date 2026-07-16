@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>psr.fm - Initial Setup</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}">
     <style>
@@ -304,30 +304,6 @@
             color: var(--accent-color);
         }
 
-        .music-notes {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            top: 0;
-            left: 0;
-            pointer-events: none;
-            overflow: hidden;
-        }
-
-        .note {
-            position: absolute;
-            color: rgba(29, 185, 84, 0.1);
-            font-size: 24px;
-            animation: floatNote 20s infinite linear;
-        }
-
-        @keyframes floatNote {
-            from { transform: translateY(100vh) rotate(0deg); opacity: 0; }
-            10% { opacity: 1; }
-            90% { opacity: 1; }
-            to { transform: translateY(-100vh) rotate(720deg); opacity: 0; }
-        }
-
         @media (max-width: 480px) {
             .auth-card {
                 padding: 40px 24px;
@@ -341,11 +317,21 @@
                 font-size: 32px;
             }
         }
+        /* Match the main listening room instead of a generic setup wizard. */
+        .auth-body { font-family: 'Manrope', system-ui, sans-serif; background: radial-gradient(circle at 50% 0%, rgba(48,214,107,.14), transparent 34%), #070908; animation: none; overflow: auto; }
+        .auth-body::before { inset: 0; background-image: linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px); background-size: 44px 44px; animation: none; opacity: .4; }
+        .auth-container { animation: slideUp .28s cubic-bezier(.2,.8,.2,1); padding-block: 24px; }
+        .auth-card { padding: 40px; border-radius: 20px; background: rgba(14,17,15,.96); border-color: rgba(223,255,232,.12); box-shadow: 0 28px 80px rgba(0,0,0,.5), inset 0 1px rgba(255,255,255,.04); }
+        .setup-icon { width: 64px; height: 64px; border-radius: 18px; background: #30d66b; box-shadow: 0 12px 30px rgba(48,214,107,.18); animation: none; }
+        .setup-icon::after { display: none; }
+        .auth-logo h1 { font-family: 'Space Grotesk', sans-serif; background: none; color: #f5f7f5; -webkit-text-fill-color: currentColor; }
+        .input-wrapper input { min-height: 52px; border-width: 1px; border-radius: 12px; background: #090c0a; border-color: rgba(223,255,232,.12); font-size: 16px; }
+        .auth-submit-btn { min-height: 52px; border-radius: 12px; background: #30d66b; }
+        .auth-submit-btn::before { display: none; }
+        @media (max-width: 480px) { .auth-card { padding: 30px 22px; border-radius: 18px; } }
     </style>
 </head>
 <body class="auth-body">
-    <div class="music-notes" id="music-notes"></div>
-    
     <div class="auth-container">
         <div class="auth-card setup-card">
             <div class="auth-logo">
@@ -405,20 +391,6 @@
     </div>
 
     <script>
-        // Generate floating music notes
-        const notesContainer = document.getElementById('music-notes');
-        const notes = ['♪', '♫', '♬', '♭', '♮', '♯'];
-        
-        for (let i = 0; i < 6; i++) {
-            const note = document.createElement('div');
-            note.className = 'note';
-            note.textContent = notes[Math.floor(Math.random() * notes.length)];
-            note.style.left = Math.random() * 100 + '%';
-            note.style.animationDelay = Math.random() * 20 + 's';
-            note.style.animationDuration = (15 + Math.random() * 10) + 's';
-            notesContainer.appendChild(note);
-        }
-
         document.addEventListener('DOMContentLoaded', () => {
             const form = document.getElementById('setup-form');
             const errorMsg = document.getElementById('error-message');

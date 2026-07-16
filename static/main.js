@@ -64,6 +64,9 @@ document.addEventListener('DOMContentLoaded', () => {
         currentLyricIndex: -1,
         lyricsLoading: false,
         lyricsEditing: false,
+        shareLyricsTheme: 'verde',
+        shareLyricsText: '',
+        shareRenderPromise: null,
         currentSongMeta: null,
         lyricsRequestToken: 0,
         matchedLibrarySong: null,
@@ -83,6 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentTime: document.getElementById('current-time'),
         duration: document.getElementById('duration'),
         volumeIcon: document.getElementById('volume-icon'),
+        volumeBtn: document.getElementById('volume-btn'),
         nowPlaying: document.getElementById('now-playing-container'),
         playerTitle: document.getElementById('player-title'),
         playerArtist: document.getElementById('player-artist'),
@@ -113,8 +117,15 @@ document.addEventListener('DOMContentLoaded', () => {
         lyricsCloseBtn: document.getElementById('lyrics-close-btn'),
         lyricsRetryBtn: document.getElementById('lyrics-retry-btn'),
         lyricsEditBtn: document.getElementById('lyrics-edit-btn'),
+        lyricsShareBtn: document.getElementById('lyrics-share-btn'),
         lyricsCancelEditBtn: document.getElementById('lyrics-cancel-edit-btn'),
         lyricsSaveBtn: document.getElementById('lyrics-save-btn'),
+        shareLyricsModal: document.getElementById('share-lyrics-modal'),
+        shareLyricsCloseBtn: document.getElementById('share-lyrics-close-btn'),
+        shareLyricsInput: document.getElementById('share-lyrics-input'),
+        shareLyricsCanvas: document.getElementById('share-lyrics-canvas'),
+        shareLyricsCopyBtn: document.getElementById('share-lyrics-copy-btn'),
+        shareLyricsDownloadBtn: document.getElementById('share-lyrics-download-btn'),
         sidebar: document.querySelector('.sidebar'),
         mobileMenuBtn: document.getElementById('mobile-menu-btn'),
         views: {
@@ -503,6 +514,274 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    const shareThemes = {
+        verde: ['#073b25', '#30d66b'],
+        dusk: ['#182848', '#4b6cb7'],
+        rose: ['#7f1d1d', '#fb7185'],
+        amber: ['#78350f', '#fbbf24'],
+        mono: ['#090909', '#3f3f46'],
+        cyan: ['#164e63', '#38bdf8']
+    };
+
+    function getShareLyricsSource() {
+        if (Array.isArray(state.syncedLyrics) && state.syncedLyrics.length) {
+            return state.syncedLyrics.map(line => line.text).filter(Boolean).join('\n');
+        }
+        return state.plainLyrics || '';
+    }
+
+    function getShareSong() {
+        return state.currentSongMeta
+            || state.currentPlaylistSongs.find(song => String(song.id) === String(state.currentPlayingSongId))
+            || {};
+    }
+
+    function pickInitialShareText(text) {
+        return String(text || '')
+            .split(/\r?\n/)
+            .map(line => line.trim())
+            .filter(Boolean)
+            .slice(0, 7)
+            .join('\n');
+    }
+
+    async function openShareLyricsModal() {
+        if (!state.currentPlayingSongId) {
+            showToast('Play a song first', 'error');
+            return;
+        }
+        if (!getShareLyricsSource().trim()) {
+            await loadLyrics(state.currentPlayingSongId);
+        }
+
+        const lyrics = getShareLyricsSource();
+        if (!lyrics.trim()) {
+            showToast('No lyrics available to share', 'error');
+            return;
+        }
+
+        state.shareLyricsText = pickInitialShareText(lyrics);
+        if (el.shareLyricsInput) {
+            el.shareLyricsInput.value = lyrics;
+            el.shareLyricsInput.focus();
+            el.shareLyricsInput.setSelectionRange(0, state.shareLyricsText.length);
+        }
+        if (el.shareLyricsModal) {
+            el.shareLyricsModal.style.display = 'flex';
+            el.shareLyricsModal.setAttribute('aria-hidden', 'false');
+        }
+        state.shareRenderPromise = renderShareLyricsCanvas();
+    }
+
+    function closeShareLyricsModal() {
+        el.shareLyricsModal?.setAttribute('aria-hidden', 'true');
+        if (el.shareLyricsModal) el.shareLyricsModal.style.display = 'none';
+    }
+
+    function updateShareLyricsText() {
+        if (!el.shareLyricsInput) return;
+        const start = el.shareLyricsInput.selectionStart ?? 0;
+        const end = el.shareLyricsInput.selectionEnd ?? 0;
+        const selected = start !== end ? el.shareLyricsInput.value.slice(start, end) : '';
+        state.shareLyricsText = (selected || el.shareLyricsInput.value).trim();
+        state.shareRenderPromise = renderShareLyricsCanvas();
+    }
+
+    function wrapCanvasText(ctx, text, maxWidth) {
+        const lines = [];
+        String(text || '').split(/\r?\n/).forEach((paragraph) => {
+            const words = paragraph.trim().split(/\s+/).filter(Boolean);
+            let line = '';
+            words.forEach((word) => {
+                const next = line ? `${line} ${word}` : word;
+                if (ctx.measureText(next).width > maxWidth && line) {
+                    lines.push(line);
+                    line = word;
+                } else {
+                    line = next;
+                }
+            });
+            if (line) lines.push(line);
+            if (!words.length) lines.push('');
+        });
+        return lines;
+    }
+
+    function drawRoundRect(ctx, x, y, width, height, radius) {
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+        ctx.lineTo(x + radius, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
+    }
+
+    function loadCanvasImage(src) {
+        return new Promise((resolve) => {
+            if (!src) return resolve(null);
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => resolve(null);
+            img.src = src;
+        });
+    }
+
+    function drawCoverFallback(ctx, x, y, size) {
+        drawRoundRect(ctx, x, y, size, size, 26);
+        ctx.fillStyle = 'rgba(255,255,255,0.18)';
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '800 34px Manrope, Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('psr', x + size / 2, y + size / 2);
+    }
+
+    function drawRoundedImage(ctx, img, x, y, size, radius) {
+        ctx.save();
+        drawRoundRect(ctx, x, y, size, size, radius);
+        ctx.clip();
+        const sourceSize = Math.min(img.naturalWidth || img.width, img.naturalHeight || img.height);
+        const sx = ((img.naturalWidth || img.width) - sourceSize) / 2;
+        const sy = ((img.naturalHeight || img.height) - sourceSize) / 2;
+        ctx.drawImage(img, sx, sy, sourceSize, sourceSize, x, y, size, size);
+        ctx.restore();
+    }
+
+    function fitCanvasText(ctx, text, maxWidth) {
+        const value = String(text || '');
+        if (ctx.measureText(value).width <= maxWidth) return value;
+        let trimmed = value;
+        while (trimmed.length > 1 && ctx.measureText(`${trimmed}...`).width > maxWidth) {
+            trimmed = trimmed.slice(0, -1);
+        }
+        return `${trimmed.trim()}...`;
+    }
+
+    async function renderShareLyricsCanvas() {
+        const canvas = el.shareLyricsCanvas;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const colors = shareThemes[state.shareLyricsTheme] || shareThemes.verde;
+        const song = getShareSong();
+        const lyrics = state.shareLyricsText || pickInitialShareText(getShareLyricsSource());
+        const coverSrc = song.album_art ? `/static/album_art/${mediaUrlName(song.album_art)}` : '';
+        const cover = await loadCanvasImage(coverSrc);
+
+        const pad = 88;
+        const maxLyricsWidth = width - pad * 2;
+        const fontSize = lyrics.length > 360 ? 42 : lyrics.length > 220 ? 48 : 56;
+        ctx.font = `800 ${fontSize}px Space Grotesk, Manrope, Arial, sans-serif`;
+        const lineHeight = Math.round(fontSize * 1.32);
+        const wrappedLines = wrapCanvasText(ctx, lyrics, maxLyricsWidth);
+        const footerHeight = 210;
+        const height = Math.max(900, 310 + (Math.min(wrappedLines.length, 14) * lineHeight) + footerHeight);
+        canvas.height = height;
+
+        const gradient = ctx.createLinearGradient(0, 0, width, height);
+        gradient.addColorStop(0, colors[0]);
+        gradient.addColorStop(1, colors[1]);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+
+        ctx.fillStyle = 'rgba(0,0,0,0.14)';
+        ctx.beginPath();
+        ctx.arc(width * 0.92, height * 0.08, 260, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(width * 0.08, height * 0.92, 320, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (cover) {
+            drawRoundedImage(ctx, cover, pad, pad, 116, 26);
+        } else {
+            drawCoverFallback(ctx, pad, pad, 116);
+        }
+
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '800 46px Space Grotesk, Manrope, Arial, sans-serif';
+        ctx.fillText(fitCanvasText(ctx, song.title || 'Song Title', width - pad * 2 - 142), pad + 142, pad + 42);
+        ctx.fillStyle = 'rgba(255,255,255,0.78)';
+        ctx.font = '600 30px Manrope, Arial, sans-serif';
+        ctx.fillText(fitCanvasText(ctx, song.artist || 'Unknown Artist', width - pad * 2 - 142), pad + 142, pad + 86);
+
+        ctx.font = `800 ${fontSize}px Space Grotesk, Manrope, Arial, sans-serif`;
+        ctx.fillStyle = '#ffffff';
+        ctx.textBaseline = 'top';
+        const maxLines = Math.floor((height - 390) / lineHeight);
+        const lines = wrappedLines.slice(0, maxLines);
+        let y = 310;
+        lines.forEach((line) => {
+            ctx.fillText(line, pad, y);
+            y += lineHeight;
+        });
+        if (wrappedLines.length > maxLines && lines.length) {
+            ctx.fillText('...', pad, y);
+        }
+
+        ctx.strokeStyle = 'rgba(255,255,255,0.24)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(pad, height - 150);
+        ctx.lineTo(width - pad, height - 150);
+        ctx.stroke();
+
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.font = '800 34px Manrope, Arial, sans-serif';
+        ctx.fillText('psr.fm', pad, height - 104);
+        ctx.font = '600 24px Manrope, Arial, sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.68)';
+        ctx.fillText('private frequency', pad, height - 68);
+    }
+
+    function canvasToBlob(canvas) {
+        return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    }
+
+    function shareFilename() {
+        const song = getShareSong();
+        return `psr.fm-${song.title || 'lyrics'}`.replace(/[\\/:*?"<>|]+/g, '-').slice(0, 80) + '.png';
+    }
+
+    async function downloadShareLyrics() {
+        if (!el.shareLyricsCanvas) return;
+        await state.shareRenderPromise;
+        const blob = await canvasToBlob(el.shareLyricsCanvas);
+        if (!blob) return showToast('Failed to create image', 'error');
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = shareFilename();
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        showToast('Lyrics card downloaded', 'success');
+    }
+
+    async function copyShareLyrics() {
+        if (!el.shareLyricsCanvas || !navigator.clipboard?.write || !window.ClipboardItem) {
+            await downloadShareLyrics();
+            return;
+        }
+        await state.shareRenderPromise;
+        const blob = await canvasToBlob(el.shareLyricsCanvas);
+        if (!blob) return showToast('Failed to create image', 'error');
+        try {
+            await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
+            showToast('Lyrics card copied', 'success');
+        } catch (err) {
+            await downloadShareLyrics();
+        }
+    }
+
     function updateLoopIndicator() {
         if (!el.loopIndicator || !el.audio.duration) return;
 
@@ -563,9 +842,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateVolumeIcon(vol) {
         if (!el.volumeIcon) return;
-        if (vol === 0) el.volumeIcon.className = 'fas fa-volume-mute';
+        const muted = el.audio.muted || vol === 0;
+        if (muted) el.volumeIcon.className = 'fas fa-volume-mute';
         else if (vol < 0.5) el.volumeIcon.className = 'fas fa-volume-down';
         else el.volumeIcon.className = 'fas fa-volume-up';
+        el.volumeBtn?.classList.toggle('active', muted);
+        el.volumeBtn?.setAttribute('aria-pressed', String(muted));
+        el.volumeBtn?.setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
     }
 
     function updatePlayPauseIcon(isPlaying) {
@@ -1032,6 +1315,10 @@ if (el.usersBtn) {
         }
     });
 }
+document.getElementById('close-users-view')?.addEventListener('click', () => {
+    showView('dashboard');
+    document.getElementById('home-btn')?.focus();
+});
 if (el.addUserBtnMain) {
     el.addUserBtnMain.addEventListener('click', () => {
         const modal = document.getElementById('add-user-modal');
@@ -1201,11 +1488,29 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     // ==========================================
     // MOBILE MENU
     // ==========================================
+    let setMobileMenu = () => {};
     if (el.mobileMenuBtn && el.sidebar) {
-        el.mobileMenuBtn.addEventListener('click', () => el.sidebar.classList.toggle('open'));
+        const sidebarScrim = document.getElementById('sidebar-scrim');
+        setMobileMenu = (open) => {
+            el.sidebar.classList.toggle('open', open);
+            document.body.classList.toggle('mobile-nav-open', open);
+            el.mobileMenuBtn.setAttribute('aria-expanded', String(open));
+            el.mobileMenuBtn.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');
+            const icon = el.mobileMenuBtn.querySelector('i');
+            icon?.classList.toggle('fa-bars', !open);
+            icon?.classList.toggle('fa-xmark', open);
+        };
+        el.mobileMenuBtn.addEventListener('click', () => setMobileMenu(!el.sidebar.classList.contains('open')));
+        sidebarScrim?.addEventListener('click', () => setMobileMenu(false));
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && el.sidebar.classList.contains('open')) {
+                setMobileMenu(false);
+                el.mobileMenuBtn.focus();
+            }
+        });
         document.querySelectorAll('.nav-item, .playlist-item').forEach(item => {
             item.addEventListener('click', () => {
-                if (window.innerWidth <= 768) el.sidebar.classList.remove('open');
+                if (window.innerWidth <= 768) setMobileMenu(false);
             });
         });
     }
@@ -1400,7 +1705,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             const div = document.createElement('div');
             div.className = 'queue-item';
             div.innerHTML = `
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'36\' height=\'36\' viewBox=\'0 0 24 24\' fill=\'%23555\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" alt="" loading="lazy" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'36\' height=\'36\' viewBox=\'0 0 24 24\' fill=\'%23555\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
                 <div class="q-info">
                     <div class="q-title">${escapeHtml(song.title)}</div>
                     <div class="q-artist">${escapeHtml(song.artist || 'Unknown')}</div>
@@ -1737,6 +2042,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     });
 
     el.lyricsCloseBtn?.addEventListener('click', closeLyricsPanel);
+    el.lyricsShareBtn?.addEventListener('click', openShareLyricsModal);
     el.lyricsEditBtn?.addEventListener('click', () => {
         if (state.currentLyricsSongId) setLyricsEditing(true);
     });
@@ -1751,11 +2057,33 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             loadLyrics(state.currentPlayingSongId, true);
         }
     });
+    el.shareLyricsCloseBtn?.addEventListener('click', closeShareLyricsModal);
+    el.shareLyricsInput?.addEventListener('input', updateShareLyricsText);
+    el.shareLyricsInput?.addEventListener('select', updateShareLyricsText);
+    el.shareLyricsInput?.addEventListener('keyup', updateShareLyricsText);
+    el.shareLyricsInput?.addEventListener('mouseup', updateShareLyricsText);
+    el.shareLyricsDownloadBtn?.addEventListener('click', downloadShareLyrics);
+    el.shareLyricsCopyBtn?.addEventListener('click', copyShareLyrics);
+    el.shareLyricsModal?.addEventListener('click', (e) => {
+        if (e.target === el.shareLyricsModal) closeShareLyricsModal();
+    });
+    document.querySelectorAll('.share-theme').forEach((button) => {
+        button.addEventListener('click', () => {
+            document.querySelectorAll('.share-theme').forEach(item => item.classList.remove('active'));
+            button.classList.add('active');
+            state.shareLyricsTheme = button.dataset.theme || 'verde';
+            state.shareRenderPromise = renderShareLyricsCanvas();
+        });
+    });
 
     // ==========================================
     // KEYBOARD SHORTCUTS
     // ==========================================
     document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && el.shareLyricsModal?.style.display === 'flex') {
+            closeShareLyricsModal();
+            return;
+        }
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
         if (e.code === 'Space' || e.keyCode === 32) {
             e.preventDefault();
@@ -1858,7 +2186,23 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
     el.volumeBar?.addEventListener('input', (e) => {
         el.audio.volume = e.target.value / 100;
+        el.audio.muted = false;
+        if (el.audio.volume > 0) state.lastNonZeroVolume = el.audio.volume;
         if (el.volumeFill) el.volumeFill.style.width = `${e.target.value}%`;
+        updateVolumeIcon(el.audio.volume);
+    });
+    state.lastNonZeroVolume = 1;
+    el.volumeBtn?.addEventListener('click', () => {
+        if (el.audio.muted || el.audio.volume === 0) {
+            el.audio.muted = false;
+            if (el.audio.volume === 0) el.audio.volume = state.lastNonZeroVolume || 1;
+        } else {
+            state.lastNonZeroVolume = el.audio.volume;
+            el.audio.muted = true;
+        }
+        const shownVolume = el.audio.muted ? 0 : el.audio.volume;
+        if (el.volumeBar) el.volumeBar.value = String(Math.round(shownVolume * 100));
+        if (el.volumeFill) el.volumeFill.style.width = `${shownVolume * 100}%`;
         updateVolumeIcon(el.audio.volume);
     });
     if (el.volumeFill) el.volumeFill.style.width = '100%';
@@ -1917,7 +2261,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             div.className = 'song-item library-song-item';
             div.setAttribute('data-id', String(song.id));
             div.innerHTML = `
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
                 <div class="song-info">
                     <div class="song-title">${escapeHtml(song.title)}</div>
                     <div class="song-artist">${escapeHtml(song.artist || 'Unknown')}</div>
@@ -1957,7 +2301,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             const coverSrc = p.cover_art
                 ? `/static/album_art/${mediaUrlName(p.cover_art)}`
                 : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24' fill='%23555'><path d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/></svg>";
-            li.innerHTML = `<img src="${coverSrc}"> <span>${escapeHtml(p.name)}</span>`;
+            li.innerHTML = `<img src="${coverSrc}" alt=""> <span>${escapeHtml(p.name)}</span>`;
             li.addEventListener('click', () => openPlaylist(p));
             list.appendChild(li);
         });
@@ -1969,7 +2313,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (el.playlistTitle) el.playlistTitle.innerText = playlist.name;
 
         if (window.innerWidth <= 768) {
-            el.sidebar?.classList.remove('open');
+            setMobileMenu(false);
         }
 
         const timestamp = new Date().getTime();
@@ -2094,13 +2438,13 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             `;
         }
         const recentSongs = await (await fetch('/api/songs?limit=5')).json();
-        renderSongs(recentSongs, 'recent-songs-list', true);
+        renderSongs(recentSongs.slice(0, 5), 'recent-songs-list', true);
 
         const topSongs = await (await fetch('/api/top-songs')).json();
-        renderTopSongs(topSongs, 'top-songs-list');
+        renderTopSongs(topSongs.slice(0, 5), 'top-songs-list');
 
         const topSongsDuration = await (await fetch('/api/top-songs-duration')).json();
-        renderTopSongs(topSongsDuration, 'top-songs-duration-list');
+        renderTopSongs(topSongsDuration.slice(0, 5), 'top-songs-duration-list');
     }
 
     // ==========================================
@@ -2147,7 +2491,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
             div.innerHTML = `
                 ${canReorder ? '<button class="drag-handle" type="button" aria-label="Reorder song" title="Drag to reorder"><i class="fas fa-grip-lines"></i></button>' : ''}
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
                 <div class="eq-container"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>
                 <div class="song-info"><div class="song-title">${escapeHtml(song.title)}</div><div class="song-artist">${escapeHtml(song.artist || 'Unknown')}</div></div>
                 <div class="song-duration">${formatTime(song.duration_seconds)}</div>
@@ -2234,7 +2578,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             }
 
             div.innerHTML = `
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
                 <div class="eq-container"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>
                 <div class="song-info">
                     <div class="song-title">${escapeHtml(song.title)}</div>
@@ -2302,7 +2646,10 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
         if (el.playerTitle) el.playerTitle.innerText = song.title;
         if (el.playerArtist) el.playerArtist.innerText = song.artist || 'Unknown';
-        if (el.playerArt) el.playerArt.src = `/static/album_art/${mediaUrlName(song.album_art)}`;
+        if (el.playerArt) {
+            el.playerArt.src = `/static/album_art/${mediaUrlName(song.album_art)}`;
+            el.playerArt.alt = `${song.title} album artwork`;
+        }
 
         updatePlayPauseIcon(true);
         highlightPlayingSong();
