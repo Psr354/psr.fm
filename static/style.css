@@ -530,7 +530,7 @@ button { touch-action: manipulation; }
 .empty-state p { max-width: 420px; margin: 0 auto; line-height: 1.5; }
 .empty-icon { width: 46px; height: 46px; margin: 0 auto 14px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: rgba(255,255,255,0.07); color: var(--accent-color); }
 .empty-action { margin: 18px auto 0; }
-.repeat-one { position: absolute; top: -4px; right: -8px; font-size: 9px; font-weight: bold; color: var(--accent-color); }
+.repeat-one { position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: bold; color: var(--accent-color); pointer-events: none; }
 
 .queue-popover {
     display: none;
