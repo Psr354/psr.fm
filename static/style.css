@@ -773,7 +773,7 @@ h1, h2, h3, h4, .section-title, .track-title {
 .stat-card p { font-size: 10px; letter-spacing: .08em; }
 .stat-icon { width: 38px; height: 38px; border-radius: 10px; background: rgba(255,255,255,.055); }
 
-.dashboard-columns { display: grid; grid-template-columns: minmax(0, 1.32fr) minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.dashboard-columns { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.25fr) minmax(0, 1.25fr); gap: 12px; align-items: start; }
 .dashboard-columns .content-section { min-width: 0; margin-top: 0; padding: 18px; border: 1px solid var(--border-subtle); border-radius: 16px; background: rgba(7,9,8,.62); }
 .dashboard-columns .section-heading { margin-bottom: 10px; }
 .dashboard-columns .section-title { font-size: 16px; }
@@ -785,12 +785,17 @@ h1, h2, h3, h4, .section-title, .track-title {
 .dashboard-columns .song-duration { display: none; }
 .dashboard-columns .song-stats {
     display: flex;
-    min-width: 92px;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    flex-shrink: 0;
+    min-width: auto;
     margin-left: 8px;
 }
 .dashboard-columns .song-stat-primary,
 .dashboard-columns .song-stat-secondary {
     white-space: nowrap;
+    line-height: 1.4;
 }
 .dashboard-columns .delete-song { opacity: 0; }
 .dashboard-columns .song-item:hover .delete-song, .dashboard-columns .song-item:focus-within .delete-song { opacity: 1; }
