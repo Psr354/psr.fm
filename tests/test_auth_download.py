@@ -4,6 +4,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from datetime import datetime
 from http.cookies import SimpleCookie
 from unittest.mock import patch
 
@@ -296,6 +297,39 @@ class AuthAndDownloadTests(unittest.TestCase):
             [song['id'] for song in songs_response.get_json()],
             [song_c, song_a, song_b],
         )
+
+    def test_recap_uses_play_events_not_listen_chunks(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+        song_id = self._create_song()
+
+        for _ in range(2):
+            play_response = client.post(
+                f'/api/songs/{song_id}/play',
+                headers={'X-CSRF-Token': csrf_token},
+            )
+            self.assertEqual(play_response.status_code, 200)
+
+        for _ in range(3):
+            listen_response = client.post(
+                '/api/listen',
+                headers={'X-CSRF-Token': csrf_token},
+                json={'song_id': song_id, 'seconds': 10},
+            )
+            self.assertEqual(listen_response.status_code, 200)
+
+        now = datetime.now()
+        recap_response = client.get(f'/api/recap?period=month&month={now.month}&year={now.year}')
+        self.assertEqual(recap_response.status_code, 200)
+        recap = recap_response.get_json()
+
+        self.assertEqual(recap['stats']['total_plays'], 2)
+        self.assertEqual(recap['stats']['total_seconds'], 30)
+        self.assertEqual(recap['top_played'][0]['play_count'], 2)
 
     def test_lyrics_helpers_parse_and_clean(self):
         self.assertEqual(clean_text('Song Title (Official Video) feat. Guest'), 'Song Title')

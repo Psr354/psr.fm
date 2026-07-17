@@ -261,6 +261,28 @@ def init_db(db_path):
         cursor.execute("ALTER TABLE listening_logs ADD COLUMN user_id INTEGER DEFAULT 1")
         cursor.execute("UPDATE listening_logs SET user_id = 1 WHERE user_id IS NULL")
 
+    # ==========================================
+    # PLAY EVENTS TABLE
+    # ==========================================
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS play_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            song_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_play_events_user_timestamp
+        ON play_events (user_id, timestamp)
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_play_events_song_user
+        ON play_events (song_id, user_id)
+    ''')
+
     conn.commit()
     conn.close()
 

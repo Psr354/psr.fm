@@ -870,6 +870,7 @@ def log_play(song_id):
     if not get_owned_song(db, song_id):
         return jsonify({'error': 'Not found'}), 404
     db.execute('UPDATE songs SET play_count = play_count + 1 WHERE id = ? AND user_id = ?', (song_id, current_user.id))
+    db.execute('INSERT INTO play_events (song_id, user_id) VALUES (?, ?)', (song_id, current_user.id))
     db.commit()
     return jsonify({'status': 'ok'})
 
@@ -1198,10 +1199,10 @@ def get_recap():
     
     # Top played
     top_played_rows = db.execute('''
-        SELECT s.id, s.title, s.artist, s.album_art, COUNT(l.id) as play_count
-        FROM listening_logs l
-        JOIN songs s ON l.song_id = s.id
-        WHERE l.user_id = ? AND l.timestamp >= ? AND l.timestamp <= ?
+        SELECT s.id, s.title, s.artist, s.album_art, COUNT(pe.id) as play_count
+        FROM play_events pe
+        JOIN songs s ON pe.song_id = s.id
+        WHERE pe.user_id = ? AND pe.timestamp >= ? AND pe.timestamp <= ?
         GROUP BY s.id
         ORDER BY play_count DESC
         LIMIT 10
@@ -1222,46 +1223,76 @@ def get_recap():
     stats_row = db.execute('''
         SELECT 
             COALESCE(SUM(seconds_listened), 0) as total_seconds,
-            COUNT(DISTINCT song_id) as unique_songs,
-            COUNT(id) as total_plays
+            COUNT(DISTINCT song_id) as unique_songs
         FROM listening_logs
+        WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
+    ''', (current_user.id, start_str, end_str)).fetchone()
+    plays_row = db.execute('''
+        SELECT COUNT(id) as total_plays
+        FROM play_events
         WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
     ''', (current_user.id, start_str, end_str)).fetchone()
     
     # ponytail: monthly breakdown only for year view, one extra query
     monthly_breakdown = []
     if period == 'year':
-        monthly_rows = db.execute('''
+        monthly_listening_rows = db.execute('''
             SELECT
                 CAST(strftime('%m', timestamp) AS INTEGER) as month_num,
                 COALESCE(SUM(seconds_listened), 0) as total_seconds,
-                COUNT(DISTINCT song_id) as unique_songs,
-                COUNT(id) as total_plays
+                COUNT(DISTINCT song_id) as unique_songs
             FROM listening_logs
             WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
             GROUP BY month_num
             ORDER BY month_num
         ''', (current_user.id, start_str, end_str)).fetchall()
+        monthly_play_rows = db.execute('''
+            SELECT
+                CAST(strftime('%m', timestamp) AS INTEGER) as month_num,
+                COUNT(id) as total_plays
+            FROM play_events
+            WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
+            GROUP BY month_num
+            ORDER BY month_num
+        ''', (current_user.id, start_str, end_str)).fetchall()
+
+        monthly_stats = {
+            row['month_num']: {
+                'total_seconds': row['total_seconds'],
+                'unique_songs': row['unique_songs'],
+                'total_plays': 0,
+            }
+            for row in monthly_listening_rows
+        }
+        for row in monthly_play_rows:
+            monthly_stats.setdefault(row['month_num'], {
+                'total_seconds': 0,
+                'unique_songs': 0,
+                'total_plays': 0,
+            })
+            monthly_stats[row['month_num']]['total_plays'] = row['total_plays']
 
         month_names = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-        for row in monthly_rows:
-            m = row['month_num']
+        for m in sorted(monthly_stats):
             # top song per month
             top_song = db.execute('''
-                SELECT s.title, s.artist, s.album_art, COUNT(l.id) as pc
-                FROM listening_logs l JOIN songs s ON l.song_id = s.id
-                WHERE l.user_id = ? AND strftime('%m', l.timestamp) = ? AND l.timestamp >= ? AND l.timestamp <= ?
+                SELECT s.title, s.artist, s.album_art, COUNT(pe.id) as pc
+                FROM play_events pe JOIN songs s ON pe.song_id = s.id
+                WHERE pe.user_id = ? AND strftime('%m', pe.timestamp) = ? AND pe.timestamp >= ? AND pe.timestamp <= ?
                 GROUP BY s.id ORDER BY pc DESC LIMIT 1
             ''', (current_user.id, f'{m:02d}', start_str, end_str)).fetchone()
             monthly_breakdown.append({
                 'month': month_names[m],
                 'month_num': m,
-                'total_seconds': row['total_seconds'],
-                'unique_songs': row['unique_songs'],
-                'total_plays': row['total_plays'],
+                'total_seconds': monthly_stats[m]['total_seconds'],
+                'unique_songs': monthly_stats[m]['unique_songs'],
+                'total_plays': monthly_stats[m]['total_plays'],
                 'top_song': dict(top_song) if top_song else None
             })
+
+    stats = dict(stats_row) if stats_row else {"total_seconds": 0, "unique_songs": 0}
+    stats["total_plays"] = plays_row["total_plays"] if plays_row else 0
 
     result = {
         "period": {
@@ -1272,7 +1303,7 @@ def get_recap():
         },
         "top_played": [dict(r) for r in top_played_rows],
         "top_listened": [dict(r) for r in top_listened_rows],
-        "stats": dict(stats_row) if stats_row else {"total_seconds": 0, "unique_songs": 0, "total_plays": 0}
+        "stats": stats
     }
     if monthly_breakdown:
         result["monthly_breakdown"] = monthly_breakdown

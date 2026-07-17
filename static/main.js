@@ -2785,7 +2785,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     }
 
     function renderFrequencyFocus(data) {
-        if (!data.stats.total_plays) {
+        if (!data.stats.total_plays && !data.stats.total_seconds) {
             el.capsuleContent.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-icon"><i class="fas fa-headphones"></i></div>
