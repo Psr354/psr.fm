@@ -1,4 +1,6 @@
 import os
+import calendar
+from datetime import datetime
 import shutil
 import uuid
 from flask import Flask, request, jsonify, send_from_directory, render_template, g, redirect, url_for
@@ -1167,6 +1169,115 @@ def change_user_role(user_id):
     finally:
         conn.close()
 
+
+
+# ponytail: used stdlib datetime/calendar instead of dateutil to avoid an external dependency
+@app.route('/api/recap', methods=['GET'])
+@login_required
+def get_recap():
+    period = request.args.get('period', 'month')
+    now = datetime.now()
+    year = int(request.args.get('year', now.year))
+    
+    if period == 'month':
+        month = int(request.args.get('month', now.month))
+        # ponytail: standard library monthrange
+        last_day = calendar.monthrange(year, month)[1]
+        start_date = datetime(year, month, 1)
+        end_date = datetime(year, month, last_day, 23, 59, 59)
+        label = start_date.strftime('%B %Y')
+    else:
+        start_date = datetime(year, 1, 1)
+        end_date = datetime(year, 12, 31, 23, 59, 59)
+        label = str(year)
+        
+    start_str = start_date.strftime('%Y-%m-%d %H:%M:%S')
+    end_str = end_date.strftime('%Y-%m-%d %H:%M:%S')
+    
+    db = get_db()
+    
+    # Top played
+    top_played_rows = db.execute('''
+        SELECT s.id, s.title, s.artist, s.album_art, COUNT(l.id) as play_count
+        FROM listening_logs l
+        JOIN songs s ON l.song_id = s.id
+        WHERE l.user_id = ? AND l.timestamp >= ? AND l.timestamp <= ?
+        GROUP BY s.id
+        ORDER BY play_count DESC
+        LIMIT 10
+    ''', (current_user.id, start_str, end_str)).fetchall()
+    
+    # Top listened
+    top_listened_rows = db.execute('''
+        SELECT s.id, s.title, s.artist, s.album_art, SUM(l.seconds_listened) as total_listened
+        FROM listening_logs l
+        JOIN songs s ON l.song_id = s.id
+        WHERE l.user_id = ? AND l.timestamp >= ? AND l.timestamp <= ?
+        GROUP BY s.id
+        ORDER BY total_listened DESC
+        LIMIT 10
+    ''', (current_user.id, start_str, end_str)).fetchall()
+    
+    # Stats
+    stats_row = db.execute('''
+        SELECT 
+            COALESCE(SUM(seconds_listened), 0) as total_seconds,
+            COUNT(DISTINCT song_id) as unique_songs,
+            COUNT(id) as total_plays
+        FROM listening_logs
+        WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
+    ''', (current_user.id, start_str, end_str)).fetchone()
+    
+    # ponytail: monthly breakdown only for year view, one extra query
+    monthly_breakdown = []
+    if period == 'year':
+        monthly_rows = db.execute('''
+            SELECT
+                CAST(strftime('%m', timestamp) AS INTEGER) as month_num,
+                COALESCE(SUM(seconds_listened), 0) as total_seconds,
+                COUNT(DISTINCT song_id) as unique_songs,
+                COUNT(id) as total_plays
+            FROM listening_logs
+            WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
+            GROUP BY month_num
+            ORDER BY month_num
+        ''', (current_user.id, start_str, end_str)).fetchall()
+
+        month_names = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        for row in monthly_rows:
+            m = row['month_num']
+            # top song per month
+            top_song = db.execute('''
+                SELECT s.title, s.artist, s.album_art, COUNT(l.id) as pc
+                FROM listening_logs l JOIN songs s ON l.song_id = s.id
+                WHERE l.user_id = ? AND strftime('%m', l.timestamp) = ? AND l.timestamp >= ? AND l.timestamp <= ?
+                GROUP BY s.id ORDER BY pc DESC LIMIT 1
+            ''', (current_user.id, f'{m:02d}', start_str, end_str)).fetchone()
+            monthly_breakdown.append({
+                'month': month_names[m],
+                'month_num': m,
+                'total_seconds': row['total_seconds'],
+                'unique_songs': row['unique_songs'],
+                'total_plays': row['total_plays'],
+                'top_song': dict(top_song) if top_song else None
+            })
+
+    result = {
+        "period": {
+            "type": period,
+            "start": start_date.isoformat(),
+            "end": end_date.isoformat(),
+            "label": label
+        },
+        "top_played": [dict(r) for r in top_played_rows],
+        "top_listened": [dict(r) for r in top_listened_rows],
+        "stats": dict(stats_row) if stats_row else {"total_seconds": 0, "unique_songs": 0, "total_plays": 0}
+    }
+    if monthly_breakdown:
+        result["monthly_breakdown"] = monthly_breakdown
+
+    return jsonify(result)
 
 
 if __name__ == '__main__':

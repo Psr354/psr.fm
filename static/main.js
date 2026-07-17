@@ -41,6 +41,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // STATE MANAGEMENT (Single Source of Truth)
     // ==========================================
     const state = {
+        capsulePeriod: 'month-current',
+        capsuleData: null,
         playQueue: [],
         currentPlaylistId: null,
         currentPlaylistSongs: [],
@@ -128,11 +130,16 @@ document.addEventListener('DOMContentLoaded', () => {
         shareLyricsDownloadBtn: document.getElementById('share-lyrics-download-btn'),
         sidebar: document.querySelector('.sidebar'),
         mobileMenuBtn: document.getElementById('mobile-menu-btn'),
+        capsuleView: document.getElementById('capsule-view'),
+        capsuleBtn: document.getElementById('capsule-btn'),
+        capsuleContent: document.getElementById('capsule-content'),
+        capsulePeriodSelect: document.getElementById('capsule-period-select'),
         views: {
             dashboard: document.getElementById('dashboard-view'),
             playlist: document.getElementById('playlist-view'),
             search: document.getElementById('search-view'),
-            library: document.getElementById('library-view')
+            library: document.getElementById('library-view'),
+            capsule: document.getElementById('capsule-view')
         },
         playlistCoverImg: document.getElementById('playlist-cover-img'),
         playlistTitle: document.getElementById('playlist-title'),
@@ -1756,6 +1763,9 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             loadLibrarySongs();
         } else if (viewName === 'users') {
             if (el.usersBtn) el.usersBtn.classList.add('active');
+        } else if (viewName === 'capsule') {
+            if (el.capsuleBtn) el.capsuleBtn.classList.add('active');
+            loadFrequencyFocus(el.capsulePeriodSelect.value);
         }
 
         highlightPlayingSong();
@@ -2729,6 +2739,204 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             return;
         }
         playSong(state.currentPlaylistSongs, (state.currentSongIndex - 1 + state.currentPlaylistSongs.length) % state.currentPlaylistSongs.length);
+    }
+
+    // ==========================================
+    // FREQUENCY FOCUS
+    // ==========================================
+    function formatCapsuleTime(seconds) {
+        if (!seconds) return "0h 0m";
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        if (h === 0) return `${m}m`;
+        return `${h}h ${m}m`;
+    }
+
+    async function loadFrequencyFocus(periodCode = 'month-current') {
+        state.capsulePeriod = periodCode;
+        const now = new Date();
+        let period = 'month';
+        let month = now.getMonth() + 1;
+        let year = now.getFullYear();
+
+        if (periodCode === 'month-prev') {
+            month -= 1;
+            if (month === 0) {
+                month = 12;
+                year -= 1;
+            }
+        } else if (periodCode === 'year-current') {
+            period = 'year';
+        } else if (periodCode === 'year-prev') {
+            period = 'year';
+            year -= 1;
+        }
+
+        try {
+            const response = await fetch(`/api/recap?period=${period}&month=${month}&year=${year}`);
+            if (!response.ok) throw new Error("Failed to fetch recap");
+            const data = await response.json();
+            state.capsuleData = data;
+            renderFrequencyFocus(data);
+        } catch (e) {
+            console.error(e);
+            showToast("Error loading Frequency Focus");
+        }
+    }
+
+    function renderFrequencyFocus(data) {
+        if (!data.stats.total_plays) {
+            el.capsuleContent.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon"><i class="fas fa-headphones"></i></div>
+                    <h4>No listening history</h4>
+                    <p>Start playing some music to see your stats for ${escapeHtml(data.period.label)}!</p>
+                </div>
+            `;
+            return;
+        }
+
+        const topPlayed = data.top_played || [];
+        const topListened = data.top_listened || [];
+        const heroSong = topListened[0] || topPlayed[0];
+        const heroArt = heroSong?.album_art ? `/static/album_art/${mediaUrlName(heroSong.album_art)}` : '';
+        const heroTitle = heroSong ? escapeHtml(heroSong.title) : 'No top track yet';
+        const heroArtist = heroSong ? escapeHtml(heroSong.artist || 'Unknown') : 'Keep listening to build your recap';
+        const topPlayedLabel = topPlayed[0] ? escapeHtml(topPlayed[0].title) : 'Not enough data';
+        const focusLabel = data.period?.label || 'this period';
+
+        const heroHTML = `
+            <section class="capsule-hero">
+                <div class="capsule-hero-copy">
+                    <span class="capsule-kicker">${escapeHtml(focusLabel)}</span>
+                    <h3>Your sound was led by <span>${heroTitle}</span></h3>
+                    <p>${heroArtist}</p>
+                    <div class="capsule-hero-metrics" aria-label="Frequency Focus highlights">
+                        <div>
+                            <strong>${formatCapsuleTime(data.stats.total_seconds)}</strong>
+                            <span>listening time</span>
+                        </div>
+                        <div>
+                            <strong>${data.stats.total_plays}</strong>
+                            <span>plays</span>
+                        </div>
+                        <div>
+                            <strong>${data.stats.unique_songs}</strong>
+                            <span>songs</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="capsule-hero-art" aria-hidden="true">
+                    ${heroArt ? `<img src="${heroArt}" alt="" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">` : ''}
+                    <div class="capsule-hero-fallback" ${heroArt ? 'style="display:none;"' : ''}><i class="fas fa-wave-square"></i></div>
+                </div>
+            </section>
+        `;
+
+        const statsHTML = `
+            <div class="stats-grid capsule-stats-grid">
+                <div class="stat-card capsule-stat-card">
+                    <div class="stat-icon"><i class="fas fa-clock"></i></div>
+                    <div><h4>${formatCapsuleTime(data.stats.total_seconds)}</h4><p>Total Time</p></div>
+                </div>
+                <div class="stat-card stat-songs capsule-stat-card">
+                    <div class="stat-icon"><i class="fas fa-music"></i></div>
+                    <div><h4>${data.stats.unique_songs}</h4><p>Unique Songs</p></div>
+                </div>
+                <div class="stat-card stat-time capsule-stat-card">
+                    <div class="stat-icon"><i class="fas fa-play"></i></div>
+                    <div><h4>${data.stats.total_plays}</h4><p>Total Plays</p></div>
+                </div>
+                <div class="stat-card capsule-stat-card">
+                    <div class="stat-icon"><i class="fas fa-star"></i></div>
+                    <div><h4>${topPlayedLabel}</h4><p>Top Track</p></div>
+                </div>
+            </div>
+        `;
+
+        // ponytail: reuse .song-item layout from the rest of the app
+        const renderSongList = (songs, valueKey, valueLabel, isTime) => {
+            if (!songs || !songs.length) {
+                return `
+                    <div class="capsule-list-empty">
+                        <i class="fas fa-compact-disc"></i>
+                        <span>No tracks for this ranking yet.</span>
+                    </div>
+                `;
+            }
+            return songs.map((s, idx) => `
+                <div class="song-item capsule-song-item">
+                    <span class="rank-number ${idx < 3 ? 'top-3' : ''}">${idx + 1}</span>
+                    <img src="/static/album_art/${mediaUrlName(s.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'48\\' height=\\'48\\' viewBox=\\'0 0 24 24\\' fill=\\'%23b3b3b3\\'><path d=\\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\\'/></svg>';">
+                    <div class="song-info">
+                        <div class="song-title">${escapeHtml(s.title)}</div>
+                        <div class="song-artist">${escapeHtml(s.artist || 'Unknown')}</div>
+                    </div>
+                    <div class="song-stats">
+                        <span class="song-stat-primary">${isTime ? formatCapsuleTime(s[valueKey]) : s[valueKey]}</span>
+                        <span class="song-stat-secondary">${isTime ? 'listened' : valueLabel}</span>
+                    </div>
+                </div>
+            `).join('');
+        };
+
+        // ponytail: monthly breakdown for year view
+        let monthlyHTML = '';
+        if (data.monthly_breakdown && data.monthly_breakdown.length) {
+            const monthCards = data.monthly_breakdown.map(m => {
+                const topSongLine = m.top_song
+                    ? `<div class="month-top-song"><i class="fas fa-trophy"></i> ${escapeHtml(m.top_song.title)}</div>`
+                    : '';
+                return `
+                    <div class="month-card">
+                        <div class="month-card-header">${escapeHtml(m.month)}</div>
+                        <div class="month-card-stats">
+                            <span>${formatCapsuleTime(m.total_seconds)}</span>
+                            <span>${m.total_plays} plays</span>
+                        </div>
+                        ${topSongLine}
+                    </div>
+                `;
+            }).join('');
+            monthlyHTML = `
+                <section class="content-section capsule-section">
+                    <div class="section-heading"><h3 class="section-title">Month by Month</h3><span class="section-note">Your year at a glance</span></div>
+                    <div class="month-grid">${monthCards}</div>
+                </section>
+            `;
+        }
+
+        el.capsuleContent.innerHTML = `
+            ${heroHTML}
+            ${statsHTML}
+            ${monthlyHTML}
+            <div class="capsule-columns">
+                <section class="content-section capsule-section">
+                    <div class="section-heading"><h3 class="section-title">Most Played</h3><span class="section-note">By play count</span></div>
+                    <div class="songs-list">
+                        ${renderSongList(topPlayed, 'play_count', 'plays', false)}
+                    </div>
+                </section>
+                <section class="content-section capsule-section">
+                    <div class="section-heading"><h3 class="section-title">Most Listened</h3><span class="section-note">By listening time</span></div>
+                    <div class="songs-list">
+                        ${renderSongList(topListened, 'total_listened', '', true)}
+                    </div>
+                </section>
+            </div>
+        `;
+    }
+
+    if (el.capsuleBtn) {
+        el.capsuleBtn.addEventListener('click', () => {
+            showView('capsule');
+        });
+    }
+
+    if (el.capsulePeriodSelect) {
+        el.capsulePeriodSelect.addEventListener('change', (e) => {
+            loadFrequencyFocus(e.target.value);
+        });
     }
 
     // ==========================================

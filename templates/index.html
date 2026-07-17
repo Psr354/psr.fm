@@ -33,6 +33,7 @@
                 <button id="home-btn" class="nav-item active"><i class="fas fa-home"></i> Home</button>
                 <button id="search-btn" class="nav-item"><i class="fas fa-search"></i> Search</button>
                 <button id="library-btn" class="nav-item"><i class="fas fa-record-vinyl"></i> Library Songs</button>
+                <button id="capsule-btn" class="nav-item"><i class="fas fa-wave-square"></i> Frequency Focus</button>
                 <button id="global-download-btn" class="nav-item nav-item-accent"><i class="fas fa-download"></i> Download Song</button>
                 <button id="users-btn" class="nav-item nav-item-accent" style="display: none;">
                     <i class="fas fa-users-cog"></i> User Management
@@ -79,6 +80,28 @@
                     <div class="section-heading"><h3 class="section-title">Top Listened</h3><span class="section-note">Most listening time</span></div>
                     <div id="top-songs-duration-list" class="songs-list"></div>
                 </section>
+                </div>
+            </div>
+
+            <div id="capsule-view" class="view">
+                <div class="page-heading">
+                    <div>
+                        <p class="eyebrow">Your Journey</p>
+                        <h2>Frequency Focus</h2>
+                        <p class="page-subtitle">Your listening recap — see what defined your sound.</p>
+                    </div>
+                    <label class="capsule-period-control" for="capsule-period-select">
+                        <span>Period</span>
+                        <select id="capsule-period-select" class="period-selector">
+                            <option value="month-current">This Month</option>
+                            <option value="month-prev">Last Month</option>
+                            <option value="year-current">This Year</option>
+                            <option value="year-prev">Last Year</option>
+                        </select>
+                    </label>
+                </div>
+                <div id="capsule-content">
+                    <!-- Populated by JS -->
                 </div>
             </div>
 
