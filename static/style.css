@@ -579,7 +579,9 @@ body, .app-container {
     }
     .sidebar-scrim { display: block; position: fixed; inset: 0; z-index: 45; border: 0; background: rgba(0,0,0,0.66); opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
     .mobile-nav-open .sidebar-scrim { opacity: 1; pointer-events: auto; }
-    .mobile-nav-open .mobile-menu-btn { z-index: 60; left: 220px; }
+    .mobile-nav-open .mobile-menu-btn { z-index: 160; left: 220px; }
+    .mobile-nav-open .sidebar { z-index: 150; }
+    .mobile-nav-open .sidebar-scrim { z-index: 140; }
     .main-content {
         padding: 70px 16px 16px 16px;
         padding-bottom: 170px;
