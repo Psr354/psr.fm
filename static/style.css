@@ -845,8 +845,17 @@ h1, h2, h3, h4, .section-title, .track-title {
 }
 
 @media (max-width: 768px) {
-    .sidebar { width: min(304px, 84vw); left: min(-304px, -84vw); padding-top: 18px; }
+    .sidebar {
+        width: min(304px, 84vw);
+        left: min(-304px, -84vw);
+        padding-top: 18px;
+        padding-bottom: max(18px, env(safe-area-inset-bottom));
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+    }
     .sidebar.open { left: 0; }
+    .sidebar .playlist-section { flex: none; }
+    .sidebar .playlist-items { overflow-y: visible; }
     .mobile-nav-open .mobile-menu-btn { left: calc(min(304px, 84vw) - 56px); }
     .mobile-menu-btn { top: max(14px, env(safe-area-inset-top)); border-radius: 12px; background: rgba(14,17,15,.94); backdrop-filter: blur(12px); }
     .main-content { padding: 74px 12px 178px; }
@@ -1874,7 +1883,9 @@ h1, h2, h3, h4, .section-title, .track-title {
 @media (max-width: 768px) {
     .admin-view {
         left: 0;
-        padding: 76px 16px 38px;
+        padding: 76px 16px max(38px, env(safe-area-inset-bottom));
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
     }
 
     .admin-toolbar {
@@ -1914,6 +1925,20 @@ h1, h2, h3, h4, .section-title, .track-title {
     
     .users-table th, .users-table td {
         padding: 12px 10px;
+    }
+
+    .users-table-wrapper {
+        max-width: 100%;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .users-table { min-width: 520px; }
+
+    .action-btn {
+        width: 44px;
+        height: 44px;
     }
     
     .user-avatar-lg {
