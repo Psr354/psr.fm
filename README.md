@@ -254,10 +254,10 @@ Pastikan `.env` ada dan `SECRET_KEY` tidak berubah.
 
 ### Permission denied saat download/upload
 
-Di Linux server, jalankan:
+Container berjalan sebagai `root`, jadi folder data harus dimiliki `root` juga. Di Linux server, jalankan:
 
 ```bash
-sudo chown -R 1000:1000 database.db downloads static/album_art logs
+sudo chown -R root:root database.db downloads static/album_art logs
 docker compose restart
 ```
 

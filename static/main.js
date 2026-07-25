@@ -2847,9 +2847,9 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                     <div class="stat-icon"><i class="fas fa-play"></i></div>
                     <div><h4>${data.stats.total_plays}</h4><p>Total Plays</p></div>
                 </div>
-                <div class="stat-card capsule-stat-card">
+                <div class="stat-card capsule-stat-card stat-top-track">
                     <div class="stat-icon"><i class="fas fa-star"></i></div>
-                    <div><h4>${topPlayedLabel}</h4><p>Top Track</p></div>
+                    <div><h4 title="${topPlayedLabel}">${topPlayedLabel}</h4><p>Top Track</p></div>
                 </div>
             </div>
         `;
