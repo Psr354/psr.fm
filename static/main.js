@@ -2837,19 +2837,19 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             <div class="stats-grid capsule-stats-grid">
                 <div class="stat-card capsule-stat-card">
                     <div class="stat-icon"><i class="fas fa-clock"></i></div>
-                    <div><h4>${formatCapsuleTime(data.stats.total_seconds)}</h4><p>Total Time</p></div>
+                    <div><p>Total Time</p><h4>${formatCapsuleTime(data.stats.total_seconds)}</h4></div>
                 </div>
                 <div class="stat-card stat-songs capsule-stat-card">
                     <div class="stat-icon"><i class="fas fa-music"></i></div>
-                    <div><h4>${data.stats.unique_songs}</h4><p>Unique Songs</p></div>
+                    <div><p>Unique Songs</p><h4>${data.stats.unique_songs}</h4></div>
                 </div>
                 <div class="stat-card stat-time capsule-stat-card">
                     <div class="stat-icon"><i class="fas fa-play"></i></div>
-                    <div><h4>${data.stats.total_plays}</h4><p>Total Plays</p></div>
+                    <div><p>Total Plays</p><h4>${data.stats.total_plays}</h4></div>
                 </div>
                 <div class="stat-card capsule-stat-card stat-top-track">
                     <div class="stat-icon"><i class="fas fa-star"></i></div>
-                    <div><h4 title="${topPlayedLabel}">${topPlayedLabel}</h4><p>Top Track</p></div>
+                    <div><p>Top Track</p><h4 title="${topPlayedLabel}">${topPlayedLabel}</h4></div>
                 </div>
             </div>
         `;

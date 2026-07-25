@@ -43,3 +43,4 @@ Thumbs.db
 services/old.py
 *.old
 *backup*
+.github/
