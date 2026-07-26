@@ -7,7 +7,7 @@ from flask import Flask, request, jsonify, send_from_directory, render_template,
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, join_room
 from flask_wtf.csrf import CSRFProtect, generate_csrf, validate_csrf
 from PIL import Image
 import io
@@ -75,6 +75,14 @@ login_manager.login_view = 'login_page'
 login_manager.login_message = None
 
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+
+@socketio.on('connect')
+def on_socket_connect():
+    # Scope realtime events to the user who owns the socket so download/song
+    # notifications don't leak to every connected client.
+    if current_user.is_authenticated:
+        join_room(f'user_{current_user.id}')
 
 DOWNLOAD_DIR = os.environ.get('PSR_FM_DOWNLOAD_DIR', os.path.join(BASE_DIR, 'downloads'))
 LIBRARY_DIR = os.path.join(DOWNLOAD_DIR, 'library')

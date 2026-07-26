@@ -2181,11 +2181,13 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     el.audio.addEventListener('play', () => {
         state.lastLoggedTime = el.audio.currentTime;
         if (el.nowPlaying) el.nowPlaying.classList.add('playing');
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
     });
 
     el.audio.addEventListener('pause', () => {
         if (el.nowPlaying) el.nowPlaying.classList.remove('playing');
         flushListenLog();
+        if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
     });
 
     el.audio.addEventListener('seeked', () => {
@@ -2196,6 +2198,30 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         flushListenLog();
         playNext(true);
     });
+
+    // Media Session API: keeps background/locked-screen playback alive so tracks
+    // auto-advance when the tab is not focused, and wires OS media controls.
+    if ('mediaSession' in navigator) {
+        navigator.mediaSession.setActionHandler('previoustrack', () => playPrev());
+        navigator.mediaSession.setActionHandler('nexttrack', () => playNext(false));
+        navigator.mediaSession.setActionHandler('play', () => {
+            el.audio.play().catch(e => console.log("Play prevented", e));
+            updatePlayPauseIcon(true);
+        });
+        navigator.mediaSession.setActionHandler('pause', () => {
+            el.audio.pause();
+            updatePlayPauseIcon(false);
+        });
+    }
+
+    function updateMediaSession(song) {
+        if (!('mediaSession' in navigator)) return;
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: song.title || 'Unknown',
+            artist: song.artist || 'Unknown',
+            artwork: [{ src: `/static/album_art/${mediaUrlName(song.album_art)}` }]
+        });
+    }
 
     function flushListenLog() {
         if (state.currentPlayingSongId && state.lastLoggedTime > 0) {
@@ -2834,6 +2860,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
 
         updatePlayPauseIcon(true);
+        updateMediaSession(song);
         highlightPlayingSong();
         buildQueue();
         loadLyrics(song.id);

@@ -40,7 +40,7 @@ def download_worker(db_path, download_dir, album_art_dir, sio):
         try: process_download(task, db_path, download_dir, album_art_dir)
         except Exception as e:
             print(f"Error: {e}")
-            if socketio_instance: socketio_instance.emit('download_error', {'url': task['url'], 'error': str(e)})
+            if socketio_instance: socketio_instance.emit('download_error', {'url': task['url'], 'error': str(e)}, room=f"user_{task['user_id']}")
         finally: download_queue.task_done()
 
 def process_download(task, db_path, download_dir, album_art_dir):
@@ -58,9 +58,9 @@ def process_download(task, db_path, download_dir, album_art_dir):
                 percent_str = d.get('_percent_str', '0%').strip().replace('%', '').replace(' ', '')
                 try: percent = float(percent_str)
                 except: percent = 0
-                socketio_instance.emit('download_progress', {'url': url, 'percent': percent})
+                socketio_instance.emit('download_progress', {'url': url, 'percent': percent}, room=f'user_{user_id}')
             elif d['status'] == 'finished':
-                socketio_instance.emit('download_progress', {'url': url, 'percent': 100})
+                socketio_instance.emit('download_progress', {'url': url, 'percent': 100}, room=f'user_{user_id}')
 
     ydl_opts_info = {'quiet': True, 'no_warnings': True, 'extract_flat': False}
     with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
@@ -141,7 +141,7 @@ def process_download(task, db_path, download_dir, album_art_dir):
         print(f"[WARN] lyrics lookup failed for {song_id}: {exc}")
 
     if socketio_instance:
-        socketio_instance.emit('song_added', {'id': song_id, 'playlist_ids': playlist_ids, 'title': title, 'artist': artist, 'filename': expected_file, 'album_art': album_art_filename, 'duration_seconds': duration_seconds, 'source_url': source_url, 'source_id': source_id})
+        socketio_instance.emit('song_added', {'id': song_id, 'playlist_ids': playlist_ids, 'title': title, 'artist': artist, 'filename': expected_file, 'album_art': album_art_filename, 'duration_seconds': duration_seconds, 'source_url': source_url, 'source_id': source_id}, room=f'user_{user_id}')
 
 def start_worker(db_path, download_dir, album_art_dir, sio):
     threading.Thread(target=download_worker, args=(db_path, download_dir, album_art_dir, sio), daemon=True).start()
