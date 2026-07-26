@@ -47,6 +47,8 @@ document.addEventListener('DOMContentLoaded', () => {
         currentPlaylistId: null,
         currentPlaylistSongs: [],
         currentSongIndex: -1,
+        shuffleOrder: [],
+        shuffleKey: null,
         isShuffle: false,
         repeatMode: 0, // 0=Off, 1=RepeatAll, 2=RepeatOne
         currentPlayingSongId: null,
@@ -1684,23 +1686,43 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     // ==========================================
     // QUEUE MANAGEMENT
     // ==========================================
+    // Build a fresh shuffled order of ALL songs in the playlist, starting with
+    // the current song. Every song appears exactly once, so nothing repeats
+    // until the whole playlist has played through (a-c-d-f-b-g-e-a).
+    function rebuildShuffleOrder() {
+        const rest = [];
+        for (let i = 0; i < state.currentPlaylistSongs.length; i++) {
+            if (i !== state.currentSongIndex) rest.push(state.currentPlaylistSongs[i]);
+        }
+        for (let i = rest.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [rest[i], rest[j]] = [rest[j], rest[i]];
+        }
+        state.shuffleOrder = [state.currentPlaylistSongs[state.currentSongIndex], ...rest];
+        state.shuffleKey = state.currentPlaylistId;
+    }
+
     function buildQueue() {
         state.playQueue = [];
         if (!state.currentPlaylistSongs || state.currentPlaylistSongs.length <= 1) {
+            state.shuffleOrder = [];
             updateQueueUI();
             return;
         }
-        const remaining = [...state.currentPlaylistSongs];
-        remaining.splice(state.currentSongIndex, 1);
 
         if (state.isShuffle) {
-            for (let i = remaining.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
+            // Only reshuffle when the playlist changed or shuffle was just turned
+            // on; otherwise reuse the existing order so songs don't repeat.
+            const currentSong = state.currentPlaylistSongs[state.currentSongIndex];
+            const hasCurrent = state.shuffleOrder?.some(s => s.id === currentSong.id);
+            if (!state.shuffleOrder?.length || state.shuffleKey !== state.currentPlaylistId || !hasCurrent) {
+                rebuildShuffleOrder();
             }
-            state.playQueue = remaining;
+            const pos = state.shuffleOrder.findIndex(s => s.id === currentSong.id);
+            state.playQueue = state.shuffleOrder.slice(pos + 1);
             if (el.queueMode) el.queueMode.innerText = '(Shuffled)';
         } else {
+            state.shuffleOrder = [];
             for (let i = 1; i < state.currentPlaylistSongs.length; i++) {
                 const nextIdx = (state.currentSongIndex + i) % state.currentPlaylistSongs.length;
                 state.playQueue.push(state.currentPlaylistSongs[nextIdx]);
@@ -1924,6 +1946,9 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     document.getElementById('shuffle-btn')?.addEventListener('click', () => {
         state.isShuffle = !state.isShuffle;
         document.getElementById('shuffle-btn')?.classList.toggle('active', state.isShuffle);
+        if (state.isShuffle) {
+            state.shuffleOrder = []; // Force a fresh shuffle order when turned on
+        }
         buildQueue();
     });
 
@@ -2721,6 +2746,19 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
 
         if (state.currentPlaylistSongs.length === 0) return;
+
+        // Queue is empty: the whole playlist has played through once.
+        if (state.isShuffle) {
+            if (state.repeatMode === 0) {
+                el.audio.pause();
+                updatePlayPauseIcon(false);
+                return;
+            }
+            // Repeat All: start a fresh shuffle so the next loop has a new order.
+            state.shuffleOrder = [];
+            playSong(state.currentPlaylistSongs, Math.floor(Math.random() * state.currentPlaylistSongs.length));
+            return;
+        }
 
         let nextIndex = (state.currentSongIndex + 1) % state.currentPlaylistSongs.length;
         if (nextIndex === 0 && state.repeatMode === 0 && state.currentSongIndex === state.currentPlaylistSongs.length - 1) {
