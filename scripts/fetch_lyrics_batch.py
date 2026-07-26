@@ -20,8 +20,8 @@ def main():
         '''
         SELECT id, title, artist, duration_seconds
         FROM songs
-        WHERE COALESCE(lyrics, '') = ''
-           OR COALESCE(synced_lyrics, '') = ''
+        WHERE (COALESCE(lyrics, '') = '' OR COALESCE(synced_lyrics, '') = '')
+          AND COALESCE(lyrics_status, 'none') NOT IN ('manual', 'not_found')
         ORDER BY created_at ASC
         '''
     )

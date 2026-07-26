@@ -56,16 +56,25 @@ class AuthAndDownloadTests(unittest.TestCase):
         filename='test-track.mp3',
         source_url=None,
         source_id=None,
+        lyrics='',
+        synced_lyrics='',
+        lyrics_status='none',
     ):
         conn = sqlite3.connect(self.app_module.DATABASE_PATH)
         try:
             cursor = conn.cursor()
             cursor.execute(
                 '''
-                INSERT INTO songs (title, artist, filename, duration_seconds, source_url, source_id, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO songs (
+                    title, artist, filename, duration_seconds, source_url, source_id,
+                    lyrics, synced_lyrics, lyrics_status, user_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
-                (title, artist, filename, duration_seconds, source_url, source_id, user_id),
+                (
+                    title, artist, filename, duration_seconds, source_url, source_id,
+                    lyrics, synced_lyrics, lyrics_status, user_id,
+                ),
             )
             conn.commit()
             return cursor.lastrowid
@@ -409,6 +418,75 @@ class AuthAndDownloadTests(unittest.TestCase):
             )
 
         self.assertEqual(limited_response.status_code, 429)
+
+    def test_manual_lyrics_survive_try_again_refresh(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+        song_id = self._create_song()
+
+        # User writes lyrics by hand.
+        client.put(
+            f'/api/songs/{song_id}/lyrics',
+            headers={'X-CSRF-Token': csrf_token},
+            json={'lyrics': 'My hand-typed lyrics', 'synced_lyrics': ''},
+        )
+
+        # "Try again" must NOT overwrite manual lyrics, even if LRCLIB has a hit.
+        with patch.object(self.app_module, 'search_lyrics', return_value={
+            'lyrics': 'Remote lyrics',
+            'synced_lyrics': '[00:01.00] Remote lyrics',
+        }) as search_mock:
+            refresh_response = client.post(
+                f'/api/songs/{song_id}/lyrics',
+                headers={'X-CSRF-Token': csrf_token},
+            )
+
+        search_mock.assert_not_called()
+        self.assertEqual(refresh_response.status_code, 200)
+        self.assertEqual(refresh_response.get_json()['lyrics'], 'My hand-typed lyrics')
+        self.assertEqual(refresh_response.get_json()['lyrics_status'], 'manual')
+
+        stored = client.get(f'/api/songs/{song_id}/lyrics').get_json()
+        self.assertEqual(stored['lyrics'], 'My hand-typed lyrics')
+        self.assertEqual(stored['lyrics_status'], 'manual')
+
+    def test_added_library_song_does_not_inherit_other_users_lyrics(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+        playlist_id = self._create_playlist()
+        source_song_id = self._create_song(
+            user_id=2,
+            title='Shared With Lyrics',
+            artist='Someone Else',
+            filename='shared-with-lyrics.mp3',
+            source_url='https://www.youtube.com/watch?v=abc12345678',
+            source_id='abc12345678',
+            lyrics='Other user lyrics',
+            synced_lyrics='[00:01.00] Other user lyrics',
+            lyrics_status='manual',
+        )
+
+        add_response = client.post(
+            f'/api/library-songs/{source_song_id}/add',
+            headers={'X-CSRF-Token': csrf_token},
+            json={'playlist_ids': [playlist_id]},
+        )
+        self.assertEqual(add_response.status_code, 200)
+        new_song_id = add_response.get_json()['song_id']
+        self.assertNotEqual(new_song_id, source_song_id)
+
+        lyrics = client.get(f'/api/songs/{new_song_id}/lyrics').get_json()
+        self.assertEqual(lyrics['lyrics'], '')
+        self.assertEqual(lyrics['synced_lyrics'], '')
+        self.assertEqual(lyrics['lyrics_status'], 'none')
 
 
 if __name__ == '__main__':

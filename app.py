@@ -182,10 +182,12 @@ def add_global_song_to_playlists(db, source_song, playlist_ids):
                 source_song['duration_seconds'],
                 source_song['source_url'],
                 source_song['source_id'],
-                source_song['lyrics'],
-                source_song['synced_lyrics'],
-                source_song['lyrics_status'] or 'none',
-                source_song['lyrics_updated_at'],
+                # Lyrics are per-user: a copy added from another library starts
+                # blank so each user manages (and edits) their own lyrics.
+                '',
+                '',
+                'none',
+                None,
                 current_user.id,
             )
         )
@@ -898,6 +900,16 @@ def refresh_song_lyrics(song_id):
     song = get_owned_song(db, song_id)
     if not song:
         return jsonify({'error': 'Not found'}), 404
+
+    # Never let an automatic refresh ("Try again") wipe out lyrics the user
+    # edited by hand. Manual lyrics are kept until the user changes them.
+    if (song['lyrics_status'] or 'none') == 'manual':
+        return jsonify({
+            'lyrics': song['lyrics'] or '',
+            'synced_lyrics': song['synced_lyrics'] or '',
+            'lyrics_status': 'manual',
+            'lyrics_updated_at': song['lyrics_updated_at'],
+        })
 
     allowed, retry_after = check_lyrics_rate_limit(current_user.id)
     if not allowed:
