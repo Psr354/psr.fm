@@ -2981,12 +2981,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                             <span>listening time</span>
                         </div>
                         <div>
-                            <strong>${data.stats.total_plays}</strong>
+                            <strong>${heroSong ? (heroSong.play_count || 0) : 0}</strong>
                             <span>plays</span>
-                        </div>
-                        <div>
-                            <strong>${data.stats.unique_songs}</strong>
-                            <span>songs</span>
                         </div>
                     </div>
                 </div>

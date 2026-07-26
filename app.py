@@ -1220,16 +1220,22 @@ def get_recap():
         LIMIT 10
     ''', (current_user.id, start_str, end_str)).fetchall()
     
-    # Top listened
+    # Top listened. ponytail: correlated subquery counts this song's plays
+    # inside the same window so the hero card shows per-period (monthly/yearly)
+    # plays, matching how total_listened is windowed.
     top_listened_rows = db.execute('''
-        SELECT s.id, s.title, s.artist, s.album_art, SUM(l.seconds_listened) as total_listened
+        SELECT s.id, s.title, s.artist, s.album_art,
+               SUM(l.seconds_listened) as total_listened,
+               (SELECT COUNT(pe.id) FROM play_events pe
+                WHERE pe.song_id = s.id AND pe.user_id = l.user_id
+                  AND pe.timestamp >= ? AND pe.timestamp <= ?) as play_count
         FROM listening_logs l
         JOIN songs s ON l.song_id = s.id
         WHERE l.user_id = ? AND l.timestamp >= ? AND l.timestamp <= ?
         GROUP BY s.id
         ORDER BY total_listened DESC
         LIMIT 10
-    ''', (current_user.id, start_str, end_str)).fetchall()
+    ''', (start_str, end_str, current_user.id, start_str, end_str)).fetchall()
     
     # Stats
     stats_row = db.execute('''
