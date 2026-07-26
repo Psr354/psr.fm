@@ -8,7 +8,7 @@ from datetime import datetime
 from http.cookies import SimpleCookie
 from unittest.mock import patch
 
-from services.lyrics import clean_text, parse_lrc
+from services.lyrics import clean_text, parse_lrc, _build_search_variants
 
 
 class AuthAndDownloadTests(unittest.TestCase):
@@ -346,6 +346,14 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(len(parsed), 3)
         self.assertAlmostEqual(parsed[1]['timestamp'], 3.0, places=1)
         self.assertAlmostEqual(parsed[2]['timestamp'], 5.5, places=1)
+
+    def test_lyrics_variants_split_multi_artist(self):
+        # A multi-artist credit must yield per-artist variants plus a
+        # title-only fallback so LRCLIB (single-artist indexed) can match.
+        variants = _build_search_variants('cool enough for you', 'Gerald Timotheus / Skyline')
+        self.assertIn(('cool enough for you', 'Gerald Timotheus'), variants)
+        self.assertIn(('cool enough for you', 'Skyline'), variants)
+        self.assertIn(('cool enough for you', ''), variants)
 
     def test_lyrics_endpoints(self):
         client = self.app_module.app.test_client()

@@ -19,6 +19,10 @@ _FEAT_RE = re.compile(r'\s*(?:\(|\[)?\b(?:feat\.?|ft\.?|featuring)\b[^\])]*', re
 _WHITESPACE_RE = re.compile(r'\s+')
 _LRC_TIMESTAMP_RE = re.compile(r'\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]')
 _ARTIST_TITLE_RE = re.compile(r'^\s*(?P<artist>[^-–—:|]+)\s*[-–—:|]\s*(?P<title>.+?)\s*$')
+# Splits a multi-artist credit ("A / B", "A & B", "A, B feat. C", "A x B")
+# into individual names so each can be searched separately on LRCLIB, which
+# usually indexes a single primary artist.
+_ARTIST_SPLIT_RE = re.compile(r'\s*(?:/|,|&|\bx\b|\bvs\.?\b|\bfeat\.?\b|\bft\.?\b|\bwith\b|\band\b|\+)\s*', re.IGNORECASE)
 
 
 def _throttled_request(method, url, **kwargs):
@@ -78,6 +82,12 @@ def parse_lrc(lrc_content):
     return sorted(lines, key=lambda item: item['timestamp'])
 
 
+def _split_artists(artist):
+    if not artist:
+        return []
+    parts = [clean_text(part) for part in _ARTIST_SPLIT_RE.split(str(artist))]
+    return [part for part in parts if part]
+
 def _build_search_variants(title, artist):
     clean_title = clean_text(title)
     clean_artist = clean_text(artist)
@@ -92,6 +102,15 @@ def _build_search_variants(title, artist):
         split_title = clean_text(match.group('title'))
         if split_title:
             variants.append((split_title, split_artist or clean_artist))
+
+    # Multi-artist credits ("Gerald Timotheus / Skyline") rarely match LRCLIB's
+    # single-artist index, so try each individual artist, then fall back to a
+    # title+duration-only search (still guarded by the ±5s duration check).
+    if clean_title:
+        individual = _split_artists(clean_artist)
+        if len(individual) > 1:
+            variants.extend((clean_title, name) for name in individual)
+        variants.append((clean_title, ''))
 
     unique = []
     seen = set()
