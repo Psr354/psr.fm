@@ -476,6 +476,22 @@ button { touch-action: manipulation; }
 .checkbox-row:hover { background: var(--bg-highlight); }
 .checkbox-row input { width: 18px; height: 18px; accent-color: var(--accent-color); flex-shrink: 0; }
 .empty-compact { color: var(--text-secondary); font-size: 13px; padding: 8px; }
+
+.playlist-add-songs-btn { margin-top: 14px; }
+.add-songs-modal-content { width: 520px; max-width: 100%; }
+.search-container.compact { margin: 0; }
+.add-songs-list { display: flex; flex-direction: column; gap: 4px; max-height: 46vh; overflow-y: auto; background: #0a0a0a; padding: 8px; border: 1px solid var(--border-subtle); border-radius: 8px; }
+.add-song-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 8px; cursor: pointer; transition: background-color 0.15s; }
+.add-song-row:hover { background: var(--bg-highlight); }
+.add-song-row.is-selected { background: rgba(29, 185, 84, 0.12); }
+.add-song-row.is-added { opacity: 0.5; cursor: default; }
+.add-song-row input { width: 18px; height: 18px; accent-color: var(--accent-color); flex-shrink: 0; }
+.add-song-row img { width: 42px; height: 42px; border-radius: 6px; object-fit: cover; background: #282828; flex-shrink: 0; }
+.add-song-row .add-song-info { min-width: 0; flex: 1; }
+.add-song-row .add-song-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.add-song-row .add-song-artist { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.add-song-row .add-song-dur { font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
+.add-song-row .added-pill { font-size: 11px; font-weight: 700; color: var(--accent-color); flex-shrink: 0; }
 .library-warning {
     align-items: flex-start;
     gap: 12px;

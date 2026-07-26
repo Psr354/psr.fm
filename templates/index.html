@@ -112,6 +112,7 @@
                         <div>
                             <div class="playlist-title-row"><h2 id="playlist-title">Playlist</h2><button id="rename-playlist-btn" class="icon-btn"><i class="fas fa-pen"></i></button></div>
                             <p id="playlist-meta" class="playlist-meta"></p>
+                            <button id="playlist-add-songs-btn" class="btn-primary compact-action playlist-add-songs-btn" type="button"><i class="fas fa-plus"></i> Add Songs</button>
                         </div>
                     </div>
                     <button id="delete-playlist-btn" class="btn-danger"><i class="fas fa-trash"></i> Delete</button>
@@ -332,6 +333,19 @@
             <p class="field-hint">Add to playlists:</p>
             <div id="playlist-checkboxes" class="checkbox-list"></div>
             <div class="modal-actions"><button id="cancel-global-download-btn" class="btn-secondary">Cancel</button><button id="save-global-download-btn" class="btn-primary">Download</button></div>
+        </div>
+    </div>
+
+    <div id="add-songs-modal" class="modal">
+        <div class="modal-content add-songs-modal-content">
+            <h3>Add Songs to Playlist</h3>
+            <p class="field-hint">Pick from Library Songs, then add straight to <strong id="add-songs-playlist-name">this playlist</strong>.</p>
+            <div class="search-container compact"><i class="fas fa-search"></i><input type="text" id="add-songs-search-input" placeholder="Search Library Songs..."></div>
+            <div id="add-songs-list" class="add-songs-list"></div>
+            <div class="modal-actions">
+                <button id="cancel-add-songs-btn" class="btn-secondary">Close</button>
+                <button id="confirm-add-songs-btn" class="btn-primary" disabled>Add <span id="add-songs-count"></span></button>
+            </div>
         </div>
     </div>
 

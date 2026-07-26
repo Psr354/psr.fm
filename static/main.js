@@ -2338,6 +2338,131 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     }, 300));
 
     // ==========================================
+    // ADD SONGS TO PLAYLIST (from Library Songs)
+    // ==========================================
+    const addSongsModal = document.getElementById('add-songs-modal');
+    const addSongsList = document.getElementById('add-songs-list');
+    const addSongsSearchInput = document.getElementById('add-songs-search-input');
+    const confirmAddSongsBtn = document.getElementById('confirm-add-songs-btn');
+    const addSongsCountLabel = document.getElementById('add-songs-count');
+    const addSongsSelected = new Set();
+
+    function renderAddSongsList(songs) {
+        if (!addSongsList) return;
+        const existingIds = new Set(state.currentPlaylistSongs.map(s => String(s.source_id || `f:${s.filename}`)));
+        addSongsList.innerHTML = '';
+        if (!songs.length) {
+            addSongsList.innerHTML = '<p class="empty-compact">No songs found in Library Songs.</p>';
+            return;
+        }
+        songs.forEach((song) => {
+            const alreadyIn = existingIds.has(String(song.source_id || `f:${song.filename}`));
+            const row = document.createElement('label');
+            row.className = 'add-song-row' + (alreadyIn ? ' is-added' : '');
+            if (addSongsSelected.has(song.id)) row.classList.add('is-selected');
+            row.innerHTML = `
+                <input type="checkbox" value="${song.id}" ${alreadyIn ? 'disabled' : ''} ${addSongsSelected.has(song.id) ? 'checked' : ''}>
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" alt="" loading="lazy" onerror="this.style.background='#282828'; this.removeAttribute('src');">
+                <div class="add-song-info">
+                    <div class="add-song-title">${escapeHtml(song.title)}</div>
+                    <div class="add-song-artist">${escapeHtml(song.artist || 'Unknown')}</div>
+                </div>
+                ${alreadyIn ? '<span class="added-pill">In playlist</span>' : `<span class="add-song-dur">${formatTime(song.duration_seconds)}</span>`}
+            `;
+            const checkbox = row.querySelector('input');
+            if (!alreadyIn) {
+                checkbox.addEventListener('change', () => {
+                    if (checkbox.checked) addSongsSelected.add(song.id);
+                    else addSongsSelected.delete(song.id);
+                    row.classList.toggle('is-selected', checkbox.checked);
+                    updateAddSongsCount();
+                });
+            }
+            addSongsList.appendChild(row);
+        });
+    }
+
+    function updateAddSongsCount() {
+        if (!confirmAddSongsBtn) return;
+        const count = addSongsSelected.size;
+        confirmAddSongsBtn.disabled = count === 0;
+        if (addSongsCountLabel) addSongsCountLabel.innerText = count ? `(${count})` : '';
+    }
+
+    async function loadAddSongsList(query = '') {
+        if (!addSongsList) return;
+        addSongsList.innerHTML = '<p class="empty-compact">Loading Library Songs...</p>';
+        try {
+            const suffix = query ? `?q=${encodeURIComponent(query)}` : '';
+            const songs = await (await fetch(`/api/library-songs${suffix}`)).json();
+            renderAddSongsList(songs);
+        } catch (err) {
+            addSongsList.innerHTML = '<p class="empty-compact">Library unavailable. Try again.</p>';
+        }
+    }
+
+    function openAddSongsModal() {
+        if (!state.currentPlaylistId || !addSongsModal) return;
+        addSongsSelected.clear();
+        updateAddSongsCount();
+        const nameEl = document.getElementById('add-songs-playlist-name');
+        if (nameEl) nameEl.innerText = state.currentPlaylist?.name || 'this playlist';
+        if (addSongsSearchInput) addSongsSearchInput.value = '';
+        addSongsModal.style.display = 'flex';
+        loadAddSongsList();
+        addSongsSearchInput?.focus();
+    }
+
+    function closeAddSongsModal() {
+        if (addSongsModal) addSongsModal.style.display = 'none';
+    }
+
+    document.getElementById('playlist-add-songs-btn')?.addEventListener('click', openAddSongsModal);
+    document.getElementById('cancel-add-songs-btn')?.addEventListener('click', closeAddSongsModal);
+    addSongsModal?.addEventListener('click', (e) => {
+        if (e.target === addSongsModal) closeAddSongsModal();
+    });
+    addSongsSearchInput?.addEventListener('input', debounce((e) => {
+        loadAddSongsList(e.target.value.trim());
+    }, 300));
+
+    confirmAddSongsBtn?.addEventListener('click', async () => {
+        const playlistId = state.currentPlaylistId;
+        const songIds = [...addSongsSelected];
+        if (!playlistId || songIds.length === 0) return;
+
+        confirmAddSongsBtn.disabled = true;
+        const originalLabel = confirmAddSongsBtn.innerHTML;
+        confirmAddSongsBtn.innerText = 'Adding...';
+
+        let addedCount = 0;
+        let failedCount = 0;
+        for (const songId of songIds) {
+            try {
+                const res = await fetch(`/api/library-songs/${songId}/add`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({playlist_ids: [playlistId]})
+                });
+                if (res.ok) addedCount += 1;
+                else failedCount += 1;
+            } catch (err) {
+                failedCount += 1;
+            }
+        }
+
+        confirmAddSongsBtn.innerHTML = originalLabel;
+        closeAddSongsModal();
+
+        if (addedCount) {
+            showToast(`Added ${addedCount} song${addedCount === 1 ? '' : 's'} to playlist`, 'success');
+            if (state.currentPlaylist) openPlaylist(state.currentPlaylist);
+            loadDashboard();
+        }
+        if (failedCount) showToast(`${failedCount} song${failedCount === 1 ? '' : 's'} could not be added`, 'error');
+    });
+
+    // ==========================================
     // PLAYLISTS
     // ==========================================
     async function loadPlaylists() {
