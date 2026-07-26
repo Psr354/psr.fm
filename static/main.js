@@ -2803,6 +2803,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         const heroTitle = heroSong ? escapeHtml(heroSong.title) : 'No top track yet';
         const heroArtist = heroSong ? escapeHtml(heroSong.artist || 'Unknown') : 'Keep listening to build your recap';
         const topPlayedLabel = topPlayed[0] ? escapeHtml(topPlayed[0].title) : 'Not enough data';
+        const topPlayedArt = topPlayed[0]?.album_art ? `/static/album_art/${mediaUrlName(topPlayed[0].album_art)}` : '';
         const focusLabel = data.period?.label || 'this period';
 
         const heroHTML = `
@@ -2813,7 +2814,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                     <p>${heroArtist}</p>
                     <div class="capsule-hero-metrics" aria-label="Frequency Focus highlights">
                         <div>
-                            <strong>${formatCapsuleTime(data.stats.total_seconds)}</strong>
+                            <strong>${formatCapsuleTime(heroSong ? (heroSong.total_listened || 0) : 0)}</strong>
                             <span>listening time</span>
                         </div>
                         <div>
@@ -2848,7 +2849,10 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                     <div><p>Total Plays</p><h4>${data.stats.total_plays}</h4></div>
                 </div>
                 <div class="stat-card capsule-stat-card stat-top-track">
-                    <div class="stat-icon"><i class="fas fa-star"></i></div>
+                    <div class="stat-icon stat-top-track-art">
+                        ${topPlayedArt ? `<img src="${topPlayedArt}" alt="" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">` : ''}
+                        <div class="stat-top-track-fallback" ${topPlayedArt ? 'style="display:none;"' : ''}><i class="fas fa-star"></i></div>
+                    </div>
                     <div><p>Top Track</p><h4 title="${topPlayedLabel}">${topPlayedLabel}</h4></div>
                 </div>
             </div>
