@@ -394,6 +394,11 @@ def create_new_user():
 def index():
     return render_template('index.html')
 
+@app.route('/service-worker.js')
+def service_worker():
+    """Expose the worker at the domain root so it can control the app and audio URLs."""
+    return send_from_directory(app.static_folder, 'service-worker.js', mimetype='application/javascript')
+
 @app.route('/api/playlists', methods=['POST'])
 @login_required
 def create_playlist():

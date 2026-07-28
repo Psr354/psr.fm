@@ -3439,7 +3439,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     if (dashboardTitle) dashboardTitle.innerText = getGreeting();
 
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/static/service-worker.js').catch((error) => {
+        navigator.serviceWorker.register('/service-worker.js').catch((error) => {
             console.warn('Offline support could not be registered:', error);
         });
     }
