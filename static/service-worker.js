@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'psr354-shell-v1';
+const SHELL_CACHE = 'psr354-shell-v2';
 const MEDIA_CACHE = 'psr354-media-v2';
 const SHELL_FILES = [
   '/', '/static/main.js', '/static/style.css', '/static/site.webmanifest',
@@ -10,7 +10,15 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys
+        .filter((key) => key.startsWith('psr354-shell-') && key !== SHELL_CACHE)
+        .map((key) => caches.delete(key))))
+      .then(() => self.clients.claim())
+  );
+});
 
 self.addEventListener('fetch', (event) => {
   const request = event.request;
