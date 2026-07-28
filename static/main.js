@@ -237,6 +237,95 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.removeChild(a);
     }
 
+    // Offline downloads stay inside the browser's storage. They are separate
+    // from the regular MP3 download, which is handed to the device's Downloads folder.
+    const OFFLINE_DB = 'psr354-offline';
+    const OFFLINE_STORE = 'playlists';
+    const OFFLINE_MEDIA_CACHE = 'psr354-media-v1';
+
+    function offlineDb() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(OFFLINE_DB, 1);
+            request.onupgradeneeded = () => request.result.createObjectStore(OFFLINE_STORE, { keyPath: 'id' });
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async function saveOfflinePlaylist(playlist) {
+        const songs = state.currentPlaylistSongs;
+        if (!songs.length) return showToast('Add songs before saving this playlist offline', 'error');
+        const button = document.getElementById('save-playlist-offline-btn');
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving 0%';
+        }
+        try {
+            const cache = await caches.open(OFFLINE_MEDIA_CACHE);
+            const assets = [
+                ...(playlist.cover_art ? [`/static/album_art/${mediaUrlName(playlist.cover_art)}`] : []),
+                ...songs.flatMap((song) => [
+                    `/audio/${mediaUrlName(song.filename)}`,
+                    ...(song.album_art ? [`/static/album_art/${mediaUrlName(song.album_art)}`] : [])
+                ])
+            ];
+            const uniqueAssets = [...new Set(assets)];
+            for (let i = 0; i < uniqueAssets.length; i += 1) {
+                const response = await fetch(uniqueAssets[i]);
+                if (!response.ok) throw new Error('One or more files could not be downloaded');
+                await cache.put(uniqueAssets[i], response.clone());
+                if (button) button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving ${Math.round((i + 1) / uniqueAssets.length * 100)}%`;
+            }
+            const lyrics = {};
+            for (let i = 0; i < songs.length; i += 1) {
+                const response = await fetch(`/api/songs/${songs[i].id}/lyrics`);
+                if (response.ok) lyrics[songs[i].id] = await response.json();
+                if (button) button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving lyrics ${i + 1}/${songs.length}`;
+            }
+            const db = await offlineDb();
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction(OFFLINE_STORE, 'readwrite');
+                tx.objectStore(OFFLINE_STORE).put({ ...playlist, songs, lyrics, saved_at: new Date().toISOString() });
+                tx.oncomplete = resolve;
+                tx.onerror = () => reject(tx.error);
+            });
+            db.close();
+            showToast(`Playlist "${playlist.name}" is ready offline`, 'success');
+        } catch (error) {
+            console.error('Offline save failed:', error);
+            showToast(error.message || 'Offline save failed. Check your connection and storage.', 'error');
+        } finally {
+            updateOfflineButton();
+        }
+    }
+
+    async function getOfflinePlaylists() {
+        const db = await offlineDb();
+        const playlists = await new Promise((resolve, reject) => {
+            const request = db.transaction(OFFLINE_STORE, 'readonly').objectStore(OFFLINE_STORE).getAll();
+            request.onsuccess = () => resolve(request.result || []);
+            request.onerror = () => reject(request.error);
+        });
+        db.close();
+        return playlists;
+    }
+
+    async function getOfflinePlaylist(id) {
+        const playlists = await getOfflinePlaylists();
+        return playlists.find((playlist) => String(playlist.id) === String(id));
+    }
+
+    async function updateOfflineButton() {
+        const button = document.getElementById('save-playlist-offline-btn');
+        if (!button) return;
+        const saved = state.currentPlaylist ? await getOfflinePlaylist(state.currentPlaylist.id) : null;
+        button.disabled = !navigator.onLine;
+        button.innerHTML = saved
+            ? '<i class="fas fa-check"></i> Saved Offline'
+            : '<i class="fas fa-cloud-download-alt"></i> Save Offline';
+        button.title = navigator.onLine ? '' : 'This playlist is already available offline';
+    }
+
     function debounce(f, w) {
         let t;
         return (...a) => {
@@ -455,6 +544,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
+            if (!navigator.onLine) {
+                const playlist = await getOfflinePlaylist(state.currentPlaylistId);
+                const data = playlist?.lyrics?.[songId];
+                if (!data) throw new Error('Lyrics were not saved offline');
+                state.plainLyrics = data.lyrics || '';
+                state.rawSyncedLyrics = data.synced_lyrics || '';
+                state.syncedLyrics = parseLRC(state.rawSyncedLyrics);
+                state.lyricsStatusValue = data.lyrics_status || 'none';
+                const song = state.currentPlaylistSongs.find(item => String(item.id) === String(songId));
+                if (el.lyricsTitle) el.lyricsTitle.textContent = song?.title || 'Lyrics';
+                if (el.lyricsSubtitle) el.lyricsSubtitle.textContent = song?.artist || 'Saved for offline';
+                if (state.lyricsPanelOpen) renderLyricsPanel();
+                updateSyncedLyrics(true);
+                return;
+            }
             const method = forceRefresh ? 'POST' : 'GET';
             const res = await fetch(`/api/songs/${songId}/lyrics`, { method });
             const data = await res.json();
@@ -510,6 +614,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function saveManualLyrics() {
         if (!state.currentLyricsSongId) return;
+        if (!navigator.onLine) {
+            showToast('Lyrics cannot be edited while offline', 'error');
+            return;
+        }
         const lyrics = el.lyricsPlainInput?.value || '';
         const syncedLyrics = el.lyricsSyncedInput?.value || '';
         if (el.lyricsSaveBtn) {
@@ -2622,6 +2730,9 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     }
 
     document.getElementById('playlist-add-songs-btn')?.addEventListener('click', openAddSongsModal);
+    document.getElementById('save-playlist-offline-btn')?.addEventListener('click', () => {
+        if (state.currentPlaylist) saveOfflinePlaylist(state.currentPlaylist);
+    });
     document.getElementById('cancel-add-songs-btn')?.addEventListener('click', closeAddSongsModal);
     addSongsModal?.addEventListener('click', (e) => {
         if (e.target === addSongsModal) closeAddSongsModal();
@@ -2670,7 +2781,9 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     // PLAYLISTS
     // ==========================================
     async function loadPlaylists() {
-        const playlists = await (await fetch('/api/playlists')).json();
+        const playlists = navigator.onLine
+            ? await (await fetch('/api/playlists')).json()
+            : await getOfflinePlaylists();
         const list = document.getElementById('playlist-list');
         if (!list) return;
         list.innerHTML = '';
@@ -2697,7 +2810,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             setMobileMenu(false);
         }
 
-        const timestamp = new Date().getTime();
+        const timestamp = navigator.onLine ? new Date().getTime() : '';
         const coverSrc = playlist.cover_art
             ? `/static/album_art/${mediaUrlName(playlist.cover_art)}?t=${timestamp}`
             : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 24 24' fill='%23333'><path d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/></svg>";
@@ -2719,9 +2832,13 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             };
         }
 
-        state.currentPlaylistSongs = await (await fetch(`/api/songs?playlist_id=${playlist.id}`)).json();
+        const offlinePlaylist = !navigator.onLine ? await getOfflinePlaylist(playlist.id) : null;
+        state.currentPlaylistSongs = offlinePlaylist
+            ? offlinePlaylist.songs
+            : await (await fetch(`/api/songs?playlist_id=${playlist.id}`)).json();
         renderSongs(state.currentPlaylistSongs, 'playlist-songs-list', true);
         updatePlaylistMeta();
+        updateOfflineButton();
         highlightPlayingSong();
     }
 
@@ -3025,7 +3142,9 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
         state.currentPlayingSongId = String(song.id);
 
-        fetch(`/api/songs/${song.id}/play`, { method: 'POST' }).catch(e => console.error(e));
+        if (navigator.onLine) {
+            fetch(`/api/songs/${song.id}/play`, { method: 'POST' }).catch(e => console.error(e));
+        }
 
         updateMediaSession(song);
         el.audio.src = `/audio/${mediaUrlName(song.filename)}`;
@@ -3313,8 +3432,30 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     const dashboardTitle = document.querySelector('#dashboard-view .page-heading h2');
     if (dashboardTitle) dashboardTitle.innerText = getGreeting();
 
-    loadPlaylists();
-    loadDashboard();
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/static/service-worker.js').catch((error) => {
+            console.warn('Offline support could not be registered:', error);
+        });
+    }
+
+    window.addEventListener('offline', () => {
+        getOfflinePlaylists().then((offlinePlaylists) => {
+            loadPlaylists();
+            if (offlinePlaylists.length) openPlaylist(offlinePlaylists[0]);
+            else showToast('You are offline and no playlist is saved on this device.', 'error');
+        }).catch((error) => console.error('Could not switch to offline mode:', error));
+    });
+
+    if (navigator.onLine) {
+        loadPlaylists();
+        loadDashboard();
+    } else {
+        loadPlaylists().then(async () => {
+            const offlinePlaylists = await getOfflinePlaylists();
+            if (offlinePlaylists.length) openPlaylist(offlinePlaylists[0]);
+            else showToast('No playlists have been saved for offline listening yet.', 'error');
+        }).catch((error) => console.error('Could not load offline playlists:', error));
+    }
     renderEmptyState(document.getElementById('search-results'), {
         icon: 'fa-search',
         title: 'Search your library',
