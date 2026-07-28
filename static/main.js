@@ -1614,6 +1614,13 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
             // Close popovers
             if (el.loopPopover) el.loopPopover.classList.remove('active');
+            setQueueOpen(false);
+
+            // Close the lyrics side panel when it is open.
+            if (state.lyricsPanelOpen) {
+                closeLyricsPanel();
+                el.lyricsBtn?.focus();
+            }
 
             // Exit User Management view
             const usersViewActive = el.usersView?.classList.contains('active');
