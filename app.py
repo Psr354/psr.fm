@@ -825,6 +825,25 @@ def stream_audio(filename):
         return jsonify({'error': 'Not found'}), 404
     return send_from_directory(LIBRARY_DIR, safe_filename, mimetype='audio/mpeg')
 
+@app.route('/api/songs/<int:song_id>/offline-audio')
+@login_required
+def download_offline_audio(song_id):
+    """Return a complete audio response for the browser's offline cache.
+
+    The streaming endpoint supports Range requests (HTTP 206) for seeking,
+    but Cache Storage requires a complete response when saving for offline use.
+    """
+    db = get_db()
+    song = get_owned_song(db, song_id)
+    if not song:
+        return jsonify({'error': 'Not found'}), 404
+    return send_from_directory(
+        LIBRARY_DIR,
+        secure_filename(song['filename']),
+        mimetype='audio/mpeg',
+        conditional=False,
+    )
+
 @app.route('/api/songs/<int:song_id>/download')
 @login_required
 def download_song_file(song_id):
@@ -1339,4 +1358,3 @@ def get_recap():
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
