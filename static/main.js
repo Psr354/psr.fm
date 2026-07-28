@@ -326,6 +326,26 @@ document.addEventListener('DOMContentLoaded', () => {
         return state.offlineMode || !navigator.onLine;
     }
 
+    function setOfflineMode(enabled) {
+        state.offlineMode = enabled;
+        const status = document.querySelector('.user-status');
+        if (status) status.textContent = enabled ? 'Offline' : 'Online';
+        if (enabled) {
+            const name = document.getElementById('user-name');
+            if (name && name.textContent.trim() === 'Loading...') name.textContent = 'Offline Library';
+        }
+    }
+
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 3500) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            return await fetch(url, { ...options, signal: controller.signal });
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
     async function updateOfflineButton() {
         const button = document.getElementById('save-playlist-offline-btn');
         if (!button) return;
@@ -2797,13 +2817,13 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             playlists = await getOfflinePlaylists();
         } else {
             try {
-                const response = await fetch('/api/playlists');
+                const response = await fetchWithTimeout('/api/playlists');
                 if (!response.ok) throw new Error('Playlist request failed');
                 playlists = await response.json();
-                state.offlineMode = false;
+                setOfflineMode(false);
             } catch (error) {
                 console.warn('Server is unreachable; using offline playlists instead.', error);
-                state.offlineMode = true;
+                setOfflineMode(true);
                 playlists = await getOfflinePlaylists();
             }
         }
@@ -2861,13 +2881,13 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             state.currentPlaylistSongs = offlinePlaylist.songs;
         } else {
             try {
-                const response = await fetch(`/api/songs?playlist_id=${playlist.id}`);
+                const response = await fetchWithTimeout(`/api/songs?playlist_id=${playlist.id}`);
                 if (!response.ok) throw new Error('Song request failed');
                 state.currentPlaylistSongs = await response.json();
-                state.offlineMode = false;
+                setOfflineMode(false);
             } catch (error) {
                 console.warn('Server is unreachable; using the saved playlist instead.', error);
-                state.offlineMode = true;
+                setOfflineMode(true);
                 offlinePlaylist = await getOfflinePlaylist(playlist.id);
                 if (!offlinePlaylist) throw error;
                 state.currentPlaylistSongs = offlinePlaylist.songs;
@@ -3476,7 +3496,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     }
 
     window.addEventListener('offline', () => {
-        state.offlineMode = true;
+        setOfflineMode(true);
         getOfflinePlaylists().then((offlinePlaylists) => {
             loadPlaylists();
             if (offlinePlaylists.length) openPlaylist(offlinePlaylists[0]);
@@ -3485,7 +3505,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     });
 
     window.addEventListener('online', () => {
-        state.offlineMode = false;
+        setOfflineMode(false);
     });
 
     if (navigator.onLine) {
