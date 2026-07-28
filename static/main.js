@@ -241,7 +241,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // from the regular MP3 download, which is handed to the device's Downloads folder.
     const OFFLINE_DB = 'psr354-offline';
     const OFFLINE_STORE = 'playlists';
-    const OFFLINE_MEDIA_CACHE = 'psr354-media-v1';
+    const OFFLINE_MEDIA_CACHE = 'psr354-media-v2';
 
     function offlineDb() {
         return new Promise((resolve, reject) => {
@@ -262,19 +262,25 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         try {
             const cache = await caches.open(OFFLINE_MEDIA_CACHE);
-            const assets = [
+            const mediaAssets = [
                 ...(playlist.cover_art ? [`/static/album_art/${mediaUrlName(playlist.cover_art)}`] : []),
                 ...songs.flatMap((song) => [
-                    `/audio/${mediaUrlName(song.filename)}`,
                     ...(song.album_art ? [`/static/album_art/${mediaUrlName(song.album_art)}`] : [])
                 ])
             ];
-            const uniqueAssets = [...new Set(assets)];
+            const uniqueAssets = [...new Set(mediaAssets)];
             for (let i = 0; i < uniqueAssets.length; i += 1) {
                 const response = await fetch(uniqueAssets[i]);
                 if (!response.ok) throw new Error('One or more files could not be downloaded');
                 await cache.put(uniqueAssets[i], response.clone());
                 if (button) button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving ${Math.round((i + 1) / uniqueAssets.length * 100)}%`;
+            }
+            for (let i = 0; i < songs.length; i += 1) {
+                const song = songs[i];
+                const response = await fetch(`/api/songs/${song.id}/offline-audio`, { cache: 'no-store' });
+                if (!response.ok || response.status === 206) throw new Error('Audio file could not be downloaded completely');
+                await cache.put(`/audio/${mediaUrlName(song.filename)}`, response.clone());
+                if (button) button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving audio ${i + 1}/${songs.length}`;
             }
             const lyrics = {};
             for (let i = 0; i < songs.length; i += 1) {

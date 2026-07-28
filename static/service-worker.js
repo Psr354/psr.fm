@@ -1,5 +1,5 @@
 const SHELL_CACHE = 'psr354-shell-v1';
-const MEDIA_CACHE = 'psr354-media-v1';
+const MEDIA_CACHE = 'psr354-media-v2';
 const SHELL_FILES = [
   '/', '/static/main.js', '/static/style.css', '/static/site.webmanifest',
   '/static/icon-192.png', '/static/icon-512.png', '/static/psrfm.png'
