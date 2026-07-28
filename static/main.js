@@ -2327,6 +2327,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                     state.lastLoggedTime = el.audio.currentTime;
                 }
             }
+            updateMediaSessionPosition();
         }
     });
 
@@ -2334,12 +2335,14 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (el.duration) el.duration.innerText = formatTime(el.audio.duration);
         if (state.isLooping || state.loopStart > 0 || state.loopEnd > 0) resetLoop();
         updateLoopIndicator();
+        updateMediaSessionPosition();
     });
 
     el.audio.addEventListener('play', () => {
         state.lastLoggedTime = el.audio.currentTime;
         if (el.nowPlaying) el.nowPlaying.classList.add('playing');
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+        updateMediaSessionPosition();
     });
 
     el.audio.addEventListener('pause', () => {
@@ -2370,15 +2373,32 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             el.audio.pause();
             updatePlayPauseIcon(false);
         });
+        navigator.mediaSession.setActionHandler('seekto', ({ seekTime }) => {
+            if (Number.isFinite(seekTime)) el.audio.currentTime = seekTime;
+        });
     }
 
     function updateMediaSession(song) {
-        if (!('mediaSession' in navigator)) return;
+        if (!('mediaSession' in navigator) || !('MediaMetadata' in window)) return;
+        const artworkUrl = new URL(`/static/album_art/${mediaUrlName(song.album_art)}`, window.location.origin).href;
         navigator.mediaSession.metadata = new MediaMetadata({
             title: song.title || 'Unknown',
             artist: song.artist || 'Unknown',
-            artwork: [{ src: `/static/album_art/${mediaUrlName(song.album_art)}` }]
+            artwork: [{ src: artworkUrl, sizes: '512x512' }]
         });
+    }
+
+    function updateMediaSessionPosition() {
+        if (!('mediaSession' in navigator) || !el.audio.duration || !Number.isFinite(el.audio.duration)) return;
+        try {
+            navigator.mediaSession.setPositionState({
+                duration: el.audio.duration,
+                position: Math.min(el.audio.currentTime, el.audio.duration),
+                playbackRate: el.audio.playbackRate || 1
+            });
+        } catch (_) {
+            // Some browsers expose Media Session but do not support position state.
+        }
     }
 
     function flushListenLog() {
@@ -3007,6 +3027,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
         fetch(`/api/songs/${song.id}/play`, { method: 'POST' }).catch(e => console.error(e));
 
+        updateMediaSession(song);
         el.audio.src = `/audio/${mediaUrlName(song.filename)}`;
         el.audio.play().catch(e => console.log("Autoplay prevented", e));
 
@@ -3018,7 +3039,6 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
 
         updatePlayPauseIcon(true);
-        updateMediaSession(song);
         highlightPlayingSong();
         buildQueue();
         loadLyrics(song.id);
