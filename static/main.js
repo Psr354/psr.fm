@@ -69,6 +69,11 @@ document.addEventListener('DOMContentLoaded', () => {
         lyricsLoading: false,
         lyricsEditing: false,
         shareLyricsTheme: 'verde',
+        shareLyricsCustomColors: ['#5b21b6', '#ec4899'],
+        shareLyricsDecoration: 'circle',
+        shareLyricsDecorationImage: null,
+        shareLyricsDecorationImageUrl: null,
+        shareDrawingActive: false,
         shareLyricsText: '',
         shareRenderPromise: null,
         currentSongMeta: null,
@@ -127,6 +132,12 @@ document.addEventListener('DOMContentLoaded', () => {
         shareLyricsModal: document.getElementById('share-lyrics-modal'),
         shareLyricsCloseBtn: document.getElementById('share-lyrics-close-btn'),
         shareLyricsInput: document.getElementById('share-lyrics-input'),
+        shareThemeStart: document.getElementById('share-theme-start'),
+        shareThemeEnd: document.getElementById('share-theme-end'),
+        shareDecorationUpload: document.getElementById('share-decoration-upload'),
+        shareDrawingCanvas: document.getElementById('share-drawing-canvas'),
+        shareDrawingColor: document.getElementById('share-drawing-color'),
+        shareDrawingClear: document.getElementById('share-drawing-clear'),
         shareLyricsCanvas: document.getElementById('share-lyrics-canvas'),
         shareLyricsCopyBtn: document.getElementById('share-lyrics-copy-btn'),
         shareLyricsDownloadBtn: document.getElementById('share-lyrics-download-btn'),
@@ -671,6 +682,118 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.restore();
     }
 
+    function drawStar(ctx, cx, cy, outerRadius, innerRadius) {
+        ctx.beginPath();
+        for (let point = 0; point < 10; point += 1) {
+            const angle = -Math.PI / 2 + point * Math.PI / 5;
+            const radius = point % 2 ? innerRadius : outerRadius;
+            const x = cx + Math.cos(angle) * radius;
+            const y = cy + Math.sin(angle) * radius;
+            point ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+        }
+        ctx.closePath();
+    }
+
+    function drawHeart(ctx, cx, cy, size) {
+        const top = cy - size * 0.28;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy + size * 0.46);
+        ctx.bezierCurveTo(cx - size * 1.05, cy - size * 0.18, cx - size * 0.56, top - size * 0.55, cx, top);
+        ctx.bezierCurveTo(cx + size * 0.56, top - size * 0.55, cx + size * 1.05, cy - size * 0.18, cx, cy + size * 0.46);
+        ctx.closePath();
+    }
+
+    function drawShareDecoration(ctx, width, height) {
+        const image = state.shareLyricsDecorationImage;
+        if (state.shareLyricsDecoration === 'custom' && image) {
+            ctx.save();
+            ctx.globalAlpha = 0.22;
+            ctx.drawImage(image, width - 390, 34, 330, 330);
+            ctx.drawImage(image, -90, height - 330, 270, 270);
+            ctx.restore();
+            return;
+        }
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.14)';
+        if (state.shareLyricsDecoration === 'heart') {
+            drawHeart(ctx, width * 0.88, height * 0.14, 190);
+            ctx.fill();
+            drawHeart(ctx, width * 0.08, height * 0.88, 220);
+            ctx.fill();
+        } else if (state.shareLyricsDecoration === 'star') {
+            drawStar(ctx, width * 0.9, height * 0.12, 240, 106);
+            ctx.fill();
+            drawStar(ctx, width * 0.08, height * 0.9, 285, 126);
+            ctx.fill();
+        } else {
+            ctx.beginPath();
+            ctx.arc(width * 0.92, height * 0.08, 260, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(width * 0.08, height * 0.92, 320, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    function selectCustomDecoration(image) {
+        state.shareLyricsDecorationImage = image;
+        state.shareLyricsDecoration = 'custom';
+        document.querySelectorAll('.share-decoration').forEach(item => item.classList.remove('active'));
+        state.shareRenderPromise = renderShareLyricsCanvas();
+    }
+
+    function initShareDrawingCanvas() {
+        const canvas = el.shareDrawingCanvas;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        let drawing = false;
+        let lastPoint = null;
+        const pointFromEvent = (event) => {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: (event.clientX - rect.left) * (canvas.width / rect.width),
+                y: (event.clientY - rect.top) * (canvas.height / rect.height)
+            };
+        };
+        const renderDrawing = () => selectCustomDecoration(canvas);
+        canvas.addEventListener('pointerdown', (event) => {
+            drawing = true;
+            canvas.setPointerCapture(event.pointerId);
+            lastPoint = pointFromEvent(event);
+            ctx.fillStyle = el.shareDrawingColor?.value || '#ffffff';
+            ctx.beginPath();
+            ctx.arc(lastPoint.x, lastPoint.y, 5, 0, Math.PI * 2);
+            ctx.fill();
+            renderDrawing();
+        });
+        canvas.addEventListener('pointermove', (event) => {
+            if (!drawing || !lastPoint) return;
+            const point = pointFromEvent(event);
+            ctx.strokeStyle = el.shareDrawingColor?.value || '#ffffff';
+            ctx.lineWidth = 10;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(lastPoint.x, lastPoint.y);
+            ctx.lineTo(point.x, point.y);
+            ctx.stroke();
+            lastPoint = point;
+            renderDrawing();
+        });
+        const stopDrawing = () => { drawing = false; lastPoint = null; };
+        canvas.addEventListener('pointerup', stopDrawing);
+        canvas.addEventListener('pointercancel', stopDrawing);
+        el.shareDrawingClear?.addEventListener('click', () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (state.shareLyricsDecorationImage === canvas) {
+                state.shareLyricsDecoration = 'circle';
+                document.querySelectorAll('.share-decoration').forEach(item => item.classList.toggle('active', item.dataset.decoration === 'circle'));
+                state.shareRenderPromise = renderShareLyricsCanvas();
+            }
+        });
+    }
+
     function fitCanvasText(ctx, text, maxWidth) {
         const value = String(text || '');
         if (ctx.measureText(value).width <= maxWidth) return value;
@@ -686,7 +809,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
         const width = canvas.width;
-        const colors = shareThemes[state.shareLyricsTheme] || shareThemes.verde;
+        const colors = state.shareLyricsTheme === 'custom'
+            ? state.shareLyricsCustomColors
+            : (shareThemes[state.shareLyricsTheme] || shareThemes.verde);
         const song = getShareSong();
         const lyrics = state.shareLyricsText || pickInitialShareText(getShareLyricsSource());
         const coverSrc = song.album_art ? `/static/album_art/${mediaUrlName(song.album_art)}` : '';
@@ -708,13 +833,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, width, height);
 
-        ctx.fillStyle = 'rgba(0,0,0,0.14)';
-        ctx.beginPath();
-        ctx.arc(width * 0.92, height * 0.08, 260, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(width * 0.08, height * 0.92, 320, 0, Math.PI * 2);
-        ctx.fill();
+        drawShareDecoration(ctx, width, height);
 
         if (cover) {
             drawRoundedImage(ctx, cover, pad, pad, 116, 26);
@@ -2119,6 +2238,38 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             state.shareRenderPromise = renderShareLyricsCanvas();
         });
     });
+    [el.shareThemeStart, el.shareThemeEnd].forEach((input, index) => {
+        input?.addEventListener('input', () => {
+            state.shareLyricsCustomColors[index] = input.value;
+            state.shareLyricsTheme = 'custom';
+            document.querySelectorAll('.share-theme').forEach(item => item.classList.remove('active'));
+            state.shareRenderPromise = renderShareLyricsCanvas();
+        });
+    });
+    document.querySelectorAll('.share-decoration').forEach((button) => {
+        button.addEventListener('click', () => {
+            const decoration = button.dataset.decoration;
+            if (!decoration) return;
+            document.querySelectorAll('.share-decoration').forEach(item => item.classList.remove('active'));
+            button.classList.add('active');
+            state.shareLyricsDecoration = decoration;
+            state.shareRenderPromise = renderShareLyricsCanvas();
+        });
+    });
+    el.shareDecorationUpload?.addEventListener('change', () => {
+        const file = el.shareDecorationUpload.files?.[0];
+        if (!file) return;
+        if (state.shareLyricsDecorationImageUrl) URL.revokeObjectURL(state.shareLyricsDecorationImageUrl);
+        state.shareLyricsDecorationImageUrl = URL.createObjectURL(file);
+        const image = new Image();
+        image.onload = () => {
+            selectCustomDecoration(image);
+            el.shareDecorationUpload.closest('.share-decoration')?.classList.add('active');
+        };
+        image.onerror = () => showToast('Unable to use that image', 'error');
+        image.src = state.shareLyricsDecorationImageUrl;
+    });
+    initShareDrawingCanvas();
 
     // ==========================================
     // KEYBOARD SHORTCUTS

@@ -473,11 +473,36 @@
                     <button class="share-theme" type="button" data-theme="mono" aria-label="Mono theme" style="background: linear-gradient(135deg, #090909, #3f3f46);"></button>
                     <button class="share-theme" type="button" data-theme="cyan" aria-label="Cyan theme" style="background: linear-gradient(135deg, #164e63, #38bdf8);"></button>
                 </div>
+                <div class="share-custom-theme" aria-label="Custom card colors">
+                    <span>Custom</span>
+                    <label class="share-color-control" title="Background start color">Start <input id="share-theme-start" type="color" value="#5b21b6" aria-label="Custom background start color"></label>
+                    <label class="share-color-control" title="Background end color">End <input id="share-theme-end" type="color" value="#ec4899" aria-label="Custom background end color"></label>
+                </div>
             </div>
 
             <div class="share-section">
                 <label>Preview</label>
                 <canvas id="share-lyrics-canvas" class="share-lyrics-canvas" width="1080" height="900" aria-label="Lyrics share card preview"></canvas>
+            </div>
+
+            <div class="share-section">
+                <label>Decoration</label>
+                <div class="share-decoration-grid" role="radiogroup" aria-label="Card decoration">
+                    <button class="share-decoration active" type="button" data-decoration="circle" aria-label="Circle decoration" title="Circle"><i class="fas fa-circle"></i></button>
+                    <button class="share-decoration" type="button" data-decoration="heart" aria-label="Heart decoration" title="Heart"><i class="fas fa-heart"></i></button>
+                    <button class="share-decoration" type="button" data-decoration="star" aria-label="Star decoration" title="Star"><i class="fas fa-star"></i></button>
+                    <label class="share-decoration share-decoration-upload" title="Upload custom decoration image">
+                        <i class="fas fa-signature"></i><span>Custom image</span>
+                        <input id="share-decoration-upload" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Upload a custom decoration image, such as a signature">
+                    </label>
+                </div>
+                <p class="share-decoration-hint">Upload PNG transparan untuk coretan atau tanda tangan.</p>
+                <div class="share-drawing-tools">
+                    <label class="share-color-control">Ink <input id="share-drawing-color" type="color" value="#ffffff" aria-label="Drawing color"></label>
+                    <button id="share-drawing-clear" class="share-drawing-clear" type="button"><i class="fas fa-eraser"></i> Clear</button>
+                </div>
+                <canvas id="share-drawing-canvas" class="share-drawing-canvas" width="600" height="260" aria-label="Draw a custom decoration" role="img"></canvas>
+                <p class="share-decoration-hint">Atau corat-coret langsung di area ini.</p>
             </div>
 
             <div class="modal-actions share-actions">
