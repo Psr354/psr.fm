@@ -413,6 +413,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function setLyricsEditing(isEditing) {
         state.lyricsEditing = isEditing;
+        el.lyricsPanel?.classList.toggle('is-editing', isEditing);
         if (el.lyricsBody) el.lyricsBody.style.display = isEditing ? 'none' : '';
         if (el.lyricsEditor) el.lyricsEditor.style.display = isEditing ? 'flex' : 'none';
         if (el.lyricsEditBtn) el.lyricsEditBtn.style.display = isEditing || !state.currentLyricsSongId ? 'none' : '';
@@ -429,6 +430,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function openLyricsPanel() {
         state.lyricsPanelOpen = true;
+        document.body.classList.add('lyrics-panel-open');
         el.lyricsPanel?.classList.add('open');
         el.lyricsBtn?.classList.add('active');
         el.lyricsPanel?.setAttribute('aria-hidden', 'false');
@@ -439,10 +441,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function closeLyricsPanel() {
         state.lyricsPanelOpen = false;
+        document.body.classList.remove('lyrics-panel-open');
         el.lyricsPanel?.classList.remove('open');
         el.lyricsBtn?.classList.remove('active');
         el.lyricsPanel?.setAttribute('aria-hidden', 'true');
     }
+
+    function syncMobileViewport() {
+        const viewport = window.visualViewport;
+        const height = viewport?.height || window.innerHeight;
+        const offsetTop = viewport?.offsetTop || 0;
+        document.documentElement.style.setProperty('--mobile-viewport-height', `${height}px`);
+        document.documentElement.style.setProperty('--mobile-viewport-offset', `${offsetTop}px`);
+    }
+
+    syncMobileViewport();
+    window.addEventListener('resize', syncMobileViewport);
+    window.visualViewport?.addEventListener('resize', syncMobileViewport);
+    window.visualViewport?.addEventListener('scroll', syncMobileViewport);
 
     function setQueueOpen(isOpen) {
         const queuePopover = document.getElementById('queue-popover');

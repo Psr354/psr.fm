@@ -643,14 +643,74 @@ body, .app-container {
     .queue-popover { left: 16px; right: 16px; width: auto; bottom: 154px; }
 
     .lyrics-panel {
-        top: 64px;
-        bottom: 170px;
+        top: var(--mobile-viewport-offset, 0px);
+        bottom: auto;
+        height: var(--mobile-viewport-height, 100dvh);
         width: 100vw;
         border-left: none;
-        border-top: 1px solid var(--border-subtle);
-        border-radius: 18px 18px 0 0;
-        box-shadow: 0 -18px 40px rgba(0, 0, 0, 0.45);
-        padding: 18px;
+        border-top: 0;
+        border-radius: 0;
+        box-shadow: none;
+        padding: max(16px, env(safe-area-inset-top)) 16px max(12px, env(safe-area-inset-bottom));
+        gap: 14px;
+        overscroll-behavior: contain;
+    }
+
+    body.lyrics-panel-open {
+        overflow: hidden;
+    }
+
+    body.lyrics-panel-open .player-bar {
+        visibility: hidden;
+        pointer-events: none;
+    }
+
+    .lyrics-panel.is-editing .lyrics-header {
+        padding-bottom: 12px;
+    }
+
+    .lyrics-panel.is-editing .lyrics-header .lyrics-eyebrow,
+    .lyrics-panel.is-editing .lyrics-subtitle {
+        display: none;
+    }
+
+    .lyrics-panel.is-editing .lyrics-header h3 {
+        font-size: 18px;
+        margin: 0;
+    }
+
+    .lyrics-editor {
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 2px 3px 12px 0;
+        scroll-padding-block: 12px;
+    }
+
+    .lyrics-editor textarea {
+        flex: 0 0 auto;
+        min-height: 152px;
+        resize: none;
+        font-size: 16px;
+    }
+
+    .lyrics-actions {
+        flex: 0 0 auto;
+        padding-top: 10px;
+        padding-bottom: max(0px, env(safe-area-inset-bottom));
+        background: #090d0b;
+    }
+
+    .lyrics-actions button {
+        min-height: 48px;
+    }
+
+    .lyrics-panel.is-editing .lyrics-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .lyrics-panel.is-editing #lyrics-share-btn {
+        display: none;
     }
 
     .modal-content { width: 90%; max-width: 400px; padding: 24px; }
@@ -904,7 +964,11 @@ h1, h2, h3, h4, .section-title, .track-title {
     .time { min-width: 36px; }
     .volume-control { top: 10px; right: 8px; gap: 0; }
     .download-progress-wrapper, .queue-popover { bottom: 182px; }
-    .lyrics-panel { bottom: 188px; }
+    .lyrics-panel {
+        top: var(--mobile-viewport-offset, 0px);
+        bottom: auto;
+        height: var(--mobile-viewport-height, 100dvh);
+    }
 }
 
 @media (max-width: 420px) {
