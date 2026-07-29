@@ -253,6 +253,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function offlinePlaylistAssets(playlist) {
+        const assets = new Set();
+        if (!playlist) return assets;
+        if (playlist.cover_art) assets.add(`/static/album_art/${mediaUrlName(playlist.cover_art)}`);
+        (playlist.songs || []).forEach((song) => {
+            assets.add(`/audio/${mediaUrlName(song.filename)}`);
+            if (song.album_art) assets.add(`/static/album_art/${mediaUrlName(song.album_art)}`);
+        });
+        return assets;
+    }
+
     async function saveOfflinePlaylist(playlist) {
         const songs = state.currentPlaylistSongs;
         if (!songs.length) return showToast('Add songs before saving this playlist offline', 'error');
@@ -263,41 +274,87 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         try {
             const cache = await caches.open(OFFLINE_MEDIA_CACHE);
-            const mediaAssets = [
-                ...(playlist.cover_art ? [`/static/album_art/${mediaUrlName(playlist.cover_art)}`] : []),
-                ...songs.flatMap((song) => [
-                    ...(song.album_art ? [`/static/album_art/${mediaUrlName(song.album_art)}`] : [])
-                ])
-            ];
-            const uniqueAssets = [...new Set(mediaAssets)];
-            for (let i = 0; i < uniqueAssets.length; i += 1) {
-                const response = await fetch(uniqueAssets[i]);
+            const savedPlaylists = await getOfflinePlaylists();
+            const existingPlaylist = savedPlaylists.find((item) => String(item.id) === String(playlist.id));
+
+            // Playlist covers can change without changing filename, so refresh
+            // that small file. Album art and audio are downloaded only if absent.
+            if (playlist.cover_art) {
+                const coverUrl = `/static/album_art/${mediaUrlName(playlist.cover_art)}`;
+                const response = await fetch(coverUrl, { cache: 'no-store' });
                 if (!response.ok) throw new Error('One or more files could not be downloaded');
-                await cache.put(uniqueAssets[i], response.clone());
-                if (button) button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving ${Math.round((i + 1) / uniqueAssets.length * 100)}%`;
+                await cache.put(coverUrl, response.clone());
             }
-            for (let i = 0; i < songs.length; i += 1) {
-                const song = songs[i];
+
+            const missingArtwork = new Set();
+            for (const song of songs) {
+                if (!song.album_art) continue;
+                const artworkUrl = `/static/album_art/${mediaUrlName(song.album_art)}`;
+                if (!await cache.match(artworkUrl, { ignoreSearch: true })) missingArtwork.add(artworkUrl);
+            }
+            const artworkToDownload = [...missingArtwork];
+            for (let i = 0; i < artworkToDownload.length; i += 1) {
+                const response = await fetch(artworkToDownload[i]);
+                if (!response.ok) throw new Error('One or more covers could not be downloaded');
+                await cache.put(artworkToDownload[i], response.clone());
+                if (button) button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving covers ${i + 1}/${artworkToDownload.length}`;
+            }
+
+            const missingSongs = [];
+            for (const song of songs) {
+                const audioUrl = `/audio/${mediaUrlName(song.filename)}`;
+                if (!await cache.match(audioUrl)) missingSongs.push(song);
+            }
+            for (let i = 0; i < missingSongs.length; i += 1) {
+                const song = missingSongs[i];
                 const response = await fetch(`/api/songs/${song.id}/offline-audio`, { cache: 'no-store' });
                 if (!response.ok || response.status === 206) throw new Error('Audio file could not be downloaded completely');
                 await cache.put(`/audio/${mediaUrlName(song.filename)}`, response.clone());
-                if (button) button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving audio ${i + 1}/${songs.length}`;
+                if (button) button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving new audio ${i + 1}/${missingSongs.length}`;
             }
-            const lyrics = {};
+
+            const lyrics = { ...(existingPlaylist?.lyrics || {}) };
             for (let i = 0; i < songs.length; i += 1) {
-                const response = await fetch(`/api/songs/${songs[i].id}/lyrics`);
-                if (response.ok) lyrics[songs[i].id] = await response.json();
-                if (button) button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving lyrics ${i + 1}/${songs.length}`;
+                try {
+                    const response = await fetch(`/api/songs/${songs[i].id}/lyrics`);
+                    if (response.ok) lyrics[songs[i].id] = await response.json();
+                } catch (error) {
+                    console.warn(`Could not refresh lyrics for song ${songs[i].id}`, error);
+                }
+                if (button) button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Updating lyrics ${i + 1}/${songs.length}`;
             }
+            const currentSongIds = new Set(songs.map((song) => String(song.id)));
+            Object.keys(lyrics).forEach((songId) => {
+                if (!currentSongIds.has(String(songId))) delete lyrics[songId];
+            });
+            const savedRecord = { ...playlist, songs, lyrics, saved_at: new Date().toISOString() };
             const db = await offlineDb();
             await new Promise((resolve, reject) => {
                 const tx = db.transaction(OFFLINE_STORE, 'readwrite');
-                tx.objectStore(OFFLINE_STORE).put({ ...playlist, songs, lyrics, saved_at: new Date().toISOString() });
+                tx.objectStore(OFFLINE_STORE).put(savedRecord);
                 tx.oncomplete = resolve;
                 tx.onerror = () => reject(tx.error);
             });
             db.close();
-            showToast(`Playlist "${playlist.name}" is ready offline`, 'success');
+
+            // Remove media no longer referenced by any saved playlist, while
+            // preserving files shared with another offline playlist.
+            if (existingPlaylist) {
+                const futurePlaylists = savedPlaylists
+                    .filter((item) => String(item.id) !== String(playlist.id))
+                    .concat(savedRecord);
+                const referencedAssets = new Set(
+                    futurePlaylists.flatMap((item) => [...offlinePlaylistAssets(item)])
+                );
+                const staleAssets = [...offlinePlaylistAssets(existingPlaylist)]
+                    .filter((asset) => !referencedAssets.has(asset));
+                await Promise.all(staleAssets.map((asset) => cache.delete(asset, { ignoreSearch: true })));
+            }
+
+            const message = missingSongs.length
+                ? `Downloaded ${missingSongs.length} new song${missingSongs.length === 1 ? '' : 's'} for "${playlist.name}"`
+                : `Offline playlist "${playlist.name}" is up to date`;
+            showToast(message, 'success');
         } catch (error) {
             console.error('Offline save failed:', error);
             showToast(error.message || 'Offline save failed. Check your connection and storage.', 'error');
@@ -352,7 +409,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const saved = state.currentPlaylist ? await getOfflinePlaylist(state.currentPlaylist.id) : null;
         button.disabled = isOfflineMode();
         button.innerHTML = saved
-            ? '<i class="fas fa-check"></i> Saved Offline'
+            ? (isOfflineMode()
+                ? '<i class="fas fa-check"></i> Saved Offline'
+                : '<i class="fas fa-sync-alt"></i> Update Offline')
             : '<i class="fas fa-cloud-download-alt"></i> Save Offline';
         button.title = isOfflineMode() ? 'Offline downloads cannot be changed without a connection' : '';
     }
