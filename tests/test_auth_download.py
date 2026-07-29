@@ -278,6 +278,34 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(songs_response.status_code, 200)
         self.assertEqual(songs_response.get_json()[0]['id'], song_id)
 
+    def test_delete_playlist_removes_only_orphaned_songs(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+        playlist_a = self._create_playlist(name='A')
+        playlist_b = self._create_playlist(name='B')
+        orphaned_song = self._create_song(title='Only in A', filename='only-a.mp3')
+        shared_song = self._create_song(title='Shared', filename='shared.mp3')
+        self._add_song_to_playlist(playlist_a, orphaned_song, 0)
+        self._add_song_to_playlist(playlist_a, shared_song, 1)
+        self._add_song_to_playlist(playlist_b, shared_song, 0)
+
+        response = client.delete(
+            f'/api/playlists/{playlist_a}',
+            headers={'X-CSRF-Token': csrf_token},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()['deleted_orphaned_songs'], 1)
+
+        dashboard = client.get('/api/dashboard').get_json()
+        self.assertEqual(dashboard['total_songs'], 1)
+        remaining = client.get(f'/api/songs?playlist_id={playlist_b}').get_json()
+        self.assertEqual([song['id'] for song in remaining], [shared_song])
+
     def test_playlist_song_order_can_be_reordered(self):
         client = self.app_module.app.test_client()
         setup_response = client.post('/api/setup', json={

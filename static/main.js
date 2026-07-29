@@ -2941,7 +2941,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         const deleteBtn = document.getElementById('delete-playlist-btn');
         if (deleteBtn) {
             deleteBtn.onclick = async () => {
-                if (confirm(`Delete playlist "${playlist.name}"? (Songs will remain in other playlists)`)) {
+                if (confirm(`Delete playlist "${playlist.name}"? Songs not used by another playlist will also be deleted permanently.`)) {
                     await fetch(`/api/playlists/${playlist.id}`, {method: 'DELETE'});
                     state.currentPlaylistId = null;
                     loadPlaylists();

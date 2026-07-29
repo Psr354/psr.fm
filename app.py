@@ -485,10 +485,57 @@ def delete_playlist(playlist_id):
     if not get_owned_playlist(db, playlist_id):
         return jsonify({'error': 'Playlist not found'}), 404
 
+    playlist_songs = db.execute(
+        '''
+        SELECT s.id, s.filename, s.album_art
+        FROM songs s
+        JOIN playlist_songs ps ON ps.song_id = s.id
+        WHERE ps.playlist_id = ? AND s.user_id = ?
+        ''',
+        (playlist_id, current_user.id)
+    ).fetchall()
+
     db.execute('DELETE FROM playlist_songs WHERE playlist_id = ?', (playlist_id,))
     db.execute('DELETE FROM playlists WHERE id = ? AND user_id = ?', (playlist_id, current_user.id))
+
+    orphaned_songs = []
+    for song in playlist_songs:
+        still_in_playlist = db.execute(
+            'SELECT 1 FROM playlist_songs WHERE song_id = ? LIMIT 1',
+            (song['id'],)
+        ).fetchone()
+        if not still_in_playlist:
+            orphaned_songs.append(song)
+            db.execute('DELETE FROM listening_logs WHERE song_id = ?', (song['id'],))
+            db.execute('DELETE FROM play_events WHERE song_id = ?', (song['id'],))
+            db.execute('DELETE FROM songs WHERE id = ? AND user_id = ?', (song['id'], current_user.id))
+
     db.commit()
-    return jsonify({'status': 'success'})
+
+    for song in orphaned_songs:
+        filename_in_use = db.execute(
+            'SELECT 1 FROM songs WHERE filename = ? LIMIT 1',
+            (song['filename'],)
+        ).fetchone()
+        if not filename_in_use:
+            mp3 = os.path.join(LIBRARY_DIR, song['filename'])
+            if os.path.exists(mp3):
+                os.remove(mp3)
+
+        if song['album_art']:
+            album_art_in_use = db.execute(
+                'SELECT 1 FROM songs WHERE album_art = ? LIMIT 1',
+                (song['album_art'],)
+            ).fetchone()
+            if not album_art_in_use:
+                art = os.path.join(ALBUM_ART_DIR, song['album_art'])
+                if os.path.exists(art):
+                    os.remove(art)
+
+    return jsonify({
+        'status': 'success',
+        'deleted_orphaned_songs': len(orphaned_songs),
+    })
 
 
 @app.route('/api/playlists/<int:playlist_id>/songs/order', methods=['PUT'])
