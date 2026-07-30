@@ -81,7 +81,10 @@ document.addEventListener('DOMContentLoaded', () => {
         matchedLibrarySong: null,
         pendingLibrarySong: null,
         librarySongs: [],
-        offlineMode: false
+        offlineMode: false,
+        playbackRequestId: 0,
+        playbackRetryCount: 0,
+        shouldBePlaying: false
     };
 
     // ==========================================
@@ -2553,6 +2556,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     });
 
     el.audio.addEventListener('play', () => {
+        state.shouldBePlaying = true;
+        state.playbackRetryCount = 0;
         state.lastLoggedTime = el.audio.currentTime;
         if (el.nowPlaying) el.nowPlaying.classList.add('playing');
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
@@ -2574,16 +2579,29 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         playNext(true);
     });
 
+    // Mobile browsers can briefly fail a source transition while the screen is
+    // locked. Retry the same track after it becomes playable instead of leaving
+    // the player stopped until the page is opened again.
+    el.audio.addEventListener('canplay', () => {
+        if (state.shouldBePlaying && el.audio.paused) resumeCurrentSong();
+    });
+
+    el.audio.addEventListener('error', () => {
+        if (state.shouldBePlaying) resumeCurrentSong();
+    });
+
     // Media Session API: keeps background/locked-screen playback alive so tracks
     // auto-advance when the tab is not focused, and wires OS media controls.
     if ('mediaSession' in navigator) {
         navigator.mediaSession.setActionHandler('previoustrack', () => playPrev());
         navigator.mediaSession.setActionHandler('nexttrack', () => playNext(false));
         navigator.mediaSession.setActionHandler('play', () => {
-            el.audio.play().catch(e => console.log("Play prevented", e));
+            state.shouldBePlaying = true;
+            resumeCurrentSong();
             updatePlayPauseIcon(true);
         });
         navigator.mediaSession.setActionHandler('pause', () => {
+            state.shouldBePlaying = false;
             el.audio.pause();
             updatePlayPauseIcon(false);
         });
@@ -3265,6 +3283,27 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     // ==========================================
     // PLAYBACK CONTROL
     // ==========================================
+    function resumeCurrentSong(requestId = state.playbackRequestId) {
+        if (!state.shouldBePlaying || requestId !== state.playbackRequestId || !el.audio.src) return;
+
+        el.audio.play().catch((error) => {
+            if (!state.shouldBePlaying || requestId !== state.playbackRequestId) return;
+            if (error?.name === 'NotAllowedError') {
+                console.warn('Playback needs a user gesture', error);
+                return;
+            }
+            if (state.playbackRetryCount >= 2) {
+                console.warn('Playback could not resume', error);
+                return;
+            }
+
+            state.playbackRetryCount += 1;
+            const retry = () => resumeCurrentSong(requestId);
+            el.audio.addEventListener('canplay', retry, { once: true });
+            el.audio.load();
+        });
+    }
+
     function playSong(songs, index) {
         flushListenLog();
         state.currentPlaylistSongs = songs;
@@ -3279,8 +3318,12 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
 
         updateMediaSession(song);
+        state.playbackRequestId += 1;
+        state.playbackRetryCount = 0;
+        state.shouldBePlaying = true;
         el.audio.src = `/audio/${mediaUrlName(song.filename)}`;
-        el.audio.play().catch(e => console.log("Autoplay prevented", e));
+        el.audio.load();
+        resumeCurrentSong(state.playbackRequestId);
 
         if (el.playerTitle) el.playerTitle.innerText = song.title;
         if (el.playerArtist) el.playerArtist.innerText = song.artist || 'Unknown';
@@ -3302,9 +3345,11 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     function togglePlay() {
         if (!el.audio.src) return;
         if (el.audio.paused) {
-            el.audio.play();
+            state.shouldBePlaying = true;
+            resumeCurrentSong();
             updatePlayPauseIcon(true);
         } else {
+            state.shouldBePlaying = false;
             el.audio.pause();
             updatePlayPauseIcon(false);
         }
@@ -3313,7 +3358,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     function playNext(isFromSongEnded = true) {
         if (state.repeatMode === 2 && isFromSongEnded) {
             el.audio.currentTime = 0;
-            el.audio.play();
+            state.shouldBePlaying = true;
+            resumeCurrentSong();
             return;
         }
 
@@ -3331,6 +3377,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         // Queue is empty: the whole playlist has played through once.
         if (state.isShuffle) {
             if (state.repeatMode === 0) {
+                state.shouldBePlaying = false;
                 el.audio.pause();
                 updatePlayPauseIcon(false);
                 return;
@@ -3343,6 +3390,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
         let nextIndex = (state.currentSongIndex + 1) % state.currentPlaylistSongs.length;
         if (nextIndex === 0 && state.repeatMode === 0 && state.currentSongIndex === state.currentPlaylistSongs.length - 1) {
+            state.shouldBePlaying = false;
             el.audio.pause();
             updatePlayPauseIcon(false);
             return;
