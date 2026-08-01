@@ -3174,9 +3174,25 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             container.querySelectorAll('.delete-song').forEach(btn => {
                 btn.addEventListener('click', async (e) => {
                     e.stopPropagation();
-                    if (confirm('Delete this song completely from all playlists and storage?')) {
-                        await fetch(`/api/songs/${e.currentTarget.getAttribute('data-id')}`, {method: 'DELETE'});
-                        showToast('Song deleted permanently');
+                    const deletingFromPlaylist = canReorder && state.currentPlaylistId;
+                    const message = deletingFromPlaylist
+                        ? 'Remove this song from this playlist? It will only be deleted permanently if no other playlist uses it.'
+                        : 'Delete this song completely from all playlists and storage?';
+                    if (confirm(message)) {
+                        const songId = e.currentTarget.getAttribute('data-id');
+                        const playlistQuery = deletingFromPlaylist
+                            ? `?playlist_id=${encodeURIComponent(state.currentPlaylistId)}`
+                            : '';
+                        const response = await fetch(`/api/songs/${songId}${playlistQuery}`, {method: 'DELETE'});
+                        const result = await response.json().catch(() => ({}));
+                        if (!response.ok) {
+                            showToast(result.error || 'Failed to remove song', 'error');
+                            return;
+                        }
+                        showToast(
+                            result.song_deleted ? 'Song deleted permanently' : 'Song removed from this playlist',
+                            'success'
+                        );
                         if (state.currentPlaylistId) {
                             const p = (await (await fetch('/api/playlists')).json()).find(pl => pl.id === state.currentPlaylistId);
                             if (p) openPlaylist(p);

@@ -777,6 +777,39 @@ def delete_song(song_id):
     if not song:
         return jsonify({'error': 'Not found'}), 404
 
+    playlist_id = None
+    if 'playlist_id' in request.args:
+        playlist_id = request.args.get('playlist_id', type=int)
+        if playlist_id is None:
+            return jsonify({'error': 'Invalid playlist id'}), 400
+
+    if playlist_id is not None:
+        if not get_owned_playlist(db, playlist_id):
+            return jsonify({'error': 'Playlist not found'}), 404
+
+        membership = db.execute(
+            'SELECT 1 FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
+            (playlist_id, song_id)
+        ).fetchone()
+        if not membership:
+            return jsonify({'error': 'Song not found in playlist'}), 404
+
+        db.execute(
+            'DELETE FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
+            (playlist_id, song_id)
+        )
+        remaining_playlist_count = db.execute(
+            'SELECT COUNT(*) AS count FROM playlist_songs WHERE song_id = ?',
+            (song_id,)
+        ).fetchone()['count']
+        if remaining_playlist_count > 0:
+            db.commit()
+            return jsonify({
+                'status': 'removed_from_playlist',
+                'song_deleted': False,
+                'remaining_playlist_count': remaining_playlist_count,
+            })
+
     filename_ref_count = db.execute(
         'SELECT COUNT(*) AS count FROM songs WHERE filename = ?',
         (song['filename'],)
@@ -802,7 +835,11 @@ def delete_song(song_id):
         if os.path.exists(art):
             os.remove(art)
 
-    return jsonify({'status': 'success'})
+    return jsonify({
+        'status': 'deleted',
+        'song_deleted': True,
+        'remaining_playlist_count': 0,
+    })
 
 
 @app.route('/api/songs/<int:song_id>/playlists', methods=['POST'])

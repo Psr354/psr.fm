@@ -306,6 +306,52 @@ class AuthAndDownloadTests(unittest.TestCase):
         remaining = client.get(f'/api/songs?playlist_id={playlist_b}').get_json()
         self.assertEqual([song['id'] for song in remaining], [shared_song])
 
+    def test_delete_song_from_playlist_keeps_song_used_by_another_playlist(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+        playlist_a = self._create_playlist(name='A')
+        playlist_b = self._create_playlist(name='B')
+        song_id = self._create_song(title='Shared between playlists')
+        self._add_song_to_playlist(playlist_a, song_id, 0)
+        self._add_song_to_playlist(playlist_b, song_id, 0)
+
+        response = client.delete(
+            f'/api/songs/{song_id}?playlist_id={playlist_a}',
+            headers={'X-CSRF-Token': csrf_token},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.get_json()['song_deleted'])
+        self.assertEqual(response.get_json()['remaining_playlist_count'], 1)
+        self.assertEqual(client.get(f'/api/songs?playlist_id={playlist_a}').get_json(), [])
+        remaining = client.get(f'/api/songs?playlist_id={playlist_b}').get_json()
+        self.assertEqual([song['id'] for song in remaining], [song_id])
+
+    def test_delete_song_from_its_last_playlist_deletes_song(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+        playlist_id = self._create_playlist()
+        song_id = self._create_song(title='Last playlist')
+        self._add_song_to_playlist(playlist_id, song_id, 0)
+
+        response = client.delete(
+            f'/api/songs/{song_id}?playlist_id={playlist_id}',
+            headers={'X-CSRF-Token': csrf_token},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()['song_deleted'])
+        self.assertEqual(client.get(f'/api/songs?playlist_id={playlist_id}').get_json(), [])
+        self.assertEqual(client.get('/api/dashboard').get_json()['total_songs'], 0)
+
     def test_playlist_song_order_can_be_reordered(self):
         client = self.app_module.app.test_client()
         setup_response = client.post('/api/setup', json={
