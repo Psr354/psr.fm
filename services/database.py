@@ -283,6 +283,24 @@ def init_db(db_path):
         ON play_events (song_id, user_id)
     ''')
 
+    # Enforce one row per YouTube source for each user when legacy data is clean
+    # enough to support it. Older installations may already contain duplicates;
+    # the worker still performs an atomic lookup before inserting in that case.
+    duplicate_source = cursor.execute('''
+        SELECT 1
+        FROM songs
+        WHERE source_id IS NOT NULL AND source_id != ''
+        GROUP BY user_id, source_id
+        HAVING COUNT(*) > 1
+        LIMIT 1
+    ''').fetchone()
+    if not duplicate_source:
+        cursor.execute('''
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_songs_user_source_unique
+            ON songs (user_id, source_id)
+            WHERE source_id IS NOT NULL AND source_id != ''
+        ''')
+
     conn.commit()
     conn.close()
 

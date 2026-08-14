@@ -138,6 +138,8 @@ document.addEventListener('DOMContentLoaded', () => {
         shareLyricsInput: document.getElementById('share-lyrics-input'),
         shareThemeStart: document.getElementById('share-theme-start'),
         shareThemeEnd: document.getElementById('share-theme-end'),
+        shareThemeStartHex: document.getElementById('share-theme-start-hex'),
+        shareThemeEndHex: document.getElementById('share-theme-end-hex'),
         shareDecorationUpload: document.getElementById('share-decoration-upload'),
         shareDrawingCanvas: document.getElementById('share-drawing-canvas'),
         shareDrawingColor: document.getElementById('share-drawing-color'),
@@ -2462,12 +2464,42 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             state.shareRenderPromise = renderShareLyricsCanvas();
         });
     });
-    [el.shareThemeStart, el.shareThemeEnd].forEach((input, index) => {
+    const applyCustomThemeColor = (value, index) => {
+        state.shareLyricsCustomColors[index] = value;
+        state.shareLyricsTheme = 'custom';
+        document.querySelectorAll('.share-theme').forEach(item => item.classList.remove('active'));
+        state.shareRenderPromise = renderShareLyricsCanvas();
+    };
+
+    const normalizeHexColor = (value) => {
+        const hex = String(value || '').trim().replace(/^#/, '');
+        if (/^[0-9a-f]{3}$/i.test(hex)) {
+            return `#${hex.split('').map(char => char + char).join('').toUpperCase()}`;
+        }
+        return /^[0-9a-f]{6}$/i.test(hex) ? `#${hex.toUpperCase()}` : null;
+    };
+
+    const colorPickers = [el.shareThemeStart, el.shareThemeEnd];
+    const hexInputs = [el.shareThemeStartHex, el.shareThemeEndHex];
+    colorPickers.forEach((input, index) => {
         input?.addEventListener('input', () => {
-            state.shareLyricsCustomColors[index] = input.value;
-            state.shareLyricsTheme = 'custom';
-            document.querySelectorAll('.share-theme').forEach(item => item.classList.remove('active'));
-            state.shareRenderPromise = renderShareLyricsCanvas();
+            const value = input.value.toUpperCase();
+            if (hexInputs[index]) hexInputs[index].value = value;
+            applyCustomThemeColor(value, index);
+        });
+    });
+    hexInputs.forEach((input, index) => {
+        input?.addEventListener('input', () => {
+            const value = normalizeHexColor(input.value);
+            input.classList.toggle('invalid', !value);
+            input.setAttribute('aria-invalid', String(!value));
+            if (!value) return;
+            colorPickers[index].value = value;
+            applyCustomThemeColor(value, index);
+        });
+        input?.addEventListener('blur', () => {
+            const value = normalizeHexColor(input.value);
+            if (value) input.value = value;
         });
     });
     document.querySelectorAll('.share-decoration').forEach((button) => {
@@ -3320,6 +3352,11 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         });
     }
 
+    function logPlay(songId) {
+        if (!songId || isOfflineMode()) return;
+        fetch(`/api/songs/${songId}/play`, { method: 'POST' }).catch(e => console.error(e));
+    }
+
     function playSong(songs, index) {
         flushListenLog();
         state.currentPlaylistSongs = songs;
@@ -3329,9 +3366,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
         state.currentPlayingSongId = String(song.id);
 
-        if (!isOfflineMode()) {
-            fetch(`/api/songs/${song.id}/play`, { method: 'POST' }).catch(e => console.error(e));
-        }
+        logPlay(song.id);
 
         updateMediaSession(song);
         state.playbackRequestId += 1;
@@ -3373,6 +3408,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
     function playNext(isFromSongEnded = true) {
         if (state.repeatMode === 2 && isFromSongEnded) {
+            logPlay(state.currentPlayingSongId);
             el.audio.currentTime = 0;
             state.shouldBePlaying = true;
             resumeCurrentSong();

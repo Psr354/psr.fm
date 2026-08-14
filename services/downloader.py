@@ -43,6 +43,41 @@ def download_worker(db_path, download_dir, album_art_dir, sio):
             if socketio_instance: socketio_instance.emit('download_error', {'url': task['url'], 'error': str(e)}, room=f"user_{task['user_id']}")
         finally: download_queue.task_done()
 
+
+def add_song_to_playlists(cursor, song_id, playlist_ids):
+    for pid in playlist_ids:
+        existing = cursor.execute(
+            'SELECT 1 FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
+            (pid, song_id),
+        ).fetchone()
+        if existing:
+            continue
+        cursor.execute(
+            'SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_songs WHERE playlist_id = ?',
+            (pid,),
+        )
+        next_position = cursor.fetchone()[0]
+        cursor.execute(
+            'INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
+            (pid, song_id, next_position),
+        )
+
+
+def emit_song_added(song, playlist_ids):
+    if not socketio_instance:
+        return
+    socketio_instance.emit('song_added', {
+        'id': song['id'],
+        'playlist_ids': playlist_ids,
+        'title': song['title'],
+        'artist': song['artist'],
+        'filename': song['filename'],
+        'album_art': song['album_art'],
+        'duration_seconds': song['duration_seconds'],
+        'source_url': song['source_url'],
+        'source_id': song['source_id'],
+    }, room=f"user_{song['user_id']}")
+
 def process_download(task, db_path, download_dir, album_art_dir):
     url = task['url']
     playlist_ids = task['playlist_ids']
@@ -74,6 +109,22 @@ def process_download(task, db_path, download_dir, album_art_dir):
 
     if duration and duration > MAX_DOWNLOAD_DURATION_SECONDS:
         raise Exception('Video exceeds the 10 minute limit')
+
+    # Recheck after yt-dlp resolves the canonical video ID. This covers queued
+    # requests whose initial URL lookup happened before another download ended.
+    if source_id:
+        conn = get_db_connection(db_path)
+        existing_song = conn.execute(
+            'SELECT * FROM songs WHERE user_id = ? AND source_id = ? ORDER BY id LIMIT 1',
+            (user_id, source_id),
+        ).fetchone()
+        if existing_song:
+            add_song_to_playlists(conn.cursor(), existing_song['id'], playlist_ids)
+            conn.commit()
+            conn.close()
+            emit_song_added(existing_song, playlist_ids)
+            return
+        conn.close()
         
     file_uuid = str(uuid.uuid4())
     library_dir = os.path.join(download_dir, 'library')
@@ -105,25 +156,46 @@ def process_download(task, db_path, download_dir, album_art_dir):
         except: pass
             
     conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-    cursor.execute(
-        '''
-        INSERT INTO songs (title, artist, filename, album_art, duration_seconds, source_url, source_id, user_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''',
-        (title, artist, expected_file, album_art_filename, duration_seconds, source_url, source_id, user_id)
-    )
-    song_id = cursor.lastrowid
-    
-    for pid in playlist_ids:
-        cursor.execute('SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_songs WHERE playlist_id = ?', (pid,))
-        next_position = cursor.fetchone()[0]
-        cursor.execute(
-            'INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
-            (pid, song_id, next_position)
-        )
-    conn.commit()
-    conn.close()
+    try:
+        # Serialize the final lookup and insert so concurrent workers cannot both
+        # create a row for the same user and canonical YouTube video.
+        conn.execute('BEGIN IMMEDIATE')
+        existing_song = None
+        if source_id:
+            existing_song = conn.execute(
+                'SELECT * FROM songs WHERE user_id = ? AND source_id = ? ORDER BY id LIMIT 1',
+                (user_id, source_id),
+            ).fetchone()
+
+        cursor = conn.cursor()
+        if existing_song:
+            song_id = existing_song['id']
+        else:
+            cursor.execute(
+                '''
+                INSERT INTO songs (title, artist, filename, album_art, duration_seconds, source_url, source_id, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (title, artist, expected_file, album_art_filename, duration_seconds, source_url, source_id, user_id)
+            )
+            song_id = cursor.lastrowid
+
+        add_song_to_playlists(cursor, song_id, playlist_ids)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    if existing_song:
+        os.remove(os.path.join(library_dir, expected_file))
+        if album_art_filename:
+            album_art_path = os.path.join(album_art_dir, album_art_filename)
+            if os.path.exists(album_art_path):
+                os.remove(album_art_path)
+        emit_song_added(existing_song, playlist_ids)
+        return
 
     try:
         lyrics_data = search_lyrics(title, artist, duration_seconds)
@@ -140,8 +212,18 @@ def process_download(task, db_path, download_dir, album_art_dir):
     except Exception as exc:
         print(f"[WARN] lyrics lookup failed for {song_id}: {exc}")
 
-    if socketio_instance:
-        socketio_instance.emit('song_added', {'id': song_id, 'playlist_ids': playlist_ids, 'title': title, 'artist': artist, 'filename': expected_file, 'album_art': album_art_filename, 'duration_seconds': duration_seconds, 'source_url': source_url, 'source_id': source_id}, room=f'user_{user_id}')
+    emit_song_added({
+        'id': song_id,
+        'playlist_ids': playlist_ids,
+        'title': title,
+        'artist': artist,
+        'filename': expected_file,
+        'album_art': album_art_filename,
+        'duration_seconds': duration_seconds,
+        'source_url': source_url,
+        'source_id': source_id,
+        'user_id': user_id,
+    }, playlist_ids)
 
 def start_worker(db_path, download_dir, album_art_dir, sio):
     threading.Thread(target=download_worker, args=(db_path, download_dir, album_art_dir, sio), daemon=True).start()

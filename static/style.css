@@ -1102,6 +1102,30 @@ h1, h2, h3, h4, .section-title, .track-title {
     cursor: pointer;
 }
 
+.share-color-control .share-hex-input {
+    width: 86px;
+    height: 34px;
+    padding: 7px 9px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.28);
+    color: var(--text-primary);
+    cursor: text;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.share-color-control .share-hex-input:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px rgba(48, 214, 107, 0.12);
+    outline: none;
+}
+
+.share-color-control .share-hex-input.invalid {
+    border-color: var(--danger-color);
+}
+
 .share-decoration {
     width: 44px;
     height: 44px;
