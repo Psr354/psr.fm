@@ -253,6 +253,33 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(songs_response.status_code, 200)
         self.assertEqual(songs_response.get_json()[0]['source_id'], 'abc12345678')
 
+    def test_library_song_can_be_previewed_without_adding_to_playlist(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        self._csrf_token_from_response(setup_response)
+
+        filename = 'library-preview-track.mp3'
+        file_path = os.path.join(self.app_module.LIBRARY_DIR, filename)
+        with open(file_path, 'wb') as handle:
+            handle.write(b'preview-audio-bytes')
+
+        source_song_id = self._create_song(
+            user_id=2,
+            title='Preview Track',
+            artist='Preview Artist',
+            filename=filename,
+            source_url='https://www.youtube.com/watch?v=preview123',
+            source_id='preview123',
+        )
+
+        response = client.get(f'/api/library-songs/{source_song_id}/stream')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, 'audio/mpeg')
+        self.assertEqual(response.data, b'preview-audio-bytes')
+
     def test_owned_song_can_be_added_to_another_playlist(self):
         client = self.app_module.app.test_client()
         setup_response = client.post('/api/setup', json={

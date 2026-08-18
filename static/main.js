@@ -2786,12 +2786,17 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                     ${song.in_my_library ? '<span class="in-library-pill">Already in your library</span>' : ''}
                 </div>
                 <div class="song-duration">${formatTime(song.duration_seconds)}</div>
+                <button class="icon-btn play-library-song" data-id="${song.id}" title="Play preview"><i class="fas fa-play"></i></button>
                 <button class="icon-btn download-song" data-id="${song.id}" title="Download"><i class="fas fa-download"></i></button>
                 <button class="btn-primary compact library-add-btn" data-id="${song.id}"><i class="fas fa-plus"></i> Add</button>
             `;
             div.querySelector('.library-add-btn')?.addEventListener('click', (e) => {
                 e.stopPropagation();
                 openDownloadModal(song);
+            });
+            div.querySelector('.play-library-song')?.addEventListener('click', (e) => {
+                e.stopPropagation();
+                playLibrarySong(song);
             });
             div.querySelector('.download-song')?.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -3355,6 +3360,47 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     function logPlay(songId) {
         if (!songId || isOfflineMode()) return;
         fetch(`/api/songs/${songId}/play`, { method: 'POST' }).catch(e => console.error(e));
+    }
+
+    function playLibrarySong(song) {
+        const previewSong = {
+            ...song,
+            id: Number(song.id),
+            filename: song.filename,
+            title: song.title,
+            artist: song.artist || 'Unknown',
+            album_art: song.album_art || '',
+            duration_seconds: song.duration_seconds || 0,
+        };
+
+        flushListenLog();
+        state.currentPlaylistSongs = [previewSong];
+        state.currentSongIndex = 0;
+        state.currentSongMeta = previewSong;
+        state.currentPlayingSongId = String(previewSong.id);
+
+        updateMediaSession(previewSong);
+        state.playbackRequestId += 1;
+        state.playbackRetryCount = 0;
+        state.shouldBePlaying = true;
+        el.audio.src = `/api/library-songs/${previewSong.id}/stream`;
+        el.audio.load();
+        resumeCurrentSong(state.playbackRequestId);
+
+        if (el.playerTitle) el.playerTitle.innerText = previewSong.title;
+        if (el.playerArtist) el.playerArtist.innerText = previewSong.artist || 'Unknown';
+        if (el.playerArt) {
+            el.playerArt.src = `/static/album_art/${mediaUrlName(previewSong.album_art)}`;
+            el.playerArt.alt = `${previewSong.title} album artwork`;
+        }
+
+        updatePlayPauseIcon(true);
+        highlightPlayingSong();
+        buildQueue();
+
+        if (state.isLooping || state.loopStart > 0 || state.loopEnd > 0) {
+            resetLoop();
+        }
     }
 
     function playSong(songs, index) {

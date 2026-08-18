@@ -3,12 +3,15 @@ import calendar
 from datetime import datetime
 import shutil
 import uuid
+import queue
+import threading
 from flask import Flask, request, jsonify, send_from_directory, render_template, g, redirect, url_for
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash
 from flask_socketio import SocketIO, join_room
 from flask_wtf.csrf import CSRFProtect, generate_csrf, validate_csrf
+from flask_compress import Compress
 from PIL import Image
 import io
 import time
@@ -30,6 +33,9 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(32).hex())
 
+# Enable gzip compression for responses
+Compress(app)
+
 MAINTENANCE_MODE = False
 
 @app.before_request
@@ -42,11 +48,17 @@ def maintenance_check():
 app.config['WTF_CSRF_CHECK_DEFAULT'] = False
 csrf = CSRFProtect(app)
 
-# Generate CSRF token dan set di cookie
+# Generate CSRF token dan set di cookie, plus add cache headers for static assets
 @app.after_request
 def set_csrf_cookie(response):
     token = generate_csrf()
     response.set_cookie('csrf_token', token, httponly=False, samesite='Lax')
+    
+    # Add cache headers for album art and static assets (1 year)
+    if request.path.startswith('/static/album_art/') or request.path.endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg')):
+        response.cache_control.max_age = 31536000  # 1 year
+        response.cache_control.public = True
+    
     return response
 
 # Validasi CSRF untuk API endpoints (kecuali login/setup)
@@ -108,6 +120,29 @@ os.makedirs(os.path.join(BASE_DIR, 'logs'), exist_ok=True)
 init_db(DATABASE_PATH)
 if os.environ.get('PSR_FM_DISABLE_WORKER') != '1':
     start_worker(DATABASE_PATH, DOWNLOAD_DIR, ALBUM_ART_DIR, socketio)
+
+# Async file cleanup queue to prevent blocking UI on delete operations
+_file_cleanup_queue = queue.Queue()
+
+def _file_cleanup_worker():
+    """Background worker to asynchronously delete files"""
+    while True:
+        file_path = _file_cleanup_queue.get()
+        try:
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            print(f"[WARN] Failed to delete {file_path}: {e}")
+        finally:
+            _file_cleanup_queue.task_done()
+
+# Start cleanup worker thread
+_cleanup_thread = threading.Thread(target=_file_cleanup_worker, daemon=True)
+_cleanup_thread.start()
+
+def queue_file_deletion(file_path):
+    """Queue a file for async deletion instead of blocking"""
+    _file_cleanup_queue.put(file_path)
 
 class User(UserMixin):
     def __init__(self, id, username):
@@ -236,6 +271,9 @@ def check_lyrics_rate_limit(user_id):
             return False, int(LYRICS_RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0]))
         timestamps.append(now)
         _lyrics_rate_limit_state[user_id] = timestamps
+        # Garbage collection: remove empty entries to prevent memory leak
+        if not timestamps:
+            _lyrics_rate_limit_state.pop(user_id, None)
         return True, None
 
 
@@ -271,6 +309,12 @@ def clear_login_rate_limit(username):
     key = _login_rate_limit_key(username)
     with _login_rate_limit_lock:
         _login_rate_limit_state.pop(key, None)
+        # Garbage collection: periodically clean up all expired entries
+        now = time.monotonic()
+        expired_keys = [k for k, v in _login_rate_limit_state.items() 
+                       if all(now - ts >= LOGIN_RATE_LIMIT_WINDOW_SECONDS for ts in v)]
+        for k in expired_keys:
+            _login_rate_limit_state.pop(k, None)
 
 @app.teardown_appcontext
 def close_connection(exception):
@@ -512,6 +556,7 @@ def delete_playlist(playlist_id):
 
     db.commit()
 
+    # Queue file deletions asynchronously instead of blocking
     for song in orphaned_songs:
         filename_in_use = db.execute(
             'SELECT 1 FROM songs WHERE filename = ? LIMIT 1',
@@ -519,8 +564,7 @@ def delete_playlist(playlist_id):
         ).fetchone()
         if not filename_in_use:
             mp3 = os.path.join(LIBRARY_DIR, song['filename'])
-            if os.path.exists(mp3):
-                os.remove(mp3)
+            queue_file_deletion(mp3)
 
         if song['album_art']:
             album_art_in_use = db.execute(
@@ -529,8 +573,7 @@ def delete_playlist(playlist_id):
             ).fetchone()
             if not album_art_in_use:
                 art = os.path.join(ALBUM_ART_DIR, song['album_art'])
-                if os.path.exists(art):
-                    os.remove(art)
+                queue_file_deletion(art)
 
     return jsonify({
         'status': 'success',
@@ -636,6 +679,12 @@ def download_song():
 @login_required
 def get_library_songs():
     query = request.args.get('q', '').strip()
+    limit = int(request.args.get('limit', 100))
+    offset = int(request.args.get('offset', 0))
+    
+    # Cap limit to prevent abuse
+    limit = min(limit, 500)
+    
     search_param = f"%{query}%"
     db = get_db()
     params = [current_user.id]
@@ -665,11 +714,30 @@ def get_library_songs():
         FROM grouped
         JOIN songs s ON s.id = grouped.id
         ORDER BY grouped.latest_created_at DESC, s.title COLLATE NOCASE ASC
-        LIMIT 100
+        LIMIT ? OFFSET ?
         ''',
-        tuple(params)
+        tuple(params + [limit, offset])
     )
     return jsonify([dict(row) for row in cursor.fetchall()])
+
+
+@app.route('/api/library-songs/<int:song_id>/stream')
+@login_required
+def stream_library_song(song_id):
+    db = get_db()
+    song = db.execute(
+        'SELECT id, filename FROM songs WHERE id = ?',
+        (song_id,)
+    ).fetchone()
+    if not song:
+        return jsonify({'error': 'Not found'}), 404
+
+    safe_filename = secure_filename(song['filename'])
+    full_path = os.path.join(LIBRARY_DIR, safe_filename)
+    if not os.path.exists(full_path):
+        return jsonify({'error': 'Audio file not found'}), 404
+
+    return send_from_directory(LIBRARY_DIR, safe_filename, mimetype='audio/mpeg')
 
 
 @app.route('/api/library-songs/check-url')
