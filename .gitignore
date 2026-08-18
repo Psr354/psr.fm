@@ -29,6 +29,7 @@ dist/
 .env
 venv/
 env/
+.pytest_cache/
 
 # ==========================================
 # IDE & OS
@@ -44,3 +45,10 @@ services/old.py
 *.old
 *backup*
 .github/
+
+# ==========================================
+# LOCAL NOTES / DOCUMENTATION
+# ==========================================
+DEPLOYMENT_CHECKLIST.md
+OPTIMIZATION_SUMMARY.md
+YOUTUBE_403_FIX.md
