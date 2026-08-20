@@ -26,7 +26,29 @@ YTDLP_NETWORK_OPTIONS = {
     'http_headers': YOUTUBE_HTTP_HEADERS,
     'socket_timeout': 30,
     'retries': 3,
+    'fragment_retries': 3,
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android', 'web'],
+        },
+    },
 }
+
+
+def build_ytdlp_options(extra_options=None):
+    options = {
+        **YTDLP_NETWORK_OPTIONS,
+        **(extra_options or {}),
+    }
+    cookiefile = os.environ.get('PSR_FM_YTDLP_COOKIEFILE')
+    if cookiefile:
+        options['cookiefile'] = cookiefile
+    cookies_from_browser = os.environ.get('PSR_FM_YTDLP_COOKIES_FROM_BROWSER')
+    if cookies_from_browser:
+        parts = [part.strip() for part in cookies_from_browser.split(':') if part.strip()]
+        if parts:
+            options['cookiesfrombrowser'] = tuple(parts)
+    return options
 
 
 def validate_youtube_url(url):
@@ -111,12 +133,11 @@ def process_download(task, db_path, download_dir, album_art_dir):
             elif d['status'] == 'finished':
                 socketio_instance.emit('download_progress', {'url': url, 'percent': 100}, room=f'user_{user_id}')
 
-    ydl_opts_info = {
+    ydl_opts_info = build_ytdlp_options({
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False,
-        **YTDLP_NETWORK_OPTIONS,
-    }
+    })
     with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
         info = ydl.extract_info(url, download=False)
         title = info.get('title', 'Unknown')
@@ -148,15 +169,14 @@ def process_download(task, db_path, download_dir, album_art_dir):
     file_uuid = str(uuid.uuid4())
     library_dir = os.path.join(download_dir, 'library')
     
-    ydl_opts_download = {
+    ydl_opts_download = build_ytdlp_options({
         'format': 'bestaudio/best',
         'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
         'outtmpl': os.path.join(library_dir, file_uuid),
         'quiet': True,
         'no_warnings': True,
         'progress_hooks': [progress_hook],
-        **YTDLP_NETWORK_OPTIONS,
-    }
+    })
     
     with yt_dlp.YoutubeDL(ydl_opts_download) as ydl: ydl.download([url])
         

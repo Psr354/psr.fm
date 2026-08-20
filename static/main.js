@@ -272,7 +272,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function isUsableOfflineAudio(cache, audioUrl) {
         const response = await cache.match(audioUrl, { ignoreSearch: true });
-        if (!response || !response.ok) return false;
+        if (!response || !response.ok || response.status === 206) return false;
         return (response.headers.get('content-type') || '').startsWith('audio/');
     }
 
@@ -319,13 +319,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             for (let i = 0; i < missingSongs.length; i += 1) {
                 const song = missingSongs[i];
+                const audioUrl = `/audio/${mediaUrlName(song.filename)}`;
+                await cache.delete(audioUrl, { ignoreSearch: true });
                 const response = await fetch(`/api/songs/${song.id}/offline-audio`, { cache: 'no-store' });
                 if (!response.ok || response.status === 206) throw new Error('Audio file could not be downloaded completely');
                 const audioResponse = response.clone();
                 if (!audioResponse.body || !(audioResponse.headers.get('content-type') || '').startsWith('audio/')) {
                     throw new Error('Audio file could not be downloaded completely');
                 }
-                await cache.put(`/audio/${mediaUrlName(song.filename)}`, audioResponse);
+                await cache.put(audioUrl, audioResponse);
                 if (button) button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving new audio ${i + 1}/${missingSongs.length}`;
             }
 
