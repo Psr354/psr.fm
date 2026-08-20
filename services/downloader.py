@@ -13,6 +13,20 @@ from services.lyrics import search_lyrics
 download_queue = queue.Queue()
 socketio_instance = None
 MAX_DOWNLOAD_DURATION_SECONDS = 600
+YOUTUBE_HTTP_HEADERS = {
+    'User-Agent': (
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) '
+        'Chrome/120.0.0.0 Safari/537.36'
+    ),
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Referer': 'https://www.youtube.com/',
+}
+YTDLP_NETWORK_OPTIONS = {
+    'http_headers': YOUTUBE_HTTP_HEADERS,
+    'socket_timeout': 30,
+    'retries': 3,
+}
 
 
 def validate_youtube_url(url):
@@ -97,7 +111,12 @@ def process_download(task, db_path, download_dir, album_art_dir):
             elif d['status'] == 'finished':
                 socketio_instance.emit('download_progress', {'url': url, 'percent': 100}, room=f'user_{user_id}')
 
-    ydl_opts_info = {'quiet': True, 'no_warnings': True, 'extract_flat': False}
+    ydl_opts_info = {
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': False,
+        **YTDLP_NETWORK_OPTIONS,
+    }
     with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
         info = ydl.extract_info(url, download=False)
         title = info.get('title', 'Unknown')
@@ -133,7 +152,10 @@ def process_download(task, db_path, download_dir, album_art_dir):
         'format': 'bestaudio/best',
         'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
         'outtmpl': os.path.join(library_dir, file_uuid),
-        'quiet': True, 'no_warnings': True, 'progress_hooks': [progress_hook],
+        'quiet': True,
+        'no_warnings': True,
+        'progress_hooks': [progress_hook],
+        **YTDLP_NETWORK_OPTIONS,
     }
     
     with yt_dlp.YoutubeDL(ydl_opts_download) as ydl: ydl.download([url])
@@ -150,7 +172,11 @@ def process_download(task, db_path, download_dir, album_art_dir):
         if art_ext not in ['.jpg', '.jpeg', '.png', '.webp']: art_ext = '.jpg'
         album_art_filename = f"{file_uuid}{art_ext}"
         try:
-            r = requests.get(thumbnail_url, timeout=10)
+            r = requests.get(
+                thumbnail_url,
+                timeout=10,
+                headers=YOUTUBE_HTTP_HEADERS,
+            )
             if r.status_code == 200:
                 with open(os.path.join(album_art_dir, album_art_filename), 'wb') as f: f.write(r.content)
         except: pass

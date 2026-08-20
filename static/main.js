@@ -270,6 +270,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return assets;
     }
 
+    async function isUsableOfflineAudio(cache, audioUrl) {
+        const response = await cache.match(audioUrl, { ignoreSearch: true });
+        if (!response || !response.ok) return false;
+        return (response.headers.get('content-type') || '').startsWith('audio/');
+    }
+
     async function saveOfflinePlaylist(playlist) {
         const songs = state.currentPlaylistSongs;
         if (!songs.length) return showToast('Add songs before saving this playlist offline', 'error');
@@ -309,7 +315,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const missingSongs = [];
             for (const song of songs) {
                 const audioUrl = `/audio/${mediaUrlName(song.filename)}`;
-                if (!await cache.match(audioUrl)) missingSongs.push(song);
+                if (!await isUsableOfflineAudio(cache, audioUrl)) missingSongs.push(song);
             }
             for (let i = 0; i < missingSongs.length; i += 1) {
                 const song = missingSongs[i];
@@ -321,6 +327,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 await cache.put(`/audio/${mediaUrlName(song.filename)}`, audioResponse);
                 if (button) button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving new audio ${i + 1}/${missingSongs.length}`;
+            }
+
+            const incompleteSongs = [];
+            for (const song of songs) {
+                const audioUrl = `/audio/${mediaUrlName(song.filename)}`;
+                if (!await isUsableOfflineAudio(cache, audioUrl)) incompleteSongs.push(song.title);
+            }
+            if (incompleteSongs.length) {
+                throw new Error(`Offline audio is incomplete for ${incompleteSongs.length} song${incompleteSongs.length === 1 ? '' : 's'}`);
             }
 
             const lyrics = { ...(existingPlaylist?.lyrics || {}) };
