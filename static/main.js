@@ -272,8 +272,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function isUsableOfflineAudio(cache, audioUrl) {
         const response = await cache.match(audioUrl, { ignoreSearch: true });
+        return isUsableAudioResponse(response);
+    }
+
+    function isUsableAudioResponse(response) {
         if (!response || !response.ok || response.status === 206) return false;
         return (response.headers.get('content-type') || '').startsWith('audio/');
+    }
+
+    async function hasCompleteOfflineAudio(playlist) {
+        const songs = playlist?.songs || [];
+        if (!songs.length) return false;
+        const cache = await caches.open(OFFLINE_MEDIA_CACHE);
+        for (const song of songs) {
+            const audioUrl = `/audio/${mediaUrlName(song.filename)}`;
+            if (!await isUsableOfflineAudio(cache, audioUrl)) return false;
+        }
+        return true;
     }
 
     async function saveOfflinePlaylist(playlist) {
@@ -434,13 +449,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const button = document.getElementById('save-playlist-offline-btn');
         if (!button) return;
         const saved = state.currentPlaylist ? await getOfflinePlaylist(state.currentPlaylist.id) : null;
+        const complete = saved ? await hasCompleteOfflineAudio(saved) : false;
         button.disabled = isOfflineMode();
-        button.innerHTML = saved
+        button.innerHTML = saved && complete
             ? (isOfflineMode()
                 ? '<i class="fas fa-check"></i> Saved Offline'
                 : '<i class="fas fa-sync-alt"></i> Update Offline')
+            : saved
+                ? '<i class="fas fa-exclamation-triangle"></i> Offline Incomplete'
             : '<i class="fas fa-cloud-download-alt"></i> Save Offline';
-        button.title = isOfflineMode() ? 'Offline downloads cannot be changed without a connection' : '';
+        button.title = isOfflineMode()
+            ? 'Offline downloads cannot be changed without a connection'
+            : (saved && !complete ? 'Save again to replace incomplete offline audio' : '');
     }
 
     function debounce(f, w) {
@@ -3396,7 +3416,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
         if (isOfflineMode()) {
             const cachedResponse = await caches.match(audioUrl, { ignoreSearch: true });
-            if (cachedResponse) {
+            if (isUsableAudioResponse(cachedResponse)) {
                 state.offlineAudioUrl = URL.createObjectURL(await cachedResponse.blob());
                 if (requestId !== state.playbackRequestId) {
                     releaseOfflineAudioUrl();
@@ -3407,6 +3427,9 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                 resumeCurrentSong(requestId);
                 return;
             }
+            const cache = await caches.open(OFFLINE_MEDIA_CACHE);
+            await cache.delete(audioUrl, { ignoreSearch: true });
+            throw new Error('Offline audio is incomplete or corrupted');
         }
 
         el.audio.src = audioUrl;
