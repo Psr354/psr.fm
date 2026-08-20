@@ -169,7 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
         addUserBtnMain: document.getElementById('add-user-btn-main'),
     };
 
-    const socket = io();
+    const socket = typeof io === 'function' ? io() : { on() {} };
 
     // ==========================================
     // HELPER FUNCTIONS
