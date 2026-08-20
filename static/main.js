@@ -84,7 +84,8 @@ document.addEventListener('DOMContentLoaded', () => {
         offlineMode: false,
         playbackRequestId: 0,
         playbackRetryCount: 0,
-        shouldBePlaying: false
+        shouldBePlaying: false,
+        offlineAudioUrl: null
     };
 
     // ==========================================
@@ -3362,6 +3363,36 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         fetch(`/api/songs/${songId}/play`, { method: 'POST' }).catch(e => console.error(e));
     }
 
+    function releaseOfflineAudioUrl() {
+        if (!state.offlineAudioUrl) return;
+        URL.revokeObjectURL(state.offlineAudioUrl);
+        state.offlineAudioUrl = null;
+    }
+
+    async function loadSongAudio(song, requestId) {
+        const audioUrl = `/audio/${mediaUrlName(song.filename)}`;
+        releaseOfflineAudioUrl();
+
+        if (isOfflineMode()) {
+            const cachedResponse = await caches.match(audioUrl, { ignoreSearch: true });
+            if (cachedResponse) {
+                state.offlineAudioUrl = URL.createObjectURL(await cachedResponse.blob());
+                if (requestId !== state.playbackRequestId) {
+                    releaseOfflineAudioUrl();
+                    return;
+                }
+                el.audio.src = state.offlineAudioUrl;
+                el.audio.load();
+                resumeCurrentSong(requestId);
+                return;
+            }
+        }
+
+        el.audio.src = audioUrl;
+        el.audio.load();
+        resumeCurrentSong(requestId);
+    }
+
     function playLibrarySong(song) {
         const previewSong = {
             ...song,
@@ -3418,9 +3449,10 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         state.playbackRequestId += 1;
         state.playbackRetryCount = 0;
         state.shouldBePlaying = true;
-        el.audio.src = `/audio/${mediaUrlName(song.filename)}`;
-        el.audio.load();
-        resumeCurrentSong(state.playbackRequestId);
+        loadSongAudio(song, state.playbackRequestId).catch((error) => {
+            console.error('Offline audio could not be loaded:', error);
+            showToast('This song is not available offline. Save the playlist again while online.', 'error');
+        });
 
         if (el.playerTitle) el.playerTitle.innerText = song.title;
         if (el.playerArtist) el.playerArtist.innerText = song.artist || 'Unknown';
