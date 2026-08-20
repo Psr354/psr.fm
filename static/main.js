@@ -248,7 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // from the regular MP3 download, which is handed to the device's Downloads folder.
     const OFFLINE_DB = 'psr354-offline';
     const OFFLINE_STORE = 'playlists';
-    const OFFLINE_MEDIA_CACHE = 'psr354-media-v2';
+    const OFFLINE_MEDIA_CACHE = 'psr354-media-v3';
 
     function offlineDb() {
         return new Promise((resolve, reject) => {
@@ -315,7 +315,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const song = missingSongs[i];
                 const response = await fetch(`/api/songs/${song.id}/offline-audio`, { cache: 'no-store' });
                 if (!response.ok || response.status === 206) throw new Error('Audio file could not be downloaded completely');
-                await cache.put(`/audio/${mediaUrlName(song.filename)}`, response.clone());
+                const audioResponse = response.clone();
+                if (!audioResponse.body || !(audioResponse.headers.get('content-type') || '').startsWith('audio/')) {
+                    throw new Error('Audio file could not be downloaded completely');
+                }
+                await cache.put(`/audio/${mediaUrlName(song.filename)}`, audioResponse);
                 if (button) button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving new audio ${i + 1}/${missingSongs.length}`;
             }
 
