@@ -1,4 +1,6 @@
 import os
+import json
+import mimetypes
 import calendar
 from datetime import datetime
 import shutil
@@ -116,6 +118,20 @@ os.makedirs(LIBRARY_DIR, exist_ok=True)
 os.makedirs(ALBUM_ART_DIR, exist_ok=True)
 os.makedirs(DATABASE_DIR, exist_ok=True)
 os.makedirs(os.path.join(BASE_DIR, 'logs'), exist_ok=True)
+
+
+AUDIO_MIME_TYPES = {
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.flac': 'audio/flac',
+    '.ogg': 'audio/ogg',
+    '.m4a': 'audio/mp4',
+}
+
+
+def audio_mimetype(filename):
+    ext = os.path.splitext(filename)[1].lower()
+    return AUDIO_MIME_TYPES.get(ext) or mimetypes.guess_type(filename)[0] or 'application/octet-stream'
 
 init_db(DATABASE_PATH)
 if os.environ.get('PSR_FM_DISABLE_WORKER') != '1':
@@ -675,6 +691,131 @@ def download_song():
     return jsonify({'status': 'processing', 'url': url})
 
 
+@app.route('/api/upload', methods=['POST'])
+@login_required
+def upload_song():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    allowed_extensions = {'.mp3', '.wav', '.flac', '.ogg', '.m4a'}
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in allowed_extensions:
+        return jsonify({'error': f'Unsupported file format. Allowed: {", ".join(allowed_extensions)}'}), 400
+
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+    file.seek(0, os.SEEK_END)
+    file_size = file.tell()
+    file.seek(0)
+    if file_size > MAX_FILE_SIZE:
+        return jsonify({'error': 'File too large. Maximum size is 50MB'}), 400
+
+    title = (request.form.get('title') or '').strip()
+    artist = (request.form.get('artist') or '').strip() or 'Unknown'
+    playlist_ids_raw = request.form.get('playlist_ids', '[]')
+    try:
+        playlist_ids = sorted({int(pid) for pid in json.loads(playlist_ids_raw)})
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return jsonify({'error': 'Invalid playlist data'}), 400
+
+    if not playlist_ids:
+        return jsonify({'error': 'Select at least one playlist'}), 400
+
+    db = get_db()
+    placeholders = ','.join('?' for _ in playlist_ids)
+    cursor = db.execute(
+        f'SELECT id FROM playlists WHERE user_id = ? AND id IN ({placeholders})',
+        (current_user.id, *playlist_ids)
+    )
+    owned_playlist_ids = [row['id'] for row in cursor.fetchall()]
+    if len(owned_playlist_ids) != len(playlist_ids):
+        return jsonify({'error': 'One or more playlists were not found'}), 404
+
+    if not title:
+        title = os.path.splitext(file.filename)[0].replace('_', ' ').replace('-', ' ').strip()
+
+    unique_filename = f"{uuid.uuid4().hex}{ext}"
+    save_path = os.path.join(LIBRARY_DIR, unique_filename)
+    file.save(save_path)
+
+    from services.metadata import extract_duration
+    duration = extract_duration(save_path)
+
+    album_art_filename = None
+    try:
+        from mutagen.id3 import ID3, APIC
+        from mutagen.mp3 import MP3 as MutagenMP3
+        audio_file = MutagenMP3(save_path)
+        if audio_file.tags and audio_file.tags.getall('APIC'):
+            apic = audio_file.tags.getall('APIC')[0]
+            art_ext = {'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp'}.get(apic.mime, '.jpg')
+            album_art_filename = f"upload_art_{uuid.uuid4().hex[:12]}{art_ext}"
+            art_path = os.path.join(ALBUM_ART_DIR, album_art_filename)
+            with open(art_path, 'wb') as art_file:
+                art_file.write(apic.data)
+    except Exception:
+        album_art_filename = None
+
+    cursor = db.execute(
+        '''
+        INSERT INTO songs (
+            title, artist, filename, album_art, duration_seconds,
+            source_url, source_id, lyrics, synced_lyrics, lyrics_status, lyrics_updated_at, user_id
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''',
+        (title, artist, unique_filename, album_art_filename, duration, None, None, '', '', 'none', None, current_user.id)
+    )
+    song_id = cursor.lastrowid
+
+    added_playlist_ids = []
+    for playlist_id in owned_playlist_ids:
+        cursor = db.execute(
+            'SELECT 1 FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
+            (playlist_id, song_id)
+        )
+        if cursor.fetchone():
+            continue
+        pos_cursor = db.execute(
+            'SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_songs WHERE playlist_id = ?',
+            (playlist_id,)
+        )
+        next_position = pos_cursor.fetchone()[0]
+        db.execute(
+            'INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
+            (playlist_id, song_id, next_position)
+        )
+        added_playlist_ids.append(playlist_id)
+
+    db.commit()
+
+    try:
+        socketio.emit('song_added', {
+            'id': song_id,
+            'title': title,
+            'artist': artist,
+            'filename': unique_filename,
+            'album_art': album_art_filename,
+            'duration_seconds': duration,
+            'playlist_ids': added_playlist_ids,
+        }, room=f'user_{current_user.id}')
+    except Exception:
+        pass
+
+    return jsonify({
+        'status': 'success',
+        'song_id': song_id,
+        'title': title,
+        'artist': artist,
+        'filename': unique_filename,
+        'album_art': album_art_filename,
+        'duration_seconds': duration,
+        'playlist_ids': added_playlist_ids,
+    }), 201
+
+
 @app.route('/api/library-songs', methods=['GET'])
 @login_required
 def get_library_songs():
@@ -726,7 +867,7 @@ def get_library_songs():
 def stream_library_song(song_id):
     db = get_db()
     song = db.execute(
-        'SELECT id, filename FROM songs WHERE id = ?',
+        'SELECT id, title, artist, filename FROM songs WHERE id = ?',
         (song_id,)
     ).fetchone()
     if not song:
@@ -737,7 +878,37 @@ def stream_library_song(song_id):
     if not os.path.exists(full_path):
         return jsonify({'error': 'Audio file not found'}), 404
 
-    return send_from_directory(LIBRARY_DIR, safe_filename, mimetype='audio/mpeg')
+    return send_from_directory(LIBRARY_DIR, safe_filename, mimetype=audio_mimetype(safe_filename))
+
+
+@app.route('/api/library-songs/<int:song_id>/download')
+@login_required
+def download_library_song(song_id):
+    """Download any song from Library Songs (including ones uploaded by other users)."""
+    db = get_db()
+    song = db.execute(
+        'SELECT id, title, artist, filename FROM songs WHERE id = ?',
+        (song_id,)
+    ).fetchone()
+    if not song:
+        return jsonify({'error': 'Song not found'}), 404
+
+    safe_filename = secure_filename(song['filename'])
+    full_path = os.path.join(LIBRARY_DIR, safe_filename)
+    if not os.path.exists(full_path):
+        return jsonify({'error': 'Audio file not found'}), 404
+
+    ext = os.path.splitext(safe_filename)[1] or '.mp3'
+    download_name = f"{song['title']} - {song['artist'] or 'Unknown'}{ext}"
+    download_name = secure_filename(download_name) or f"song{safe_filename}"
+
+    return send_from_directory(
+        LIBRARY_DIR,
+        safe_filename,
+        mimetype=audio_mimetype(safe_filename),
+        as_attachment=True,
+        download_name=download_name
+    )
 
 
 @app.route('/api/library-songs/check-url')
@@ -980,7 +1151,7 @@ def stream_audio(filename):
     ).fetchone()
     if not song:
         return jsonify({'error': 'Not found'}), 404
-    return send_from_directory(LIBRARY_DIR, safe_filename, mimetype='audio/mpeg')
+    return send_from_directory(LIBRARY_DIR, safe_filename, mimetype=audio_mimetype(safe_filename))
 
 @app.route('/api/songs/<int:song_id>/offline-audio')
 @login_required

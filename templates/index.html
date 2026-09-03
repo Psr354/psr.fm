@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>psr.fm</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=10">
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}">
@@ -41,6 +41,7 @@
                 <button id="library-btn" class="nav-item"><i class="fas fa-record-vinyl"></i> Library Songs</button>
                 <button id="capsule-btn" class="nav-item"><i class="fas fa-wave-square"></i> Frequency Focus</button>
                 <button id="global-download-btn" class="nav-item nav-item-accent"><i class="fas fa-download"></i> Download Song</button>
+                <button id="upload-song-btn" class="nav-item nav-item-accent"><i class="fas fa-cloud-upload-alt"></i> Upload Song</button>
                 <button id="users-btn" class="nav-item nav-item-accent" style="display: none;">
                     <i class="fas fa-users-cog"></i> User Management
                 </button>
@@ -343,6 +344,45 @@
         </div>
     </div>
 
+    <div id="upload-modal" class="modal">
+        <div class="modal-content upload-modal-content">
+            <h3>Upload Song</h3>
+            <div id="upload-dropzone" class="upload-dropzone">
+                <i class="fas fa-cloud-upload-alt upload-dropzone-icon"></i>
+                <p class="upload-dropzone-text">Drag & drop your audio file here</p>
+                <p class="upload-dropzone-hint">or click to browse</p>
+                <input type="file" id="upload-file-input" accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a" style="display:none;">
+            </div>
+            <div id="upload-file-info" class="upload-file-info" style="display:none;">
+                <i class="fas fa-file-audio upload-file-icon"></i>
+                <span id="upload-file-name" class="upload-file-name"></span>
+                <span id="upload-file-size" class="upload-file-size"></span>
+                <button id="upload-remove-file" class="icon-btn" type="button"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="form-group">
+                <label>Title</label>
+                <input type="text" id="upload-title-input" placeholder="Song title (optional)">
+            </div>
+            <div class="form-group">
+                <label>Artist</label>
+                <input type="text" id="upload-artist-input" placeholder="Artist name (optional)">
+            </div>
+            <p class="field-hint">Add to playlists:</p>
+            <div id="upload-playlist-checkboxes" class="checkbox-list"></div>
+            <div id="upload-progress-wrapper" class="upload-progress-wrapper" style="display:none;">
+                <div class="upload-progress-meta">
+                    <span><i class="fas fa-cloud-upload-alt"></i> Uploading</span>
+                    <span id="upload-progress-label">0%</span>
+                </div>
+                <div class="upload-progress-track"><div id="upload-progress-bar" class="upload-progress-bar"></div></div>
+            </div>
+            <div class="modal-actions">
+                <button id="cancel-upload-btn" class="btn-secondary">Cancel</button>
+                <button id="save-upload-btn" class="btn-primary" disabled>Upload</button>
+            </div>
+        </div>
+    </div>
+
     <div id="add-songs-modal" class="modal">
         <div class="modal-content add-songs-modal-content">
             <h3>Add Songs to Playlist</h3>
@@ -391,6 +431,7 @@
                 <button id="next-btn" class="control-btn" aria-label="Next song"><i class="fas fa-step-forward" aria-hidden="true"></i></button>
                 <button id="lyrics-btn" class="control-btn" title="Lyrics"><i class="fas fa-music"></i></button>
                 <button id="loop-btn" class="control-btn" title="A-B Loop"><i class="fas fa-braille"></i></button>
+                <button id="eq-btn" class="control-btn" title="Equalizer"><i class="fas fa-sliders-h"></i></button>
             </div>
             <div class="progress-container">
                  <span id="current-time" class="time">0:00</span>
@@ -514,7 +555,50 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
-    <script src="{{ url_for('static', filename='main.js') }}"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=10"></script>
+
+    <!-- Equalizer Popover -->
+    <div id="eq-popover" class="eq-popover" aria-hidden="true">
+        <div class="eq-header">
+            <div class="eq-title-group">
+                <h4><i class="fas fa-sliders-h"></i> Equalizer</h4>
+                <span id="eq-status" class="eq-status">Off</span>
+            </div>
+            <div class="eq-header-actions">
+                <label class="eq-toggle" title="Enable equalizer">
+                    <input type="checkbox" id="eq-enable-toggle">
+                    <span class="eq-toggle-slider"></span>
+                </label>
+                <button id="eq-close-btn" class="eq-close-btn" type="button" aria-label="Close equalizer"><i class="fas fa-times"></i></button>
+            </div>
+        </div>
+        <div class="eq-presets">
+            <select id="eq-preset-select" class="eq-preset-select" aria-label="Equalizer preset">
+                <option value="flat">Flat</option>
+                <option value="bass">Bass Boost</option>
+                <option value="treble">Treble Boost</option>
+                <option value="rock">Rock</option>
+                <option value="pop">Pop</option>
+                <option value="jazz">Jazz</option>
+                <option value="classical">Classical</option>
+                <option value="vocal">Vocal</option>
+                <option value="electronic">Electronic</option>
+                <option value="acoustic">Acoustic</option>
+                <option value="custom">Custom</option>
+            </select>
+            <button id="eq-reset-btn" class="btn-secondary compact" type="button"><i class="fas fa-undo"></i> Reset</button>
+        </div>
+        <div class="eq-preamp-row">
+            <label for="eq-preamp">Preamp</label>
+            <input type="range" id="eq-preamp" min="-12" max="12" value="0" step="1">
+            <span id="eq-preamp-value">0 dB</span>
+        </div>
+        <div id="eq-bands" class="eq-bands"></div>
+        <div class="eq-footer">
+            <span class="eq-hint">±12 dB • Double-click slider untuk reset band</span>
+            <canvas id="eq-canvas" class="eq-canvas" width="600" height="80" aria-hidden="true"></canvas>
+        </div>
+    </div>
 
     <!-- Loop Popover -->
     <div id="loop-popover" class="loop-popover">

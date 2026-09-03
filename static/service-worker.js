@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'psr354-shell-v7';
+const SHELL_CACHE = 'psr354-shell-v10';
 const MEDIA_CACHE = 'psr354-media-v3';
 const SHELL_FILES = [
   '/', '/static/main.js', '/static/style.css', '/static/site.webmanifest',
@@ -36,7 +36,33 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  if (url.pathname === '/static/main.js' || url.pathname === '/static/style.css') {
+    // Always fetch fresh JS/CSS so feature updates reach the browser immediately.
+    // Fall back to cache only when offline so the PWA stays usable.
+    event.respondWith(
+      fetch(request).then((response) => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(SHELL_CACHE).then((cache) => cache.put(request, clone));
+        }
+        return response;
+      }).catch(() => caches.match(request))
+    );
+    return;
+  }
+
   if (url.pathname.startsWith('/static/')) {
-    event.respondWith(caches.match(request).then((cached) => cached || fetch(request)));
+    event.respondWith(
+      caches.match(request).then((cached) => {
+        if (cached) return cached;
+        return fetch(request).then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(SHELL_CACHE).then((cache) => cache.put(request, clone));
+          }
+          return response;
+        }).catch(() => caches.match('/static/main.js'));
+      })
+    );
   }
 });

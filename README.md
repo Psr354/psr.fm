@@ -10,6 +10,7 @@ Aplikasi ini cocok untuk server pribadi, keluarga, atau teman kecil-kecilan. Set
 
 - Multi-user dengan akun admin dan user biasa.
 - Download lagu dari YouTube ke MP3.
+- Upload file audio lokal ke library dan playlist.
 - Library Songs untuk melihat lagu yang sudah pernah didownload semua user.
 - Add lagu dari Library Songs tanpa download ulang.
 - Peringatan kalau link YouTube yang ditempel sudah ada di Library Songs.
@@ -18,7 +19,7 @@ Aplikasi ini cocok untuk server pribadi, keluarga, atau teman kecil-kecilan. Set
 - Lyrics biasa dan synced lyrics jika tersedia.
 - Edit lirik manual jika hasil pencarian tidak tersedia atau perlu dikoreksi.
 - Share Lyrics Card untuk membuat gambar PNG dari potongan lirik dengan cover lagu dan tema warna.
-- Player dengan queue, shuffle, repeat, volume, seek, dan A-B loop.
+- Player dengan queue, shuffle, repeat, volume, seek, A-B loop, dan equalizer 16-band.
 - Dashboard per user: recently added, top played, top listened, dan storage usage.
 - Frequency Focus untuk recap bulanan/tahunan: total waktu dengar, jumlah play, lagu paling sering diputar, lagu paling lama didengar, dan breakdown per bulan untuk mode tahunan.
 - Tampilan mobile dengan drawer sidebar, tombol keluar User Management, dan player bawah yang tidak menutup konten.
@@ -108,6 +109,16 @@ Jika lagu sudah ada di **Library Songs**, aplikasi akan memberi peringatan dan l
 
 Download hanya menerima URL YouTube dan video berdurasi maksimal 10 menit.
 
+### Upload Lagu
+
+1. Klik **Upload Song**.
+2. Pilih atau drag file audio ke modal upload.
+3. Isi judul/artis jika ingin mengganti hasil otomatis dari nama file.
+4. Pilih minimal satu playlist tujuan.
+5. Klik **Upload**.
+
+Upload menerima file MP3, WAV, FLAC, OGG, dan M4A dengan ukuran maksimal 50 MB. Jika file MP3 punya embedded cover art, cover tersebut akan ikut disimpan sebagai album art.
+
 ### Library Songs
 
 Menu **Library Songs** menampilkan lagu yang sudah pernah didownload oleh semua user.
@@ -145,6 +156,14 @@ Bagian **Most Played** dihitung dari jumlah lagu mulai diputar pada periode itu.
 
 Untuk data lama sebelum tabel `play_events` tersedia, listening time lama tetap bisa muncul, tetapi play count per periode baru akurat setelah aplikasi berjalan dengan versi ini.
 
+### Equalizer
+
+- Klik tombol **Equalizer** di player untuk membuka panel EQ.
+- Aktifkan toggle EQ untuk memakai Web Audio equalizer.
+- Pilih preset seperti Bass Boost, Rock, Pop, Jazz, Classical, Vocal, Electronic, atau Acoustic.
+- Atur 16 band frekuensi dan preamp secara manual jika ingin membuat preset custom.
+- Pengaturan EQ disimpan di browser yang sedang dipakai.
+
 ### Lyrics dan Share Card
 
 - Klik tombol **Lyrics** di player untuk membuka panel lirik.
@@ -170,7 +189,7 @@ Folder penting:
 | Folder | Isi |
 | --- | --- |
 | `database.db/` | Database SQLite |
-| `downloads/` | File MP3 |
+| `downloads/` | File audio library |
 | `static/album_art/` | Cover lagu dan playlist |
 | `logs/` | Log aplikasi |
 
@@ -182,11 +201,11 @@ Sebelum update atau pindah server, backup folder-folder di atas.
 
 | Path | Fungsi |
 | --- | --- |
-| `app.py` | Route Flask, auth, API playlist/song/user, dan bootstrap aplikasi |
+| `app.py` | Route Flask, auth, API playlist/song/user, upload audio, dan bootstrap aplikasi |
 | `services/database.py` | Schema SQLite, migration ringan, play events, listening logs, dan helper user/song |
 | `services/downloader.py` | Worker download YouTube, metadata, album art, dan event progress |
 | `services/lyrics.py` | Pencarian lyrics/synced lyrics via LRCLIB |
-| `static/main.js` | UI browser: player, playlist, modal, dashboard, Frequency Focus, lyrics, dan user management |
+| `static/main.js` | UI browser: player, playlist, upload modal, dashboard, Frequency Focus, equalizer, lyrics, dan user management |
 | `static/style.css` | Design system visual dan responsive behavior |
 | `templates/` | HTML halaman utama, login, setup, dan maintenance |
 
