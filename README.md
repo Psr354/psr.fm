@@ -4,7 +4,7 @@ psr.fm adalah aplikasi musik self-hosted untuk download audio dari YouTube, meny
 
 Aplikasi ini cocok untuk server pribadi, keluarga, atau teman kecil-kecilan. Setiap user punya playlist, lagu, riwayat dengar, dan statistik sendiri.
 
-![Dashboard Preview](static/dashboard.jpeg)
+![Dashboard Preview](static/dashboard.png)
 
 ## Fitur Utama
 
