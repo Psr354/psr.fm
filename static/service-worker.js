@@ -1,8 +1,10 @@
-const SHELL_CACHE = 'psr354-shell-v11';
+const SHELL_CACHE = 'psr354-shell-v12';
 const MEDIA_CACHE = 'psr354-media-v3';
 const SHELL_FILES = [
   '/', '/static/offline.html', '/static/offline-register.js',
-  '/static/main.js', '/static/style.css', '/static/site.webmanifest',
+  '/static/main.js', '/static/main.js?v=10',
+  '/static/style.css', '/static/style.css?v=10',
+  '/static/site.webmanifest',
   '/static/icon-192.png', '/static/icon-512.png', '/static/psrfm.png'
 ];
 
@@ -53,14 +55,16 @@ self.addEventListener('fetch', (event) => {
           caches.open(SHELL_CACHE).then((cache) => cache.put(request, clone));
         }
         return response;
-      }).catch(() => caches.match(request))
+      }).catch(() => (
+        caches.match(request, { ignoreSearch: true })
+      ))
     );
     return;
   }
 
   if (url.pathname.startsWith('/static/')) {
     event.respondWith(
-      caches.match(request).then((cached) => {
+      caches.match(request, { ignoreSearch: true }).then((cached) => {
         if (cached) return cached;
         return fetch(request).then((response) => {
           if (response.ok) {
@@ -68,7 +72,7 @@ self.addEventListener('fetch', (event) => {
             caches.open(SHELL_CACHE).then((cache) => cache.put(request, clone));
           }
           return response;
-        }).catch(() => caches.match('/static/main.js'));
+        }).catch(() => caches.match(request, { ignoreSearch: true }));
       })
     );
   }
