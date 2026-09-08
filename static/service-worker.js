@@ -1,7 +1,8 @@
-const SHELL_CACHE = 'psr354-shell-v10';
+const SHELL_CACHE = 'psr354-shell-v11';
 const MEDIA_CACHE = 'psr354-media-v3';
 const SHELL_FILES = [
-  '/', '/static/main.js', '/static/style.css', '/static/site.webmanifest',
+  '/', '/static/offline.html', '/static/offline-register.js',
+  '/static/main.js', '/static/style.css', '/static/site.webmanifest',
   '/static/icon-192.png', '/static/icon-512.png', '/static/psrfm.png'
 ];
 
@@ -27,7 +28,13 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   if (request.mode === 'navigate') {
-    event.respondWith(fetch(request).catch(() => caches.match('/')));
+    event.respondWith(
+      fetch(request).catch(() => (
+        caches.match(request)
+          .then((cached) => cached || caches.match('/'))
+          .then((cached) => cached || caches.match('/static/offline.html'))
+      ))
+    );
     return;
   }
 
