@@ -3755,25 +3755,60 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     // ==========================================
     // DASHBOARD
     // ==========================================
-    async function loadDashboard() {
-        const stats = await (await fetch('/api/dashboard')).json();
+    function renderDashboardFallback(message = 'Save a playlist offline while online, then it will appear here when the server is unreachable.') {
         const statsGrid = document.getElementById('stats-grid');
         if (statsGrid) {
             statsGrid.innerHTML = `
-                <div class="stat-card stat-playlists"><div class="stat-icon"><i class="fas fa-list"></i></div><div><h4>${stats.total_playlists}</h4><p>Playlists</p></div></div>
-                <div class="stat-card stat-songs"><div class="stat-icon"><i class="fas fa-music"></i></div><div><h4>${stats.total_songs}</h4><p>Songs</p></div></div>
-                <div class="stat-card stat-time"><div class="stat-icon"><i class="fas fa-clock"></i></div><div><h4>${formatTime(stats.total_listened)}</h4><p>Time Listened</p></div></div>
-                <div class="stat-card stat-storage"><div class="stat-icon"><i class="fas fa-hard-drive"></i></div><div><h4>${formatBytes(stats.storage_used)}</h4><p>Storage Used</p></div></div>
+                <div class="stat-card stat-playlists"><div class="stat-icon"><i class="fas fa-list"></i></div><div><h4>0</h4><p>Playlists</p></div></div>
+                <div class="stat-card stat-songs"><div class="stat-icon"><i class="fas fa-music"></i></div><div><h4>0</h4><p>Songs</p></div></div>
+                <div class="stat-card stat-time"><div class="stat-icon"><i class="fas fa-clock"></i></div><div><h4>0:00</h4><p>Time Listened</p></div></div>
+                <div class="stat-card stat-storage"><div class="stat-icon"><i class="fas fa-hard-drive"></i></div><div><h4>0 B</h4><p>Storage Used</p></div></div>
             `;
         }
-        const recentSongs = await (await fetch('/api/songs?limit=5')).json();
-        renderSongs(recentSongs.slice(0, 5), 'recent-songs-list', true);
 
-        const topSongs = await (await fetch('/api/top-songs')).json();
-        renderTopSongs(topSongs.slice(0, 5), 'top-songs-list');
+        ['recent-songs-list', 'top-songs-list', 'top-songs-duration-list'].forEach((id) => {
+            renderEmptyState(document.getElementById(id), {
+                icon: 'fa-wifi',
+                title: 'Offline library is empty',
+                body: message
+            });
+        });
+    }
 
-        const topSongsDuration = await (await fetch('/api/top-songs-duration')).json();
-        renderTopSongs(topSongsDuration.slice(0, 5), 'top-songs-duration-list');
+    async function loadDashboard() {
+        try {
+            const statsResponse = await fetchWithTimeout('/api/dashboard');
+            if (!statsResponse.ok) throw new Error('Dashboard request failed');
+            const stats = await statsResponse.json();
+            const statsGrid = document.getElementById('stats-grid');
+            if (statsGrid) {
+                statsGrid.innerHTML = `
+                    <div class="stat-card stat-playlists"><div class="stat-icon"><i class="fas fa-list"></i></div><div><h4>${stats.total_playlists}</h4><p>Playlists</p></div></div>
+                    <div class="stat-card stat-songs"><div class="stat-icon"><i class="fas fa-music"></i></div><div><h4>${stats.total_songs}</h4><p>Songs</p></div></div>
+                    <div class="stat-card stat-time"><div class="stat-icon"><i class="fas fa-clock"></i></div><div><h4>${formatTime(stats.total_listened)}</h4><p>Time Listened</p></div></div>
+                    <div class="stat-card stat-storage"><div class="stat-icon"><i class="fas fa-hard-drive"></i></div><div><h4>${formatBytes(stats.storage_used)}</h4><p>Storage Used</p></div></div>
+                `;
+            }
+
+            const recentResponse = await fetchWithTimeout('/api/songs?limit=5');
+            if (!recentResponse.ok) throw new Error('Recent songs request failed');
+            const recentSongs = await recentResponse.json();
+            renderSongs(recentSongs.slice(0, 5), 'recent-songs-list', true);
+
+            const topSongsResponse = await fetchWithTimeout('/api/top-songs');
+            if (!topSongsResponse.ok) throw new Error('Top songs request failed');
+            const topSongs = await topSongsResponse.json();
+            renderTopSongs(topSongs.slice(0, 5), 'top-songs-list');
+
+            const topDurationResponse = await fetchWithTimeout('/api/top-songs-duration');
+            if (!topDurationResponse.ok) throw new Error('Top songs duration request failed');
+            const topSongsDuration = await topDurationResponse.json();
+            renderTopSongs(topSongsDuration.slice(0, 5), 'top-songs-duration-list');
+        } catch (error) {
+            console.warn('Dashboard unavailable; showing offline fallback.', error);
+            setOfflineMode(true);
+            renderDashboardFallback();
+        }
     }
 
     // ==========================================
@@ -4413,6 +4448,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         });
         loadDashboard();
     } else {
+        renderDashboardFallback('No offline playlists have been saved on this device yet. Connect to the server, open a playlist, and use Save Offline first.');
         loadPlaylists().then(async () => {
             const offlinePlaylists = await getOfflinePlaylists();
             if (offlinePlaylists.length) openPlaylist(offlinePlaylists[0]);
