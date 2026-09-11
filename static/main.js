@@ -170,7 +170,34 @@ document.addEventListener('DOMContentLoaded', () => {
         addUserBtnMain: document.getElementById('add-user-btn-main'),
     };
 
-    const socket = typeof io === 'function' ? io() : { on() {} };
+    // Do not block startup on the external realtime client. Offline playback
+    // must initialize immediately even when the CDN cannot be reached.
+    const pendingSocketHandlers = [];
+    let liveSocket = null;
+    const socket = {
+        on(eventName, handler) {
+            pendingSocketHandlers.push([eventName, handler]);
+            if (liveSocket) liveSocket.on(eventName, handler);
+        }
+    };
+
+    function connectRealtime() {
+        if (liveSocket || !navigator.onLine) return;
+        const attach = () => {
+            if (liveSocket || typeof window.io !== 'function') return;
+            liveSocket = window.io();
+            pendingSocketHandlers.forEach(([eventName, handler]) => liveSocket.on(eventName, handler));
+        };
+        if (typeof window.io === 'function') return attach();
+        if (document.querySelector('script[data-realtime-client]')) return;
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js';
+        script.async = true;
+        script.dataset.realtimeClient = 'true';
+        script.onload = attach;
+        script.onerror = () => script.remove();
+        document.head.appendChild(script);
+    }
 
     // ==========================================
     // HELPER FUNCTIONS
@@ -259,6 +286,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const OFFLINE_DB = 'psr354-offline';
     const OFFLINE_STORE = 'playlists';
     const OFFLINE_MEDIA_CACHE = 'psr354-media-v3';
+    const OFFLINE_PLAYLIST_BACKUP = 'psr354-offline-playlists';
 
     function offlineDb() {
         return new Promise((resolve, reject) => {
@@ -285,9 +313,39 @@ document.addEventListener('DOMContentLoaded', () => {
         return isUsableAudioResponse(response);
     }
 
-    function isUsableAudioResponse(response) {
+    async function isUsableAudioResponse(response) {
         if (!response || !response.ok || response.status === 206) return false;
-        return (response.headers.get('content-type') || '').startsWith('audio/');
+        if (!(response.headers.get('content-type') || '').startsWith('audio/')) return false;
+        try {
+            return (await response.clone().blob()).size > 0;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    async function requestPersistentOfflineStorage() {
+        if (!navigator.storage?.persist) return false;
+        try {
+            if (await navigator.storage.persisted?.()) return true;
+            return await navigator.storage.persist();
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function writeOfflinePlaylistBackup(playlists) {
+        try {
+            localStorage.setItem(OFFLINE_PLAYLIST_BACKUP, JSON.stringify(playlists));
+        } catch (_) {}
+    }
+
+    function readOfflinePlaylistBackup() {
+        try {
+            const value = JSON.parse(localStorage.getItem(OFFLINE_PLAYLIST_BACKUP) || '[]');
+            return Array.isArray(value) ? value : [];
+        } catch (_) {
+            return [];
+        }
     }
 
     async function hasCompleteOfflineAudio(playlist) {
@@ -310,6 +368,7 @@ document.addEventListener('DOMContentLoaded', () => {
             button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving 0%';
         }
         try {
+            await requestPersistentOfflineStorage();
             const cache = await caches.open(OFFLINE_MEDIA_CACHE);
             const savedPlaylists = await getOfflinePlaylists();
             const existingPlaylist = savedPlaylists.find((item) => String(item.id) === String(playlist.id));
@@ -348,11 +407,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 await cache.delete(audioUrl, { ignoreSearch: true });
                 const response = await fetch(`/api/songs/${song.id}/offline-audio`, { cache: 'no-store' });
                 if (!response.ok || response.status === 206) throw new Error('Audio file could not be downloaded completely');
-                const audioResponse = response.clone();
-                if (!audioResponse.body || !(audioResponse.headers.get('content-type') || '').startsWith('audio/')) {
+                const contentType = response.headers.get('content-type') || '';
+                const audioBlob = await response.blob();
+                if (!contentType.startsWith('audio/') || !audioBlob.size) {
                     throw new Error('Audio file could not be downloaded completely');
                 }
-                await cache.put(audioUrl, audioResponse);
+                // Consuming the whole response before Cache.put catches broken
+                // mobile downloads instead of saving a truncated stream.
+                await cache.put(audioUrl, new Response(audioBlob, {
+                    status: 200,
+                    headers: {
+                        'Content-Type': contentType,
+                        'Content-Length': String(audioBlob.size),
+                        'X-PSR354-Offline-Complete': '1'
+                    }
+                }));
                 if (button) button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving new audio ${i + 1}/${missingSongs.length}`;
             }
 
@@ -388,6 +457,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 tx.onerror = () => reject(tx.error);
             });
             db.close();
+            writeOfflinePlaylistBackup(savedPlaylists
+                .filter((item) => String(item.id) !== String(savedRecord.id))
+                .concat(savedRecord));
 
             // Remove media no longer referenced by any saved playlist, while
             // preserving files shared with another offline playlist.
@@ -416,14 +488,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function getOfflinePlaylists() {
-        const db = await offlineDb();
-        const playlists = await new Promise((resolve, reject) => {
-            const request = db.transaction(OFFLINE_STORE, 'readonly').objectStore(OFFLINE_STORE).getAll();
-            request.onsuccess = () => resolve(request.result || []);
-            request.onerror = () => reject(request.error);
-        });
-        db.close();
-        return playlists;
+        try {
+            const db = await offlineDb();
+            const playlists = await new Promise((resolve, reject) => {
+                const request = db.transaction(OFFLINE_STORE, 'readonly').objectStore(OFFLINE_STORE).getAll();
+                request.onsuccess = () => resolve(request.result || []);
+                request.onerror = () => reject(request.error);
+            });
+            db.close();
+            if (playlists.length) writeOfflinePlaylistBackup(playlists);
+            return playlists.length ? playlists : readOfflinePlaylistBackup();
+        } catch (error) {
+            console.warn('IndexedDB unavailable; using playlist metadata backup.', error);
+            return readOfflinePlaylistBackup();
+        }
     }
 
     async function getOfflinePlaylist(id) {
@@ -4053,7 +4131,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
         if (isOfflineMode()) {
             const cachedResponse = await caches.match(audioUrl, { ignoreSearch: true });
-            if (isUsableAudioResponse(cachedResponse)) {
+            if (await isUsableAudioResponse(cachedResponse)) {
                 state.offlineAudioUrl = URL.createObjectURL(await cachedResponse.blob());
                 if (requestId !== state.playbackRequestId) {
                     releaseOfflineAudioUrl();
@@ -4424,10 +4502,18 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     if (dashboardTitle) dashboardTitle.innerText = getGreeting();
 
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/service-worker.js').catch((error) => {
-            console.warn('Offline support could not be registered:', error);
-        });
+        navigator.serviceWorker.register('/service-worker.js').then(async (registration) => {
+            const warmAppShell = () => {
+                const worker = registration.active || navigator.serviceWorker.controller;
+                worker?.postMessage({ type: 'CACHE_APP_SHELL' });
+            };
+            navigator.serviceWorker.addEventListener('controllerchange', warmAppShell, { once: true });
+            await navigator.serviceWorker.ready;
+            warmAppShell();
+        }).catch((error) => console.warn('Offline support could not be registered:', error));
     }
+
+    connectRealtime();
 
     window.addEventListener('offline', () => {
         setOfflineMode(true);
@@ -4440,6 +4526,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
     window.addEventListener('online', () => {
         setOfflineMode(false);
+        connectRealtime();
+        navigator.serviceWorker?.controller?.postMessage({ type: 'CACHE_APP_SHELL' });
     });
 
     if (navigator.onLine) {

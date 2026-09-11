@@ -457,7 +457,10 @@ def index():
 @app.route('/service-worker.js')
 def service_worker():
     """Expose the worker at the domain root so it can control the app and audio URLs."""
-    return send_from_directory(app.static_folder, 'service-worker.js', mimetype='application/javascript')
+    response = send_from_directory(app.static_folder, 'service-worker.js', mimetype='application/javascript')
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Service-Worker-Allowed'] = '/'
+    return response
 
 @app.route('/api/playlists', methods=['POST'])
 @login_required
@@ -1168,7 +1171,7 @@ def download_offline_audio(song_id):
     return send_from_directory(
         LIBRARY_DIR,
         secure_filename(song['filename']),
-        mimetype='audio/mpeg',
+        mimetype=audio_mimetype(song['filename']),
         conditional=False,
     )
 

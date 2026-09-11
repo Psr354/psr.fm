@@ -280,6 +280,35 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(response.mimetype, 'audio/mpeg')
         self.assertEqual(response.data, b'preview-audio-bytes')
 
+    def test_service_worker_is_served_from_root_without_http_caching(self):
+        client = self.app_module.app.test_client()
+
+        response = client.get('/service-worker.js')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, 'application/javascript')
+        self.assertEqual(response.headers['Cache-Control'], 'no-cache, no-store, must-revalidate')
+        self.assertEqual(response.headers['Service-Worker-Allowed'], '/')
+
+    def test_offline_audio_returns_complete_file_with_its_real_mimetype(self):
+        client = self.app_module.app.test_client()
+        client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+
+        filename = 'offline-track.m4a'
+        file_path = os.path.join(self.app_module.LIBRARY_DIR, filename)
+        with open(file_path, 'wb') as handle:
+            handle.write(b'complete-offline-audio')
+        song_id = self._create_song(filename=filename)
+
+        response = client.get(f'/api/songs/{song_id}/offline-audio')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, 'audio/mp4')
+        self.assertEqual(response.data, b'complete-offline-audio')
+
     def test_owned_song_can_be_added_to_another_playlist(self):
         client = self.app_module.app.test_client()
         setup_response = client.post('/api/setup', json={

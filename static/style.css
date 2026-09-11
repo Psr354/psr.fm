@@ -2591,3 +2591,50 @@ h1, h2, h3, h4, .section-title, .track-title {
     .capsule-song-item { gap: 8px; padding-inline: 6px; }
     .rank-number { width: 28px; height: 28px; border-radius: 9px; font-size: 12px; }
 }
+/* Local icon fallback. Font Awesome overrides these rules when its CDN is
+   reachable; these glyphs keep every control understandable when fully offline. */
+.fas, .far { display: inline-block; min-width: 1em; font-style: normal; text-align: center; }
+.fas::before, .far::before { content: '\2022'; }
+.fa-home::before { content: '\2302'; }
+.fa-bars::before { content: '\2630'; }
+.fa-search::before { content: '\2315'; }
+.fa-plus::before { content: '+'; }
+.fa-times::before, .fa-xmark::before { content: '\00d7'; }
+.fa-play::before, .fa-play-circle::before { content: '\25b6'; }
+.fa-pause::before { content: '\23f8'; }
+.fa-step-backward::before { content: '\23ee'; }
+.fa-step-forward::before { content: '\23ed'; }
+.fa-volume-up::before, .fa-volume-down::before { content: '\266b'; }
+.fa-volume-mute::before { content: '\00d7'; }
+.fa-music::before, .fa-headphones::before, .fa-record-vinyl::before, .fa-compact-disc::before { content: '\266b'; }
+.fa-list::before { content: '\2637'; }
+.fa-trash::before { content: '\232b'; }
+.fa-download::before, .fa-cloud-download-alt::before { content: '\2193'; }
+.fa-cloud-upload-alt::before { content: '\2191'; }
+.fa-check::before, .fa-check-circle::before { content: '\2713'; }
+.fa-exclamation-triangle::before, .fa-triangle-exclamation::before, .fa-exclamation-circle::before { content: '!'; }
+.fa-circle-info::before { content: 'i'; }
+.fa-clock::before { content: '\25f7'; }
+.fa-user::before, .fa-user-tag::before, .fa-user-plus::before, .fa-user-shield::before { content: '\25cf'; }
+.fa-users::before, .fa-users-cog::before { content: '\25cf\25cf'; font-size: .72em; }
+.fa-lock::before, .fa-key::before, .fa-shield-alt::before { content: '\25c6'; }
+.fa-star::before, .fa-trophy::before { content: '\2605'; }
+.fa-heart::before { content: '\2665'; }
+.fa-redo::before, .fa-rotate-right::before, .fa-sync-alt::before, .fa-undo::before, .fa-reply::before { content: '\21bb'; }
+.fa-spinner::before { content: '\25cc'; }
+.fa-spin { animation: psr354-icon-spin 1s linear infinite; }
+.fa-arrow-left::before { content: '\2190'; }
+.fa-random::before { content: '\2928'; }
+.fa-pen::before, .fa-signature::before { content: '\270e'; }
+.fa-camera::before { content: '\25a3'; }
+.fa-copy::before { content: '\25a1'; }
+.fa-file-audio::before { content: '\266b'; }
+.fa-sliders-h::before, .fa-wave-square::before, .fa-braille::before, .fa-grip-lines::before { content: '\2637'; }
+.fa-thumbtack::before { content: '\25bc'; }
+.fa-eraser::before { content: '\232b'; }
+.fa-share-alt::before { content: '\2197'; }
+.fa-hard-drive::before { content: '\25a3'; }
+.fa-wifi::before { content: '\224b'; }
+.fa-chart-line::before { content: '\2197'; }
+.fa-circle::before { content: '\25cf'; }
+@keyframes psr354-icon-spin { to { transform: rotate(360deg); } }
