@@ -12,12 +12,33 @@ def extract_youtube_video_id(url):
     if host == 'youtu.be':
         return parsed.path.strip('/').split('/')[0] or ''
 
-    if host in {'youtube.com', 'm.youtube.com'}:
+    if host in {'youtube.com', 'm.youtube.com', 'music.youtube.com'}:
         if parsed.path == '/watch':
             return parse_qs(parsed.query).get('v', [''])[0]
         path_parts = [part for part in parsed.path.split('/') if part]
         if len(path_parts) >= 2 and path_parts[0] in {'shorts', 'embed', 'live'}:
             return path_parts[1]
+
+    return ''
+
+
+def extract_song_source_id(url):
+    """Return a stable library key for a supported song URL."""
+    youtube_id = extract_youtube_video_id(url)
+    if youtube_id:
+        # Keep the legacy YouTube key format so existing library rows still match.
+        return youtube_id
+
+    parsed = urlparse((url or '').strip())
+    host = parsed.netloc.lower()
+    if host.startswith('www.'):
+        host = host[4:]
+    if host == 'open.spotify.com':
+        parts = [part for part in parsed.path.split('/') if part]
+        if 'track' in parts:
+            track_index = parts.index('track')
+            if len(parts) > track_index + 1 and parts[track_index + 1].isalnum():
+                return f'spotify:{parts[track_index + 1]}'
 
     return ''
 
@@ -197,7 +218,7 @@ def init_db(db_path):
         '''
     )
     for row in cursor.fetchall():
-        source_id = extract_youtube_video_id(row['source_url'])
+        source_id = extract_song_source_id(row['source_url'])
         if source_id:
             cursor.execute(
                 'UPDATE songs SET source_id = ? WHERE id = ?',

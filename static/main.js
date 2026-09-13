@@ -2145,7 +2145,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     globalUrlInput?.addEventListener('input', debounce(async (e) => {
         if (state.pendingLibrarySong) return;
         const url = e.target.value.trim();
-        if (!url || !url.includes('youtu')) {
+        if (!url || !/(?:youtu(?:be\.com|\.be)|music\.youtube\.com|open\.spotify\.com)/i.test(url)) {
             setLibraryWarning(null);
             return;
         }

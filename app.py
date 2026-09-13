@@ -21,12 +21,12 @@ from threading import Lock
 from dotenv import load_dotenv
 
 from services.database import (
-    init_db, get_db_connection, extract_youtube_video_id,
+    init_db, get_db_connection, extract_song_source_id,
     get_user_by_username, create_user, has_any_user,
     get_all_users, get_user_files, delete_user_cascade, update_user_password
 )
 
-from services.downloader import download_queue, start_worker, validate_youtube_url
+from services.downloader import download_queue, start_worker, validate_song_url
 from services.lyrics import search_lyrics, parse_lrc
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -649,7 +649,7 @@ def download_song():
     playlist_ids = data.get('playlist_ids', [])
     if not url or not playlist_ids:
         return jsonify({'error': 'Missing data'}), 400
-    is_valid, validation_error = validate_youtube_url(url)
+    is_valid, validation_error = validate_song_url(url)
     if not is_valid:
         return jsonify({'error': validation_error}), 400
     try:
@@ -667,7 +667,7 @@ def download_song():
     if len(owned_playlist_ids) != len(playlist_ids):
         return jsonify({'error': 'One or more playlists were not found'}), 404
 
-    source_id = extract_youtube_video_id(url)
+    source_id = extract_song_source_id(url)
     if source_id:
         source_song = db.execute(
             'SELECT * FROM songs WHERE source_id = ? ORDER BY created_at ASC, id ASC LIMIT 1',
@@ -918,11 +918,11 @@ def download_library_song(song_id):
 @login_required
 def check_library_song_url():
     url = request.args.get('url', '').strip()
-    is_valid, validation_error = validate_youtube_url(url)
+    is_valid, validation_error = validate_song_url(url)
     if not is_valid:
         return jsonify({'matched': False, 'error': validation_error}), 400
 
-    source_id = extract_youtube_video_id(url)
+    source_id = extract_song_source_id(url)
     if not source_id:
         return jsonify({'matched': False})
 

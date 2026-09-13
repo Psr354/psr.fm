@@ -2,12 +2,15 @@ import os
 import uuid
 import queue
 import threading
+import html
+import json
+import re
 from urllib.parse import urlparse
 import yt_dlp
 import requests
 from werkzeug.utils import secure_filename
 from services.metadata import extract_duration
-from services.database import get_db_connection, update_song_lyrics
+from services.database import extract_song_source_id, get_db_connection, update_song_lyrics
 from services.lyrics import search_lyrics
 
 download_queue = queue.Queue()
@@ -51,7 +54,7 @@ def build_ytdlp_options(extra_options=None):
     return options
 
 
-def validate_youtube_url(url):
+def validate_song_url(url):
     if not url or not isinstance(url, str):
         return False, 'URL is required'
 
@@ -60,11 +63,74 @@ def validate_youtube_url(url):
     if host.startswith('www.'):
         host = host[4:]
 
-    allowed_hosts = {'youtube.com', 'm.youtube.com', 'youtu.be'}
-    if parsed.scheme not in ('http', 'https') or host not in allowed_hosts:
-        return False, 'Only YouTube URLs are allowed'
+    if parsed.scheme not in ('http', 'https'):
+        return False, 'Only YouTube, YouTube Music, and Spotify song URLs are allowed'
 
-    return True, ''
+    youtube_hosts = {'youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be'}
+    if host in youtube_hosts:
+        return True, ''
+
+    if host == 'open.spotify.com':
+        if extract_song_source_id(url).startswith('spotify:'):
+            return True, ''
+        return False, 'Only individual Spotify track URLs are supported'
+
+    return False, 'Only YouTube, YouTube Music, and Spotify song URLs are allowed'
+
+
+# Backward-compatible import for older integrations.
+validate_youtube_url = validate_song_url
+
+
+def _spotify_track_metadata(url):
+    source_id = extract_song_source_id(url)
+    track_id = source_id.removeprefix('spotify:')
+    embed_url = f'https://open.spotify.com/embed/track/{track_id}'
+    response = requests.get(embed_url, timeout=15, headers=YOUTUBE_HTTP_HEADERS)
+    response.raise_for_status()
+
+    match = re.search(
+        r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
+        response.text,
+        re.DOTALL,
+    )
+    if not match:
+        raise Exception('Could not read Spotify track metadata')
+
+    payload = json.loads(html.unescape(match.group(1)))
+    entity = payload['props']['pageProps']['state']['data']['entity']
+    artists = ', '.join(item['name'] for item in entity.get('artists', []) if item.get('name'))
+    images = entity.get('visualIdentity', {}).get('image', [])
+    thumbnail = next((item.get('url') for item in reversed(images) if item.get('url')), '')
+    return {
+        'title': entity.get('title') or entity.get('name') or 'Unknown',
+        'artist': artists or 'Unknown',
+        'duration': int((entity.get('duration') or 0) / 1000),
+        'thumbnail': thumbnail,
+        'source_id': source_id,
+        'source_url': url,
+    }
+
+
+def _first_media_entry(info, desired_duration=0):
+    if info and info.get('_type') in {'playlist', 'multi_video'}:
+        entries = [entry for entry in info.get('entries') or [] if entry]
+        if desired_duration:
+            compatible_entries = [
+                entry for entry in entries
+                if entry.get('duration') and abs(entry['duration'] - desired_duration) <= 30
+            ]
+            if compatible_entries:
+                return min(
+                    compatible_entries,
+                    key=lambda entry: (
+                        'official audio' not in (entry.get('title') or '').lower(),
+                        abs(entry['duration'] - desired_duration),
+                    ),
+                )
+            return None
+        return entries[0] if entries else None
+    return info
 
 def download_worker(db_path, download_dir, album_art_dir, sio):
     global socketio_instance
@@ -119,7 +185,7 @@ def process_download(task, db_path, download_dir, album_art_dir):
     playlist_ids = task['playlist_ids']
     user_id = task['user_id']
 
-    is_valid, validation_error = validate_youtube_url(url)
+    is_valid, validation_error = validate_song_url(url)
     if not is_valid:
         raise Exception(validation_error)
     
@@ -138,14 +204,26 @@ def process_download(task, db_path, download_dir, album_art_dir):
         'no_warnings': True,
         'extract_flat': False,
     })
+    requested_source_id = extract_song_source_id(url)
+    spotify_metadata = _spotify_track_metadata(url) if requested_source_id.startswith('spotify:') else None
+    extraction_url = (
+        f"ytsearch5:{spotify_metadata['title']} {spotify_metadata['artist']} official audio"
+        if spotify_metadata else url
+    )
     with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
-        info = ydl.extract_info(url, download=False)
-        title = info.get('title', 'Unknown')
-        artist = info.get('uploader', 'Unknown')
-        thumbnail_url = info.get('thumbnail', '')
-        duration = info.get('duration', 0) or 0
-        source_id = info.get('id') or ''
-        source_url = info.get('webpage_url') or url
+        info = _first_media_entry(
+            ydl.extract_info(extraction_url, download=False),
+            spotify_metadata['duration'] if spotify_metadata else 0,
+        )
+        if not info:
+            raise Exception('No matching audio source was found')
+        title = spotify_metadata['title'] if spotify_metadata else info.get('title', 'Unknown')
+        artist = spotify_metadata['artist'] if spotify_metadata else info.get('uploader', 'Unknown')
+        thumbnail_url = spotify_metadata['thumbnail'] if spotify_metadata else info.get('thumbnail', '')
+        duration = spotify_metadata['duration'] if spotify_metadata else (info.get('duration', 0) or 0)
+        source_id = requested_source_id or info.get('id') or ''
+        source_url = spotify_metadata['source_url'] if spotify_metadata else (info.get('webpage_url') or url)
+        download_url = info.get('webpage_url') or info.get('url') or extraction_url
 
     if duration and duration > MAX_DOWNLOAD_DURATION_SECONDS:
         raise Exception('Video exceeds the 10 minute limit')
@@ -178,7 +256,7 @@ def process_download(task, db_path, download_dir, album_art_dir):
         'progress_hooks': [progress_hook],
     })
     
-    with yt_dlp.YoutubeDL(ydl_opts_download) as ydl: ydl.download([url])
+    with yt_dlp.YoutubeDL(ydl_opts_download) as ydl: ydl.download([download_url])
         
     expected_file = f"{file_uuid}.mp3"
     if not os.path.exists(os.path.join(library_dir, expected_file)): raise Exception("Audio missing")

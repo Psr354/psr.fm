@@ -139,7 +139,7 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(limited_response.status_code, 429)
         self.assertIn('retry_after', limited_response.get_json())
 
-    def test_download_rejects_non_youtube_urls(self):
+    def test_download_rejects_unsupported_urls(self):
         client = self.app_module.app.test_client()
         setup_response = client.post('/api/setup', json={
             'username': 'admin',
@@ -154,7 +154,7 @@ class AuthAndDownloadTests(unittest.TestCase):
             json={'url': 'https://example.com/video', 'playlist_ids': [playlist_id]},
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn('Only YouTube URLs are allowed', response.get_json()['error'])
+        self.assertIn('Only YouTube, YouTube Music, and Spotify', response.get_json()['error'])
 
     def test_download_enqueues_valid_youtube_url(self):
         client = self.app_module.app.test_client()
@@ -182,6 +182,69 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(captured_tasks[0]['playlist_ids'], [playlist_id])
         self.assertEqual(captured_tasks[0]['user_id'], 1)
         self.assertEqual(captured_tasks[0]['url'], 'https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+
+    def test_download_enqueues_valid_youtube_music_url(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+        playlist_id = self._create_playlist()
+        url = 'https://music.youtube.com/watch?v=dQw4w9WgXcQ'
+
+        captured_tasks = []
+        with patch.object(self.app_module.download_queue, 'put', side_effect=captured_tasks.append):
+            response = client.post(
+                '/api/download',
+                headers={'X-CSRF-Token': csrf_token},
+                json={'url': url, 'playlist_ids': [playlist_id]},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured_tasks[0]['url'], url)
+
+    def test_download_enqueues_valid_spotify_track_url(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+        playlist_id = self._create_playlist()
+        url = 'https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b'
+
+        captured_tasks = []
+        with patch.object(self.app_module.download_queue, 'put', side_effect=captured_tasks.append):
+            response = client.post(
+                '/api/download',
+                headers={'X-CSRF-Token': csrf_token},
+                json={'url': url, 'playlist_ids': [playlist_id]},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured_tasks[0]['url'], url)
+
+    def test_download_rejects_spotify_playlist_url(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+        playlist_id = self._create_playlist()
+
+        response = client.post(
+            '/api/download',
+            headers={'X-CSRF-Token': csrf_token},
+            json={
+                'url': 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M',
+                'playlist_ids': [playlist_id],
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('individual Spotify track', response.get_json()['error'])
 
     def test_download_existing_library_song_adds_without_queueing(self):
         client = self.app_module.app.test_client()

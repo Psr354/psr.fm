@@ -1,6 +1,6 @@
 # psr.fm
 
-psr.fm adalah aplikasi musik self-hosted untuk download audio dari YouTube, menyimpan lagu di server sendiri, membuat playlist, dan streaming dari browser.
+psr.fm adalah aplikasi musik self-hosted untuk download audio dari YouTube, YouTube Music, dan tautan track Spotify, menyimpan lagu di server sendiri, membuat playlist, dan streaming dari browser.
 
 Aplikasi ini cocok untuk server pribadi, keluarga, atau teman kecil-kecilan. Setiap user punya playlist, lagu, riwayat dengar, dan statistik sendiri.
 
@@ -101,13 +101,13 @@ Admin bisa menambahkan user lain dari menu **User Management**.
 ### Download Lagu
 
 1. Klik **Download Song**.
-2. Paste link YouTube.
+2. Paste link YouTube, YouTube Music, atau track Spotify.
 3. Pilih playlist tujuan.
 4. Klik **Download**.
 
 Jika lagu sudah ada di **Library Songs**, aplikasi akan memberi peringatan dan lagu bisa langsung ditambahkan tanpa download ulang.
 
-Download hanya menerima URL YouTube dan video berdurasi maksimal 10 menit.
+Download menerima URL YouTube, YouTube Music, dan track Spotify dengan durasi maksimal 10 menit. Tautan Spotify dipakai sebagai metadata; audio yang cocok dicari dan diunduh dari YouTube Music/YouTube karena Spotify tidak menyediakan file audio lewat tautan track.
 
 ### Upload Lagu
 
