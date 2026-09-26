@@ -1,5 +1,6 @@
 import os
 import json
+import math
 import mimetypes
 import calendar
 from datetime import datetime
@@ -1213,26 +1214,58 @@ def search_songs():
 @app.route('/api/listen', methods=['POST'])
 @login_required
 def log_listen():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     song_id = data.get('song_id')
-    seconds = data.get('seconds', 0)
-    if song_id and seconds > 0:
-        db = get_db()
-        if get_owned_song(db, song_id):
-            db.execute('INSERT INTO listening_logs (song_id, user_id, seconds_listened) VALUES (?, ?, ?)', (song_id, current_user.id, seconds))
-            db.commit()
+    session_id = data.get('playback_session_id')
+    try:
+        seconds = float(data.get('seconds', 0))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid listening duration'}), 400
+
+    # The player sends chunks of at most 30 seconds. Reject malformed or
+    # oversized chunks so client input cannot inflate listening statistics.
+    if not song_id or not session_id or not math.isfinite(seconds) or not 0 < seconds <= 30:
+        return jsonify({'error': 'Invalid listening duration'}), 400
+
+    db = get_db()
+    if not get_owned_song(db, song_id):
+        return jsonify({'error': 'Not found'}), 404
+    accepted = db.execute(
+        '''
+        UPDATE playback_sessions
+        SET seconds_listened = seconds_listened + ?
+        WHERE id = ? AND song_id = ? AND user_id = ?
+          AND seconds_listened + ? <= COALESCE(NULLIF(duration_seconds, 0), 600)
+          AND seconds_listened + ? <=
+              ((julianday('now') - julianday(started_at)) * 86400) + 10
+        ''',
+        (seconds, session_id, song_id, current_user.id, seconds, seconds),
+    )
+    if accepted.rowcount != 1:
+        return jsonify({'error': 'Invalid or expired playback session'}), 409
+    db.execute(
+        'INSERT INTO listening_logs (song_id, user_id, seconds_listened) VALUES (?, ?, ?)',
+        (song_id, current_user.id, seconds),
+    )
+    db.commit()
     return jsonify({'status': 'ok'})
 
 @app.route('/api/songs/<int:song_id>/play', methods=['POST'])
 @login_required
 def log_play(song_id):
     db = get_db()
-    if not get_owned_song(db, song_id):
+    song = get_owned_song(db, song_id)
+    if not song:
         return jsonify({'error': 'Not found'}), 404
+    session_id = uuid.uuid4().hex
     db.execute('UPDATE songs SET play_count = play_count + 1 WHERE id = ? AND user_id = ?', (song_id, current_user.id))
     db.execute('INSERT INTO play_events (song_id, user_id) VALUES (?, ?)', (song_id, current_user.id))
+    db.execute(
+        'INSERT INTO playback_sessions (id, song_id, user_id, duration_seconds) VALUES (?, ?, ?, ?)',
+        (session_id, song_id, current_user.id, song['duration_seconds']),
+    )
     db.commit()
-    return jsonify({'status': 'ok'})
+    return jsonify({'status': 'ok', 'playback_session_id': session_id})
 
 
 @app.route('/api/songs/<int:song_id>/lyrics')
@@ -1651,13 +1684,15 @@ def get_recap():
         month_names = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
         for m in sorted(monthly_stats):
-            # top song per month
+                        # Top song per month by listening time.
             top_song = db.execute('''
-                SELECT s.title, s.artist, s.album_art, COUNT(pe.id) as pc
-                FROM play_events pe JOIN songs s ON pe.song_id = s.id
-                WHERE pe.user_id = ? AND strftime('%m', pe.timestamp) = ? AND pe.timestamp >= ? AND pe.timestamp <= ?
-                GROUP BY s.id ORDER BY pc DESC LIMIT 1
-            ''', (current_user.id, f'{m:02d}', start_str, end_str)).fetchone()
+                                SELECT s.title, s.artist, s.album_art,
+                                             SUM(l.seconds_listened) as total_listened
+                                FROM listening_logs l JOIN songs s ON l.song_id = s.id
+                                WHERE l.user_id = ? AND strftime('%m', l.timestamp) = ?
+                                    AND l.timestamp >= ? AND l.timestamp <= ?
+                                GROUP BY s.id ORDER BY total_listened DESC LIMIT 1
+                        ''', (current_user.id, f'{m:02d}', start_str, end_str)).fetchone()
             monthly_breakdown.append({
                 'month': month_names[m],
                 'month_num': m,

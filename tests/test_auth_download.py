@@ -515,12 +515,27 @@ class AuthAndDownloadTests(unittest.TestCase):
                 headers={'X-CSRF-Token': csrf_token},
             )
             self.assertEqual(play_response.status_code, 200)
+            session_id = play_response.get_json()['playback_session_id']
+
+        conn = sqlite3.connect(self.app_module.DATABASE_PATH)
+        try:
+            conn.execute(
+                "UPDATE playback_sessions SET started_at = datetime('now', '-1 minute') WHERE id = ?",
+                (session_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
         for _ in range(3):
             listen_response = client.post(
                 '/api/listen',
                 headers={'X-CSRF-Token': csrf_token},
-                json={'song_id': song_id, 'seconds': 10},
+                json={
+                    'song_id': song_id,
+                    'seconds': 10,
+                    'playback_session_id': session_id,
+                },
             )
             self.assertEqual(listen_response.status_code, 200)
 
@@ -532,6 +547,54 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(recap['stats']['total_plays'], 2)
         self.assertEqual(recap['stats']['total_seconds'], 30)
         self.assertEqual(recap['top_played'][0]['play_count'], 2)
+
+    def test_listen_rejects_invalid_or_oversized_chunks(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+        song_id = self._create_song()
+        play_response = client.post(
+            f'/api/songs/{song_id}/play',
+            headers={'X-CSRF-Token': csrf_token},
+        )
+        session_id = play_response.get_json()['playback_session_id']
+
+        for seconds in [0, 31, 'not-a-number']:
+            response = client.post(
+                '/api/listen',
+                headers={'X-CSRF-Token': csrf_token},
+                json={
+                    'song_id': song_id,
+                    'seconds': seconds,
+                    'playback_session_id': session_id,
+                },
+            )
+            self.assertEqual(response.status_code, 400)
+
+        response = client.post(
+            '/api/listen',
+            headers={'X-CSRF-Token': csrf_token},
+            json={
+                'song_id': song_id,
+                'seconds': 10,
+                'playback_session_id': session_id,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+
+        forged_response = client.post(
+            '/api/listen',
+            headers={'X-CSRF-Token': csrf_token},
+            json={
+                'song_id': song_id,
+                'seconds': 10,
+                'playback_session_id': 'forged-session',
+            },
+        )
+        self.assertEqual(forged_response.status_code, 409)
 
     def test_lyrics_helpers_parse_and_clean(self):
         self.assertEqual(clean_text('Song Title (Official Video) feat. Guest'), 'Song Title')

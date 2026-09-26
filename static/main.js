@@ -86,6 +86,8 @@ document.addEventListener('DOMContentLoaded', () => {
         playbackRequestId: 0,
         playbackRetryCount: 0,
         shouldBePlaying: false,
+        playEventLogged: false,
+        playbackSessionId: null,
         offlineAudioUrl: null
     };
 
@@ -3294,8 +3296,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
             if (!el.audio.paused && state.currentPlayingSongId) {
                 const delta = el.audio.currentTime - state.lastLoggedTime;
-                if (delta >= 5 && delta <= 30) {
-                    logListen(state.currentPlayingSongId, delta);
+                if (delta >= 5) {
+                    logListenDuration(state.currentPlayingSongId, delta);
                     state.lastLoggedTime = el.audio.currentTime;
                 } else if (delta < 0) {
                     state.lastLoggedTime = el.audio.currentTime;
@@ -3319,6 +3321,23 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (el.nowPlaying) el.nowPlaying.classList.add('playing');
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
         updateMediaSessionPosition();
+    });
+
+    el.audio.addEventListener('playing', () => {
+        if (state.currentPlayingSongId && !state.playEventLogged) {
+            state.playEventLogged = true;
+            state.playbackSessionId = null;
+            const songId = state.currentPlayingSongId;
+            const playbackRequestId = state.playbackRequestId;
+            logPlay(songId).then((sessionId) => {
+                if (
+                    String(state.currentPlayingSongId) === String(songId)
+                    && state.playbackRequestId === playbackRequestId
+                ) {
+                    state.playbackSessionId = sessionId;
+                }
+            });
+        }
     });
 
     el.audio.addEventListener('pause', () => {
@@ -3393,19 +3412,33 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     function flushListenLog() {
         if (state.currentPlayingSongId && state.lastLoggedTime > 0) {
             const delta = el.audio.currentTime - state.lastLoggedTime;
-            if (delta > 0 && delta <= 30) {
-                logListen(state.currentPlayingSongId, delta);
+            if (delta > 0) {
+                logListenDuration(state.currentPlayingSongId, delta);
             }
             state.lastLoggedTime = 0;
         }
     }
 
     function logListen(songId, seconds) {
+        if (!state.playbackSessionId) return;
         fetch('/api/listen', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({song_id: songId, seconds})
+            body: JSON.stringify({
+                song_id: songId,
+                seconds,
+                playback_session_id: state.playbackSessionId,
+            })
         }).catch(e => console.error(e));
+    }
+
+    function logListenDuration(songId, seconds) {
+        let remaining = seconds;
+        while (remaining > 0) {
+            const chunk = Math.min(remaining, 30);
+            logListen(songId, chunk);
+            remaining -= chunk;
+        }
     }
 
     el.progressBar?.addEventListener('input', (e) => {
@@ -4124,9 +4157,17 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         });
     }
 
-    function logPlay(songId) {
-        if (!songId || isOfflineMode()) return;
-        fetch(`/api/songs/${songId}/play`, { method: 'POST' }).catch(e => console.error(e));
+    async function logPlay(songId) {
+        if (!songId || isOfflineMode()) return null;
+        try {
+            const response = await fetch(`/api/songs/${songId}/play`, { method: 'POST' });
+            if (!response.ok) return null;
+            const data = await response.json();
+            return data.playback_session_id || null;
+        } catch (error) {
+            console.error(error);
+            return null;
+        }
     }
 
     function releaseOfflineAudioUrl() {
@@ -4178,6 +4219,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         state.currentSongIndex = 0;
         state.currentSongMeta = previewSong;
         state.currentPlayingSongId = String(previewSong.id);
+        state.playEventLogged = false;
+        state.playbackSessionId = null;
 
         updateMediaSession(previewSong);
         state.playbackRequestId += 1;
@@ -4211,8 +4254,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         state.currentSongMeta = song;
 
         state.currentPlayingSongId = String(song.id);
-
-        logPlay(song.id);
+        state.playEventLogged = false;
+        state.playbackSessionId = null;
 
         updateMediaSession(song);
         state.playbackRequestId += 1;
@@ -4368,8 +4411,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         const heroArt = heroSong?.album_art ? `/static/album_art/${mediaUrlName(heroSong.album_art)}` : '';
         const heroTitle = heroSong ? escapeHtml(heroSong.title) : 'No top track yet';
         const heroArtist = heroSong ? escapeHtml(heroSong.artist || 'Unknown') : 'Keep listening to build your recap';
-        const topPlayedLabel = topPlayed[0] ? escapeHtml(topPlayed[0].title) : 'Not enough data';
-        const topPlayedArt = topPlayed[0]?.album_art ? `/static/album_art/${mediaUrlName(topPlayed[0].album_art)}` : '';
+        const topListenedLabel = topListened[0] ? escapeHtml(topListened[0].title) : 'Not enough data';
+        const topListenedArt = topListened[0]?.album_art ? `/static/album_art/${mediaUrlName(topListened[0].album_art)}` : '';
         const focusLabel = data.period?.label || 'this period';
 
         const heroHTML = `
@@ -4412,10 +4455,10 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                 </div>
                 <div class="stat-card capsule-stat-card stat-top-track">
                     <div class="stat-icon stat-top-track-art">
-                        ${topPlayedArt ? `<img src="${topPlayedArt}" alt="" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">` : ''}
-                        <div class="stat-top-track-fallback" ${topPlayedArt ? 'style="display:none;"' : ''}><i class="fas fa-star"></i></div>
+                        ${topListenedArt ? `<img src="${topListenedArt}" alt="" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">` : ''}
+                        <div class="stat-top-track-fallback" ${topListenedArt ? 'style="display:none;"' : ''}><i class="fas fa-star"></i></div>
                     </div>
-                    <div><p>Top Track</p><h4 title="${topPlayedLabel}">${topPlayedLabel}</h4></div>
+                    <div><p>Top Track</p><h4 title="${topListenedLabel}">${topListenedLabel}</h4></div>
                 </div>
             </div>
         `;

@@ -304,6 +304,26 @@ def init_db(db_path):
         ON play_events (song_id, user_id)
     ''')
 
+    # ==========================================
+    # PLAYBACK SESSIONS TABLE
+    # ==========================================
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS playback_sessions (
+            id TEXT PRIMARY KEY,
+            song_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            duration_seconds REAL,
+            seconds_listened REAL NOT NULL DEFAULT 0,
+            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_playback_sessions_user_song
+        ON playback_sessions (user_id, song_id)
+    ''')
+
     # Enforce one row per YouTube source for each user when legacy data is clean
     # enough to support it. Older installations may already contain duplicates;
     # the worker still performs an atomic lookup before inserting in that case.
