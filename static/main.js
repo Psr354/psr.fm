@@ -53,6 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
         repeatMode: 0, // 0=Off, 1=RepeatAll, 2=RepeatOne
         currentPlayingSongId: null,
         wasPlayingBeforeSeek: false,
+        isSeeking: false,
         lastLoggedTime: 0,
         loopStart: 0,
         loopEnd: 0,
@@ -3280,8 +3281,10 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     el.audio.addEventListener('timeupdate', () => {
         if (el.audio.duration && !isNaN(el.audio.duration)) {
             const val = (el.audio.currentTime / el.audio.duration) * 100;
-            if (el.progressBar) el.progressBar.value = val;
-            if (el.progressFill) el.progressFill.style.width = `${val}%`;
+            if (!state.isSeeking) {
+                if (el.progressBar) el.progressBar.value = val;
+                if (el.progressFill) el.progressFill.style.width = `${val}%`;
+            }
             if (el.currentTime) el.currentTime.innerText = formatTime(el.audio.currentTime);
             updateSyncedLyrics();
 
@@ -3412,14 +3415,21 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
     });
 
-    el.progressBar?.addEventListener('mousedown', () => {
+    el.progressBar?.addEventListener('pointerdown', (event) => {
+        el.progressBar.setPointerCapture?.(event.pointerId);
+        state.isSeeking = true;
         state.wasPlayingBeforeSeek = !el.audio.paused;
         if (state.wasPlayingBeforeSeek) el.audio.pause();
     });
 
-    el.progressBar?.addEventListener('mouseup', () => {
+    const finishSeek = (event) => {
+        if (!state.isSeeking) return;
+        el.progressBar.releasePointerCapture?.(event.pointerId);
+        state.isSeeking = false;
         if (state.wasPlayingBeforeSeek) el.audio.play();
-    });
+    };
+    el.progressBar?.addEventListener('pointerup', finishSeek);
+    el.progressBar?.addEventListener('pointercancel', finishSeek);
 
     el.volumeBar?.addEventListener('input', (e) => {
         el.audio.volume = e.target.value / 100;
