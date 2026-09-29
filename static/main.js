@@ -131,7 +131,6 @@ document.addEventListener('DOMContentLoaded', () => {
         lyricsPanel: document.getElementById('lyrics-panel'),
         lyricsTitle: document.getElementById('lyrics-title'),
         lyricsSubtitle: document.getElementById('lyrics-subtitle'),
-        lyricsCurrentLine: document.getElementById('lyrics-current-line'),
         lyricsStatus: document.getElementById('lyrics-status'),
         lyricsBody: document.getElementById('lyrics-body'),
         lyricsEditor: document.getElementById('lyrics-editor'),
@@ -679,6 +678,26 @@ document.addEventListener('DOMContentLoaded', () => {
         )).join(' ');
     }
 
+    function updatePlayerLyric(markup, text) {
+        if (!el.playerLyric) return;
+        if (!text) {
+            el.playerLyric.hidden = true;
+            el.playerLyric.classList.remove('is-overflowing');
+            return;
+        }
+        let content = el.playerLyric.querySelector('.player-lyric-content');
+        if (!content) {
+            content = document.createElement('span');
+            content.className = 'player-lyric-content';
+            el.playerLyric.replaceChildren(content);
+        }
+        content.innerHTML = markup;
+        el.playerLyric.hidden = false;
+        const distance = Math.max(0, content.scrollWidth - el.playerLyric.clientWidth);
+        el.playerLyric.style.setProperty('--player-lyric-distance', `${distance}px`);
+        el.playerLyric.classList.toggle('is-overflowing', distance > 4);
+    }
+
     function syncMobileViewport() {
         const viewport = window.visualViewport;
         const height = viewport?.height || window.innerHeight;
@@ -723,7 +742,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
             setLyricsStatus('Choose a track to load lyrics.');
-            if (el.lyricsCurrentLine) el.lyricsCurrentLine.hidden = true;
             if (el.lyricsEditBtn) el.lyricsEditBtn.style.display = 'none';
             return;
         }
@@ -751,14 +769,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (hasPlain) {
             el.lyricsBody.innerHTML = `<div class="lyrics-plain">${escapeHtml(state.plainLyrics).replace(/\n/g, '<br>')}</div>`;
             const firstPlainLine = state.plainLyrics.split(/\r?\n/).find((line) => line.trim())?.trim() || '';
-            if (el.playerLyric) {
-                el.playerLyric.textContent = firstPlainLine;
-                el.playerLyric.hidden = !firstPlainLine;
-            }
-            if (el.lyricsCurrentLine) {
-                el.lyricsCurrentLine.textContent = firstPlainLine;
-                el.lyricsCurrentLine.hidden = !firstPlainLine;
-            }
+            updatePlayerLyric(renderLyricWords(firstPlainLine), firstPlainLine);
             setLyricsStatus('Plain lyrics only.');
             return;
         }
@@ -890,18 +901,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const currentLyricMarkup = activeNodeForDisplay?.innerHTML || renderLyricWords(currentLyricText);
-        if (el.playerLyric) {
-            el.playerLyric.classList.add('lyric-line-display');
-            el.playerLyric.classList.toggle('active', Boolean(activeNodeForDisplay));
-            el.playerLyric.innerHTML = currentLyricMarkup;
-            el.playerLyric.hidden = !currentLyricText;
-        }
-        if (el.lyricsCurrentLine) {
-            el.lyricsCurrentLine.classList.add('lyric-line-display');
-            el.lyricsCurrentLine.classList.toggle('active', Boolean(activeNodeForDisplay));
-            el.lyricsCurrentLine.innerHTML = currentLyricMarkup;
-            el.lyricsCurrentLine.hidden = !currentLyricText;
-        }
+        updatePlayerLyric(currentLyricMarkup, currentLyricText);
 
         if (activeIndex !== -1) {
             const activeNode = el.lyricsBody.querySelector(`.lyric-line[data-index="${activeIndex}"]`);
@@ -933,10 +933,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (el.playerLyric) {
             el.playerLyric.textContent = '';
             el.playerLyric.hidden = true;
-        }
-        if (el.lyricsCurrentLine) {
-            el.lyricsCurrentLine.textContent = '';
-            el.lyricsCurrentLine.hidden = true;
         }
         setLyricsEditing(false);
 

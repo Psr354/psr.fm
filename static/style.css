@@ -176,7 +176,13 @@ button { touch-action: manipulation; }
 .track-info { overflow: hidden; }
 .track-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .track-artist { font-size: 12px; color: var(--text-secondary); }
-.player-lyric { overflow: hidden; color: var(--text-primary); font-size: 12px; font-weight: 700; line-height: 1.25; white-space: nowrap; text-overflow: ellipsis; padding-left: 2px; }
+.player-lyric { overflow: hidden; color: var(--text-primary); font-size: 12px; font-weight: 700; line-height: 1.25; white-space: nowrap; padding-left: 2px; }
+.player-lyric-content { display: inline-block; min-width: 100%; white-space: nowrap; }
+.player-lyric.is-overflowing .player-lyric-content { animation: playerLyricMarquee 8s ease-in-out infinite alternate; }
+@keyframes playerLyricMarquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(calc(-1 * var(--player-lyric-distance, 0px))); }
+}
 .player-lyric .lyric-word::before { height: 0.1em; }
 .player-lyric .lyric-char { min-width: 0.08em; }
 
@@ -265,9 +271,7 @@ button { touch-action: manipulation; }
     line-height: 1.45;
 }
 
-.lyrics-current-line { margin-top: 12px; color: var(--text-primary); font-size: 22px; font-weight: 800; line-height: 1.25; letter-spacing: 0; max-width: 380px; }
-.lyrics-current-line .lyric-word::before { height: 0.08em; }
-.lyrics-current-line[hidden], .player-lyric[hidden] { display: none; }
+.player-lyric[hidden] { display: none; }
 
 .lyrics-close-btn {
     width: 38px;
@@ -950,8 +954,6 @@ body, .app-container {
         font-size: 18px;
         margin: 0;
     }
-
-    .lyrics-current-line { font-size: 26px; line-height: 1.2; max-width: none; margin-top: 14px; }
 
     .lyrics-editor {
         overflow-y: auto;
