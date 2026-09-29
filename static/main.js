@@ -970,7 +970,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const song = state.currentPlaylistSongs.find(item => String(item.id) === String(songId));
                 if (el.lyricsTitle) el.lyricsTitle.textContent = song?.title || 'Lyrics';
                 if (el.lyricsSubtitle) el.lyricsSubtitle.textContent = song?.artist || 'Saved for offline';
-                if (state.lyricsPanelOpen) renderLyricsPanel();
+                renderLyricsPanel();
                 updateSyncedLyrics(true);
                 return;
             }
@@ -1001,9 +1001,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 el.lyricsSubtitle.textContent = song?.artist ? `${song.artist}${song.duration_seconds ? ` - ${formatTime(song.duration_seconds)}` : ''}` : 'Cached lyrics';
             }
 
-            if (state.lyricsPanelOpen) {
-                renderLyricsPanel();
-            }
+            renderLyricsPanel();
             updateSyncedLyrics(true);
         } catch (err) {
             if (requestToken !== state.lyricsRequestToken || String(state.currentPlayingSongId) !== String(songId)) {
@@ -1015,6 +1013,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.rawSyncedLyrics = '';
             state.lyricsStatusValue = 'not_found';
             resetPlayerLyric();
+            renderLyricsPanel();
             if (el.lyricsTitle) el.lyricsTitle.textContent = 'Lyrics';
             setLyricsStatus('No lyrics found. You can add them manually.');
             if (state.lyricsPanelOpen) {
