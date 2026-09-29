@@ -694,8 +694,8 @@ document.addEventListener('DOMContentLoaded', () => {
         content.innerHTML = markup;
         el.playerLyric.hidden = false;
         const distance = Math.max(0, content.scrollWidth - el.playerLyric.clientWidth);
-        el.playerLyric.style.setProperty('--player-lyric-distance', `${distance}px`);
-        el.playerLyric.style.setProperty('--player-lyric-progress', `${Math.max(0, Math.min(100, progress))}%`);
+        const boundedProgress = Math.max(0, Math.min(100, progress));
+        el.playerLyric.style.setProperty('--player-lyric-offset', `${-(distance * boundedProgress / 100)}px`);
         el.playerLyric.classList.toggle('is-overflowing', distance > 4);
     }
 
