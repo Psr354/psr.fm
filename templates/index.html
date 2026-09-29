@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>psr.fm</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=12">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=13">
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}">
@@ -482,6 +482,7 @@
                 <p class="lyrics-eyebrow">Lyrics</p>
                 <h3 id="lyrics-title">Select a song</h3>
                 <p id="lyrics-subtitle" class="lyrics-subtitle">Cached lyrics will appear here.</p>
+                <div id="lyrics-current-line" class="lyrics-current-line" aria-live="polite" hidden></div>
             </div>
             <div class="lyrics-header-actions">
                 <button id="lyrics-focus-btn" class="lyrics-focus-btn" type="button" aria-label="Toggle focused lyrics" aria-pressed="false" title="Focus mode">
@@ -583,7 +584,7 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='main.js') }}?v=12"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=13"></script>
 
     <!-- Equalizer Popover -->
     <div id="eq-popover" class="eq-popover" aria-hidden="true">

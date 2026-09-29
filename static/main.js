@@ -61,7 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
         isRenaming: false,
         currentPlaylist: null,
         lyricsPanelOpen: false,
-        lyricsFocusMode: window.innerWidth <= 768,
+        lyricsFocusMode: false,
         syncedLyrics: [],
         wordSyncedLyrics: [],
         plainLyrics: '',
@@ -131,6 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
         lyricsPanel: document.getElementById('lyrics-panel'),
         lyricsTitle: document.getElementById('lyrics-title'),
         lyricsSubtitle: document.getElementById('lyrics-subtitle'),
+        lyricsCurrentLine: document.getElementById('lyrics-current-line'),
         lyricsStatus: document.getElementById('lyrics-status'),
         lyricsBody: document.getElementById('lyrics-body'),
         lyricsEditor: document.getElementById('lyrics-editor'),
@@ -742,6 +743,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
             setLyricsStatus('Choose a track to load lyrics.');
+            if (el.lyricsCurrentLine) el.lyricsCurrentLine.hidden = true;
             if (el.lyricsEditBtn) el.lyricsEditBtn.style.display = 'none';
             return;
         }
@@ -770,6 +772,10 @@ document.addEventListener('DOMContentLoaded', () => {
             el.lyricsBody.innerHTML = `<div class="lyrics-plain">${escapeHtml(state.plainLyrics).replace(/\n/g, '<br>')}</div>`;
             const firstPlainLine = state.plainLyrics.split(/\r?\n/).find((line) => line.trim())?.trim() || '';
             updatePlayerLyric(renderLyricWords(firstPlainLine), firstPlainLine);
+            if (el.lyricsCurrentLine) {
+                el.lyricsCurrentLine.innerHTML = renderLyricWords(firstPlainLine);
+                el.lyricsCurrentLine.hidden = !firstPlainLine;
+            }
             setLyricsStatus('Plain lyrics only.');
             return;
         }
@@ -902,6 +908,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const currentLyricMarkup = activeNodeForDisplay?.innerHTML || renderLyricWords(currentLyricText);
         updatePlayerLyric(currentLyricMarkup, currentLyricText);
+        if (el.lyricsCurrentLine) {
+            el.lyricsCurrentLine.classList.add('lyric-line-display');
+            el.lyricsCurrentLine.classList.toggle('active', Boolean(activeNodeForDisplay));
+            el.lyricsCurrentLine.innerHTML = currentLyricMarkup;
+            el.lyricsCurrentLine.hidden = !currentLyricText;
+        }
 
         if (activeIndex !== -1) {
             const activeNode = el.lyricsBody.querySelector(`.lyric-line[data-index="${activeIndex}"]`);
@@ -933,6 +945,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (el.playerLyric) {
             el.playerLyric.textContent = '';
             el.playerLyric.hidden = true;
+        }
+        if (el.lyricsCurrentLine) {
+            el.lyricsCurrentLine.textContent = '';
+            el.lyricsCurrentLine.hidden = true;
         }
         setLyricsEditing(false);
 

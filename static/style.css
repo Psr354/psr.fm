@@ -272,6 +272,9 @@ button { touch-action: manipulation; }
 }
 
 .player-lyric[hidden] { display: none; }
+.lyrics-current-line { margin-top: 12px; color: var(--text-primary); font-size: 20px; font-weight: 800; line-height: 1.25; letter-spacing: 0; max-width: 380px; }
+.lyrics-current-line .lyric-word::before { height: 0.08em; }
+.lyrics-current-line[hidden] { display: none; }
 
 .lyrics-close-btn {
     width: 38px;
@@ -954,6 +957,8 @@ body, .app-container {
         font-size: 18px;
         margin: 0;
     }
+
+    .lyrics-current-line { font-size: 20px; line-height: 1.25; max-width: none; margin-top: 12px; }
 
     .lyrics-editor {
         overflow-y: auto;
