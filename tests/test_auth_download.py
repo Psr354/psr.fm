@@ -548,6 +548,53 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(recap['stats']['total_seconds'], 30)
         self.assertEqual(recap['top_played'][0]['play_count'], 2)
 
+    def test_recap_keeps_play_and_listening_rankings_separate(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        song_by_plays = self._create_song(title='Most Played')
+        song_by_listening = self._create_song(title='Most Listened', filename='most-listened.mp3')
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        conn = sqlite3.connect(self.app_module.DATABASE_PATH)
+        try:
+            conn.executemany(
+                'INSERT INTO play_events (song_id, user_id, timestamp) VALUES (?, 1, ?)',
+                [(song_by_plays, timestamp)] * 3 + [(song_by_listening, timestamp)],
+            )
+            conn.executemany(
+                'INSERT INTO listening_logs (song_id, user_id, seconds_listened, timestamp) VALUES (?, 1, ?, ?)',
+                [
+                    (song_by_plays, 10, timestamp),
+                    (song_by_listening, 100, timestamp),
+                ],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        year = datetime.now().year
+        recap = client.get(f'/api/recap?period=year&year={year}').get_json()
+
+        self.assertEqual(recap['top_played'][0]['title'], 'Most Played')
+        self.assertEqual(recap['top_listened'][0]['title'], 'Most Listened')
+        self.assertEqual(recap['monthly_breakdown'][0]['top_song']['title'], 'Most Listened')
+
+    def test_listening_statistics_indexes_are_created(self):
+        conn = sqlite3.connect(self.app_module.DATABASE_PATH)
+        try:
+            indexes = {
+                row[1]
+                for row in conn.execute("SELECT type, name FROM sqlite_master WHERE type = 'index'")
+            }
+        finally:
+            conn.close()
+
+        self.assertIn('idx_listening_logs_user_timestamp', indexes)
+        self.assertIn('idx_listening_logs_song_user', indexes)
+
     def test_listen_rejects_invalid_or_oversized_chunks(self):
         client = self.app_module.app.test_client()
         setup_response = client.post('/api/setup', json={

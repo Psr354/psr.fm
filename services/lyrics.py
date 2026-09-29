@@ -1,9 +1,14 @@
+import json
 import re
 import threading
 import time
 from urllib.parse import urlencode
 
 import requests
+try:
+    import yaml
+except ImportError:  # Optional until the container rebuild installs PyYAML.
+    yaml = None
 
 LRCLIB_BASE_URL = 'https://lrclib.net/api'
 REQUEST_TIMEOUT_SECONDS = 10
@@ -128,13 +133,52 @@ def _normalize_lyrics_record(record):
 
     plain_lyrics = record.get('plainLyrics') or record.get('plain_lyrics') or ''
     synced_lyrics = record.get('syncedLyrics') or record.get('synced_lyrics') or ''
-    if not plain_lyrics and not synced_lyrics:
+    word_synced_lyrics = _parse_word_synced_lyrics(record.get('lyricsfile'))
+    if not plain_lyrics and not synced_lyrics and not word_synced_lyrics:
         return None
 
     return {
         'lyrics': plain_lyrics.strip(),
         'synced_lyrics': synced_lyrics.strip(),
+        'word_synced_lyrics': json.dumps(word_synced_lyrics, ensure_ascii=False) if word_synced_lyrics else '',
     }
+
+
+def _parse_word_synced_lyrics(lyricsfile):
+    if not lyricsfile or yaml is None:
+        return []
+    try:
+        document = yaml.safe_load(lyricsfile)
+    except (TypeError, yaml.YAMLError):
+        return []
+
+    normalized_lines = []
+    for line in (document or {}).get('lines', []) if isinstance(document, dict) else []:
+        words = []
+        for word in line.get('words', []) if isinstance(line, dict) else []:
+            if not isinstance(word, dict):
+                continue
+            text = word.get('word') or word.get('text') or word.get('syllable') or ''
+            start_ms = word.get('start_ms', word.get('startTimeMs', word.get('start')))
+            end_ms = word.get('end_ms', word.get('endTimeMs', word.get('end')))
+            if not text or start_ms is None or end_ms is None:
+                continue
+            try:
+                words.append({
+                    'text': str(text),
+                    'start': float(start_ms) / 1000,
+                    'end': float(end_ms) / 1000,
+                })
+            except (TypeError, ValueError):
+                continue
+        if isinstance(line, dict):
+            normalized_lines.append({
+                'text': str(line.get('text') or ''),
+                'start': float(line.get('start_ms', 0)) / 1000,
+                'end': float(line.get('end_ms', 0)) / 1000,
+                'words': words,
+            })
+    return normalized_lines if any(line['words'] for line in normalized_lines) else []
 
 
 def _score_candidate(candidate, title, artist, duration):

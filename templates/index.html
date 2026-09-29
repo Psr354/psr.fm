@@ -38,10 +38,17 @@
             <nav class="nav-menu">
                 <button id="home-btn" class="nav-item active"><i class="fas fa-home"></i> Home</button>
                 <button id="search-btn" class="nav-item"><i class="fas fa-search"></i> Search</button>
-                <button id="library-btn" class="nav-item"><i class="fas fa-record-vinyl"></i> Library Songs</button>
                 <button id="capsule-btn" class="nav-item"><i class="fas fa-wave-square"></i> Frequency Focus</button>
-                <button id="global-download-btn" class="nav-item nav-item-accent"><i class="fas fa-download"></i> Download Song</button>
-                <button id="upload-song-btn" class="nav-item nav-item-accent"><i class="fas fa-cloud-upload-alt"></i> Upload Song</button>
+                <div class="nav-dropdown" id="music-tools-dropdown">
+                    <button id="music-tools-dropdown-btn" class="nav-item nav-dropdown-toggle" type="button" aria-expanded="false" aria-controls="music-tools-menu">
+                        <i class="fas fa-layer-group"></i><span>Songs</span><i class="fas fa-chevron-down nav-dropdown-chevron" aria-hidden="true"></i>
+                    </button>
+                    <div id="music-tools-menu" class="nav-dropdown-menu" hidden>
+                        <button id="library-btn" class="nav-item nav-dropdown-item"><i class="fas fa-record-vinyl"></i> Library Songs</button>
+                        <button id="global-download-btn" class="nav-item nav-dropdown-item"><i class="fas fa-download"></i> Download Song</button>
+                        <button id="upload-song-btn" class="nav-item nav-dropdown-item"><i class="fas fa-cloud-upload-alt"></i> Upload Song</button>
+                    </div>
+                </div>
                 <button id="users-btn" class="nav-item nav-item-accent" style="display: none;">
                     <i class="fas fa-users-cog"></i> User Management
                 </button>
@@ -322,6 +329,7 @@
             <span id="download-progress-label">0%</span>
         </div>
         <div class="download-progress-track"><div id="download-progress-bar" class="download-progress-bar"></div></div>
+        <button id="download-retry-btn" class="download-retry-btn" type="button" hidden><i class="fas fa-rotate-right"></i> Retry download</button>
     </div>
 
     <!-- Modals -->
@@ -451,7 +459,20 @@
     </div>
 
     <audio id="audio-player" preload="auto" playsinline></audio>
-    <div id="queue-popover" class="queue-popover"><h4>Up Next <span id="queue-mode"></span></h4><div id="queue-list" class="queue-list"></div></div>
+    <div id="queue-popover" class="queue-popover">
+        <div class="queue-heading">
+            <h4>Up Next <span id="queue-mode"></span></h4>
+            <button id="queue-clear-btn" class="queue-clear-btn" type="button">Clear</button>
+        </div>
+        <div id="queue-list" class="queue-list"></div>
+    </div>
+        <div id="song-context-menu" class="song-context-menu" role="menu" aria-hidden="true">
+            <button type="button" data-context-action="play"><i class="fas fa-play"></i><span>Play</span></button>
+            <button type="button" data-context-action="play-next"><i class="fas fa-forward-step"></i><span>Play next</span></button>
+            <button type="button" data-context-action="queue"><i class="fas fa-list-ul"></i><span>Add to queue</span></button>
+            <button type="button" data-context-action="download"><i class="fas fa-download"></i><span>Download</span></button>
+            <button type="button" data-context-action="add-playlist"><i class="fas fa-plus"></i><span>Add to playlist</span></button>
+        </div>
     <aside id="lyrics-panel" class="lyrics-panel" aria-hidden="true">
         <div class="lyrics-header">
             <div>

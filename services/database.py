@@ -118,6 +118,7 @@ def init_db(db_path):
             play_count INTEGER DEFAULT 0,
             lyrics TEXT,
             synced_lyrics TEXT,
+            word_synced_lyrics TEXT,
             lyrics_status TEXT DEFAULT 'none',
             lyrics_updated_at TIMESTAMP,
             user_id INTEGER NOT NULL DEFAULT 1,
@@ -209,6 +210,10 @@ def init_db(db_path):
             cursor.execute("ALTER TABLE songs ADD COLUMN user_id INTEGER DEFAULT 1")
             cursor.execute("UPDATE songs SET user_id = 1 WHERE user_id IS NULL")
 
+    cursor.execute("PRAGMA table_info(songs)")
+    if 'word_synced_lyrics' not in [col[1] for col in cursor.fetchall()]:
+        cursor.execute("ALTER TABLE songs ADD COLUMN word_synced_lyrics TEXT")
+
     cursor.execute(
         '''
         SELECT id, source_url FROM songs
@@ -281,6 +286,14 @@ def init_db(db_path):
     if 'user_id' not in log_cols:
         cursor.execute("ALTER TABLE listening_logs ADD COLUMN user_id INTEGER DEFAULT 1")
         cursor.execute("UPDATE listening_logs SET user_id = 1 WHERE user_id IS NULL")
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_listening_logs_user_timestamp
+        ON listening_logs (user_id, timestamp)
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_listening_logs_song_user
+        ON listening_logs (song_id, user_id)
+    ''')
 
     # ==========================================
     # PLAY EVENTS TABLE
@@ -518,17 +531,17 @@ def update_user_role(database_path, user_id, new_role):
         conn.close()
 
 
-def update_song_lyrics(database_path, song_id, lyrics, synced_lyrics, status='found'):
+def update_song_lyrics(database_path, song_id, lyrics, synced_lyrics, word_synced_lyrics='', status='found'):
     conn = get_db_connection(database_path)
     try:
         cursor = conn.cursor()
         cursor.execute(
             '''
             UPDATE songs
-            SET lyrics = ?, synced_lyrics = ?, lyrics_status = ?, lyrics_updated_at = CURRENT_TIMESTAMP
+            SET lyrics = ?, synced_lyrics = ?, word_synced_lyrics = ?, lyrics_status = ?, lyrics_updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             ''',
-            (lyrics, synced_lyrics, status, song_id)
+            (lyrics, synced_lyrics, word_synced_lyrics, status, song_id)
         )
         conn.commit()
         return cursor.rowcount > 0

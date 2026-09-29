@@ -1279,6 +1279,7 @@ def get_song_lyrics(song_id):
     return jsonify({
         'lyrics': song['lyrics'] or '',
         'synced_lyrics': song['synced_lyrics'] or '',
+        'word_synced_lyrics': song['word_synced_lyrics'] or '',
         'lyrics_status': song['lyrics_status'] or 'none',
         'lyrics_updated_at': song['lyrics_updated_at'],
     })
@@ -1298,6 +1299,7 @@ def refresh_song_lyrics(song_id):
         return jsonify({
             'lyrics': song['lyrics'] or '',
             'synced_lyrics': song['synced_lyrics'] or '',
+            'word_synced_lyrics': song['word_synced_lyrics'] or '',
             'lyrics_status': 'manual',
             'lyrics_updated_at': song['lyrics_updated_at'],
         })
@@ -1315,7 +1317,7 @@ def refresh_song_lyrics(song_id):
         db.execute(
             '''
             UPDATE songs
-            SET lyrics = '', synced_lyrics = '', lyrics_status = 'not_found', lyrics_updated_at = CURRENT_TIMESTAMP
+            SET lyrics = '', synced_lyrics = '', word_synced_lyrics = '', lyrics_status = 'not_found', lyrics_updated_at = CURRENT_TIMESTAMP
             WHERE id = ? AND user_id = ?
             ''',
             (song_id, current_user.id)
@@ -1325,6 +1327,7 @@ def refresh_song_lyrics(song_id):
             'error': 'Lyrics not found',
             'lyrics': '',
             'synced_lyrics': '',
+            'word_synced_lyrics': '',
             'lyrics_status': 'not_found',
             'lyrics_updated_at': None,
         }), 404
@@ -1332,12 +1335,13 @@ def refresh_song_lyrics(song_id):
     db.execute(
         '''
         UPDATE songs
-        SET lyrics = ?, synced_lyrics = ?, lyrics_status = 'found', lyrics_updated_at = CURRENT_TIMESTAMP
+        SET lyrics = ?, synced_lyrics = ?, word_synced_lyrics = ?, lyrics_status = 'found', lyrics_updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND user_id = ?
         ''',
         (
             lyrics_data.get('lyrics', ''),
             lyrics_data.get('synced_lyrics', ''),
+            lyrics_data.get('word_synced_lyrics', ''),
             song_id,
             current_user.id,
         )
@@ -1347,6 +1351,7 @@ def refresh_song_lyrics(song_id):
     return jsonify({
         'lyrics': lyrics_data.get('lyrics', ''),
         'synced_lyrics': lyrics_data.get('synced_lyrics', ''),
+        'word_synced_lyrics': lyrics_data.get('word_synced_lyrics', ''),
         'lyrics_status': 'found',
         'lyrics_updated_at': None,
     })
@@ -1368,7 +1373,7 @@ def save_song_lyrics(song_id):
     db.execute(
         '''
         UPDATE songs
-        SET lyrics = ?, synced_lyrics = ?, lyrics_status = ?, lyrics_updated_at = CURRENT_TIMESTAMP
+        SET lyrics = ?, synced_lyrics = ?, word_synced_lyrics = '', lyrics_status = ?, lyrics_updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND user_id = ?
         ''',
         (lyrics, synced_lyrics, status, song_id, current_user.id)
@@ -1602,14 +1607,17 @@ def get_recap():
     
     # Top played
     top_played_rows = db.execute('''
-        SELECT s.id, s.title, s.artist, s.album_art, COUNT(pe.id) as play_count
+                SELECT s.id, s.title, s.artist, s.album_art, COUNT(pe.id) as play_count,
+                             COALESCE((SELECT SUM(l.seconds_listened) FROM listening_logs l
+                                                 WHERE l.song_id = s.id AND l.user_id = pe.user_id
+                                                     AND l.timestamp >= ? AND l.timestamp <= ?), 0) as total_listened
         FROM play_events pe
         JOIN songs s ON pe.song_id = s.id
         WHERE pe.user_id = ? AND pe.timestamp >= ? AND pe.timestamp <= ?
         GROUP BY s.id
         ORDER BY play_count DESC
         LIMIT 10
-    ''', (current_user.id, start_str, end_str)).fetchall()
+        ''', (start_str, end_str, current_user.id, start_str, end_str)).fetchall()
     
     # Top listened. ponytail: correlated subquery counts this song's plays
     # inside the same window so the hero card shows per-period (monthly/yearly)
