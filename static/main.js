@@ -61,6 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
         isRenaming: false,
         currentPlaylist: null,
         lyricsPanelOpen: false,
+        lyricsFocusMode: window.innerWidth <= 768,
         syncedLyrics: [],
         wordSyncedLyrics: [],
         plainLyrics: '',
@@ -110,6 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
         playerTitle: document.getElementById('player-title'),
         playerArtist: document.getElementById('player-artist'),
         playerArt: document.getElementById('player-art'),
+        playerLyric: document.getElementById('player-lyric'),
         playPauseBtn: document.getElementById('play-pause-btn'),
         toastContainer: document.getElementById('toast-container'),
         downloadWrapper: document.getElementById('download-progress-wrapper'),
@@ -129,12 +131,14 @@ document.addEventListener('DOMContentLoaded', () => {
         lyricsPanel: document.getElementById('lyrics-panel'),
         lyricsTitle: document.getElementById('lyrics-title'),
         lyricsSubtitle: document.getElementById('lyrics-subtitle'),
+        lyricsCurrentLine: document.getElementById('lyrics-current-line'),
         lyricsStatus: document.getElementById('lyrics-status'),
         lyricsBody: document.getElementById('lyrics-body'),
         lyricsEditor: document.getElementById('lyrics-editor'),
         lyricsPlainInput: document.getElementById('lyrics-plain-input'),
         lyricsSyncedInput: document.getElementById('lyrics-synced-input'),
         lyricsCloseBtn: document.getElementById('lyrics-close-btn'),
+        lyricsFocusBtn: document.getElementById('lyrics-focus-btn'),
         lyricsRetryBtn: document.getElementById('lyrics-retry-btn'),
         lyricsEditBtn: document.getElementById('lyrics-edit-btn'),
         lyricsShareBtn: document.getElementById('lyrics-share-btn'),
@@ -636,6 +640,7 @@ document.addEventListener('DOMContentLoaded', () => {
         el.lyricsPanel?.setAttribute('aria-hidden', 'false');
         if (state.currentLyricsSongId) {
             renderLyricsPanel();
+            updateSyncedLyrics(true);
         }
     }
 
@@ -697,6 +702,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderLyricsPanel() {
         if (!el.lyricsBody || !el.lyricsTitle || !el.lyricsSubtitle) return;
 
+        el.lyricsPanel?.classList.toggle('lyrics-focus-mode', state.lyricsFocusMode);
+        el.lyricsFocusBtn?.classList.toggle('active', state.lyricsFocusMode);
+        el.lyricsFocusBtn?.setAttribute('aria-pressed', String(state.lyricsFocusMode));
+
         const hasSynced = Array.isArray(state.syncedLyrics) && state.syncedLyrics.length > 0;
         const hasPlain = Boolean(state.plainLyrics && state.plainLyrics.trim());
         if (state.lyricsEditing) {
@@ -714,6 +723,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
             setLyricsStatus('Choose a track to load lyrics.');
+            if (el.lyricsCurrentLine) el.lyricsCurrentLine.hidden = true;
             if (el.lyricsEditBtn) el.lyricsEditBtn.style.display = 'none';
             return;
         }
@@ -740,6 +750,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (hasPlain) {
             el.lyricsBody.innerHTML = `<div class="lyrics-plain">${escapeHtml(state.plainLyrics).replace(/\n/g, '<br>')}</div>`;
+            const firstPlainLine = state.plainLyrics.split(/\r?\n/).find((line) => line.trim())?.trim() || '';
+            if (el.playerLyric) {
+                el.playerLyric.textContent = firstPlainLine;
+                el.playerLyric.hidden = !firstPlainLine;
+            }
+            if (el.lyricsCurrentLine) {
+                el.lyricsCurrentLine.textContent = firstPlainLine;
+                el.lyricsCurrentLine.hidden = !firstPlainLine;
+            }
             setLyricsStatus('Plain lyrics only.');
             return;
         }
@@ -795,9 +814,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const lyricIndexChanged = activeIndex !== state.currentLyricIndex;
         state.currentLyricIndex = activeIndex;
-
+        const currentLyricText = activeIndex >= 0
+            ? state.syncedLyrics[activeIndex]?.text
+            : state.syncedLyrics[0]?.text;
         const lyricNodes = el.lyricsBody.querySelectorAll('.lyric-line');
         lyricNodes.forEach((node, index) => {
+            const focusCenter = activeIndex === -1 ? 0 : activeIndex;
+            node.classList.toggle('focus-nearby', !state.lyricsFocusMode || Math.abs(index - focusCenter) <= 1);
             node.classList.toggle('past', index < activeIndex);
             node.classList.toggle('active', index === activeIndex && activeIndex !== -1);
             if (index !== activeIndex) node.style.removeProperty('--lyric-progress');
@@ -812,6 +835,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
+        let activeNodeForDisplay = null;
         if (activeIndex !== -1) {
             const currentLine = state.syncedLyrics[activeIndex];
             const nextLine = state.syncedLyrics[activeIndex + 1];
@@ -822,6 +846,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 Math.max(0, ((currentTime - currentLine.timestamp) / lineDuration) * 100),
             );
             const activeNode = el.lyricsBody.querySelector(`.lyric-line[data-index="${activeIndex}"]`);
+            activeNodeForDisplay = activeNode;
             activeNode?.style.setProperty('--lyric-progress', `${progress}%`);
 
             const wordNodes = activeNode?.querySelectorAll('.lyric-word') || [];
@@ -861,6 +886,16 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
+        const currentLyricMarkup = activeNodeForDisplay?.innerHTML || renderLyricWords(currentLyricText);
+        if (el.playerLyric) {
+            el.playerLyric.innerHTML = currentLyricMarkup;
+            el.playerLyric.hidden = !currentLyricText;
+        }
+        if (el.lyricsCurrentLine) {
+            el.lyricsCurrentLine.innerHTML = currentLyricMarkup;
+            el.lyricsCurrentLine.hidden = !currentLyricText;
+        }
+
         if (activeIndex !== -1) {
             const activeNode = el.lyricsBody.querySelector(`.lyric-line[data-index="${activeIndex}"]`);
             if (activeNode && (forceScroll || (lyricIndexChanged && state.lyricsPanelOpen))) {
@@ -888,6 +923,14 @@ document.addEventListener('DOMContentLoaded', () => {
         state.lyricsStatusValue = 'none';
         state.currentLyricIndex = -1;
         state.lyricsLoading = true;
+        if (el.playerLyric) {
+            el.playerLyric.textContent = '';
+            el.playerLyric.hidden = true;
+        }
+        if (el.lyricsCurrentLine) {
+            el.lyricsCurrentLine.textContent = '';
+            el.lyricsCurrentLine.hidden = true;
+        }
         setLyricsEditing(false);
 
         if (el.lyricsTitle) el.lyricsTitle.textContent = 'Loading...';
@@ -2706,6 +2749,45 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         menu.style.top = `${Math.max(12, top)}px`;
     }
 
+    function addSongLongPress(element, song, options = {}) {
+        if (navigator.maxTouchPoints > 0 || 'ontouchstart' in window) element.draggable = false;
+        let timer = null;
+        let startX = 0;
+        let startY = 0;
+        let longPressTriggered = false;
+        const cancel = () => {
+            if (timer) clearTimeout(timer);
+            timer = null;
+        };
+
+        element.addEventListener('touchstart', (event) => {
+            if (event.touches.length !== 1 || event.target.closest('button, a, input')) return;
+            const touch = event.touches[0];
+            startX = touch.clientX;
+            startY = touch.clientY;
+            timer = setTimeout(() => {
+                longPressTriggered = true;
+                openSongContextMenu(song, {
+                    clientX: startX,
+                    clientY: startY,
+                    preventDefault() {}
+                }, options);
+            }, 550);
+        }, {passive: true});
+        element.addEventListener('touchmove', (event) => {
+            const touch = event.touches[0];
+            if (!touch || Math.hypot(touch.clientX - startX, touch.clientY - startY) > 12) cancel();
+        }, {passive: true});
+        element.addEventListener('touchend', cancel, {passive: true});
+        element.addEventListener('touchcancel', cancel, {passive: true});
+        element.addEventListener('click', (event) => {
+            if (!longPressTriggered) return;
+            longPressTriggered = false;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+        }, true);
+    }
+
     document.getElementById('song-context-menu')?.addEventListener('click', (event) => {
         const action = event.target.closest('[data-context-action]')?.dataset.contextAction;
         if (!action || !contextSong) return;
@@ -3462,6 +3544,11 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     });
 
     el.lyricsCloseBtn?.addEventListener('click', closeLyricsPanel);
+    el.lyricsFocusBtn?.addEventListener('click', () => {
+        state.lyricsFocusMode = !state.lyricsFocusMode;
+        renderLyricsPanel();
+        updateSyncedLyrics(true);
+    });
     el.lyricsShareBtn?.addEventListener('click', openShareLyricsModal);
     el.lyricsEditBtn?.addEventListener('click', () => {
         if (state.currentLyricsSongId) setLyricsEditing(true);
@@ -3751,6 +3838,16 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
     }
 
+    const seekFromPointer = (event) => {
+        if (!el.progressBar || !el.audio.duration || isNaN(el.audio.duration)) return;
+        const rect = el.progressBar.getBoundingClientRect();
+        const percent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+        const value = percent * 100;
+        el.progressBar.value = value;
+        el.audio.currentTime = percent * el.audio.duration;
+        if (el.progressFill) el.progressFill.style.width = `${value}%`;
+    };
+
     el.progressBar?.addEventListener('input', (e) => {
         if (el.audio.duration && !isNaN(el.audio.duration)) {
             el.audio.currentTime = (e.target.value / 100) * el.audio.duration;
@@ -3763,6 +3860,10 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         state.isSeeking = true;
         state.wasPlayingBeforeSeek = !el.audio.paused;
         if (state.wasPlayingBeforeSeek) el.audio.pause();
+        seekFromPointer(event);
+    });
+    el.progressBar?.addEventListener('pointermove', (event) => {
+        if (state.isSeeking) seekFromPointer(event);
     });
 
     const finishSeek = (event) => {
@@ -3880,6 +3981,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             div.addEventListener('contextmenu', (event) => {
                 openSongContextMenu(song, event, {isLibrary: true, play: () => playLibrarySong(song)});
             });
+            addSongLongPress(div, song, {isLibrary: true, play: () => playLibrarySong(song)});
             container.appendChild(div);
         });
     }
@@ -4299,6 +4401,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             div.addEventListener('contextmenu', (event) => {
                 openSongContextMenu(song, event, {play: () => playSong(songs, index)});
             });
+            addSongLongPress(div, song, {play: () => playSong(songs, index)});
             container.appendChild(div);
         });
 
@@ -4416,6 +4519,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             div.addEventListener('contextmenu', (event) => {
                 openSongContextMenu(song, event, {play: () => playSong(songs, index)});
             });
+            addSongLongPress(div, song, {play: () => playSong(songs, index)});
             container.appendChild(div);
         });
 

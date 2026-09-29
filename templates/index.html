@@ -427,8 +427,11 @@
     <!-- Player Bar -->
     <div class="player-bar">
         <div class="now-playing" id="now-playing-container">
-            <img id="player-art" alt="Current album artwork" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='56' height='56' viewBox='0 0 24 24' fill='%23282828'></svg>">
-            <div class="track-info"><div id="player-title" class="track-title">Select a song</div><div id="player-artist" class="track-artist">psr.fm</div></div>
+            <div id="player-lyric" class="player-lyric" aria-live="polite" hidden></div>
+            <div class="player-track-row">
+                <img id="player-art" alt="Current album artwork" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='56' height='56' viewBox='0 0 24 24' fill='%23282828'></svg>">
+                <div class="track-info"><div id="player-title" class="track-title">Select a song</div><div id="player-artist" class="track-artist">psr.fm</div></div>
+            </div>
         </div>
         <div class="player-controls">
             <div class="control-buttons">
@@ -479,10 +482,16 @@
                 <p class="lyrics-eyebrow">Lyrics</p>
                 <h3 id="lyrics-title">Select a song</h3>
                 <p id="lyrics-subtitle" class="lyrics-subtitle">Cached lyrics will appear here.</p>
+                <div id="lyrics-current-line" class="lyrics-current-line" aria-live="polite" hidden></div>
             </div>
-            <button id="lyrics-close-btn" class="lyrics-close-btn" aria-label="Close lyrics panel">
-                <i class="fas fa-times"></i>
-            </button>
+            <div class="lyrics-header-actions">
+                <button id="lyrics-focus-btn" class="lyrics-focus-btn" type="button" aria-label="Toggle focused lyrics" aria-pressed="false" title="Focus mode">
+                    <i class="fas fa-expand-alt" aria-hidden="true"></i>
+                </button>
+                <button id="lyrics-close-btn" class="lyrics-close-btn" aria-label="Close lyrics panel">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
         </div>
         <div class="lyrics-status-row">
             <span id="lyrics-status" class="lyrics-status">Choose a track to load lyrics.</span>
