@@ -13,13 +13,15 @@ Aplikasi ini cocok untuk server pribadi, keluarga, atau teman kecil-kecilan. Set
 - Upload file audio lokal ke library dan playlist.
 - Library Songs untuk melihat lagu yang sudah pernah didownload semua user.
 - Add lagu dari Library Songs tanpa download ulang.
+- Menu **Songs** mengelompokkan Library Songs, Download Song, dan Upload Song agar sidebar mobile lebih ringkas.
 - Peringatan kalau link YouTube yang ditempel sudah ada di Library Songs.
 - Playlist pribadi dengan urutan drag-and-drop.
 - Search lagu pribadi.
-- Lyrics biasa dan synced lyrics jika tersedia.
+- Lyrics biasa, synced lyrics, dan word-synced lyrics jika tersedia.
 - Edit lirik manual jika hasil pencarian tidak tersedia atau perlu dikoreksi.
 - Share Lyrics Card untuk membuat gambar PNG dari potongan lirik dengan cover lagu dan tema warna.
 - Player dengan queue, shuffle, repeat, volume, seek, A-B loop, dan equalizer 16-band.
+- Running lyric text di mini player mengikuti progress baris lirik saat lagu diputar.
 - Dashboard per user: recently added, top played, top listened, dan storage usage.
 - Frequency Focus untuk recap bulanan/tahunan: total waktu dengar, jumlah play, lagu paling sering diputar, lagu paling lama didengar, dan breakdown per bulan untuk mode tahunan.
 - Tampilan mobile dengan drawer sidebar, tombol keluar User Management, dan player bawah yang tidak menutup konten.
@@ -178,8 +180,11 @@ Share card otomatis memakai cover lagu jika tersedia dan menyesuaikan tinggi car
 ### Mobile
 
 - Tombol menu membuka sidebar sebagai drawer.
+- Menu **Songs** membuka submenu Library Songs, Download Song, dan Upload Song.
 - Tap playlist langsung menutup drawer dan membuka playlist.
+- Tekan lama lagu sekitar 0,5 detik untuk membuka menu Play, Play next, Add to queue, Download, atau Add to playlist.
 - Player tetap berada di bawah layar; konten diberi jarak supaya tidak tertutup.
+- Panel Lyrics di mobile tetap memakai daftar baris seperti desktop; baris dapat diketuk untuk seek.
 - User Management punya tombol **Back** untuk kembali ke dashboard.
 
 ## Data yang Disimpan
@@ -264,6 +269,8 @@ docker compose up -d --build
 # Lihat log
 docker compose logs -f psr_fm
 ```
+
+Jika perubahan JavaScript atau CSS belum terlihat di HP, tutup PWA/browser lalu buka kembali. Service worker menggunakan versi cache asset agar pembaruan frontend diambil ulang.
 
 ## Troubleshooting
 

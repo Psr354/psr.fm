@@ -699,6 +699,14 @@ document.addEventListener('DOMContentLoaded', () => {
         el.playerLyric.classList.toggle('is-overflowing', distance > 4);
     }
 
+    function resetPlayerLyric() {
+        if (!el.playerLyric) return;
+        el.playerLyric.replaceChildren();
+        el.playerLyric.hidden = true;
+        el.playerLyric.classList.remove('is-overflowing');
+        el.playerLyric.style.removeProperty('--player-lyric-offset');
+    }
+
     function syncMobileViewport() {
         const viewport = window.visualViewport;
         const height = viewport?.height || window.innerHeight;
@@ -917,7 +925,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function loadLyrics(songId, forceRefresh = false) {
         if (!songId) return;
-        if (state.currentLyricsSongId === songId && !forceRefresh) {
+        if (String(state.currentLyricsSongId) === String(songId) && !forceRefresh) {
             if (state.lyricsPanelOpen) renderLyricsPanel();
             updateSyncedLyrics(true);
             return;
@@ -934,10 +942,7 @@ document.addEventListener('DOMContentLoaded', () => {
         state.lyricsStatusValue = 'none';
         state.currentLyricIndex = -1;
         state.lyricsLoading = true;
-        if (el.playerLyric) {
-            el.playerLyric.textContent = '';
-            el.playerLyric.hidden = true;
-        }
+        resetPlayerLyric();
         setLyricsEditing(false);
 
         if (el.lyricsTitle) el.lyricsTitle.textContent = 'Loading...';
@@ -956,6 +961,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const playlist = await getOfflinePlaylist(state.currentPlaylistId);
                 const data = playlist?.lyrics?.[songId];
                 if (!data) throw new Error('Lyrics were not saved offline');
+                if (requestToken !== state.lyricsRequestToken || String(state.currentPlayingSongId) !== String(songId)) return;
                 state.plainLyrics = data.lyrics || '';
                 state.rawSyncedLyrics = data.synced_lyrics || '';
                 state.syncedLyrics = parseLRC(state.rawSyncedLyrics);
@@ -1008,6 +1014,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.plainLyrics = '';
             state.rawSyncedLyrics = '';
             state.lyricsStatusValue = 'not_found';
+            resetPlayerLyric();
             if (el.lyricsTitle) el.lyricsTitle.textContent = 'Lyrics';
             setLyricsStatus('No lyrics found. You can add them manually.');
             if (state.lyricsPanelOpen) {
@@ -1019,7 +1026,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 `;
             }
         } finally {
-            state.lyricsLoading = false;
+            if (requestToken === state.lyricsRequestToken) state.lyricsLoading = false;
         }
     }
 
