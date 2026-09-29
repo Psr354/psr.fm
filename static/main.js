@@ -801,6 +801,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateSyncedLyrics(forceScroll = false) {
         if (!el.lyricsBody || !Array.isArray(state.syncedLyrics) || state.syncedLyrics.length === 0) return;
+        if (!el.lyricsBody.querySelector('.lyric-line') && state.currentLyricsSongId) {
+            renderLyricsPanel();
+        }
 
         const currentTime = el.audio.currentTime || 0;
         let activeIndex = -1;
@@ -888,10 +891,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const currentLyricMarkup = activeNodeForDisplay?.innerHTML || renderLyricWords(currentLyricText);
         if (el.playerLyric) {
+            el.playerLyric.classList.add('lyric-line-display');
+            el.playerLyric.classList.toggle('active', Boolean(activeNodeForDisplay));
             el.playerLyric.innerHTML = currentLyricMarkup;
             el.playerLyric.hidden = !currentLyricText;
         }
         if (el.lyricsCurrentLine) {
+            el.lyricsCurrentLine.classList.add('lyric-line-display');
+            el.lyricsCurrentLine.classList.toggle('active', Boolean(activeNodeForDisplay));
             el.lyricsCurrentLine.innerHTML = currentLyricMarkup;
             el.lyricsCurrentLine.hidden = !currentLyricText;
         }
