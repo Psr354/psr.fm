@@ -131,7 +131,6 @@ document.addEventListener('DOMContentLoaded', () => {
         lyricsPanel: document.getElementById('lyrics-panel'),
         lyricsTitle: document.getElementById('lyrics-title'),
         lyricsSubtitle: document.getElementById('lyrics-subtitle'),
-        lyricsCurrentLine: document.getElementById('lyrics-current-line'),
         lyricsStatus: document.getElementById('lyrics-status'),
         lyricsBody: document.getElementById('lyrics-body'),
         lyricsEditor: document.getElementById('lyrics-editor'),
@@ -679,7 +678,7 @@ document.addEventListener('DOMContentLoaded', () => {
         )).join(' ');
     }
 
-    function updatePlayerLyric(markup, text) {
+    function updatePlayerLyric(markup, text, progress = 0) {
         if (!el.playerLyric) return;
         if (!text) {
             el.playerLyric.hidden = true;
@@ -696,6 +695,7 @@ document.addEventListener('DOMContentLoaded', () => {
         el.playerLyric.hidden = false;
         const distance = Math.max(0, content.scrollWidth - el.playerLyric.clientWidth);
         el.playerLyric.style.setProperty('--player-lyric-distance', `${distance}px`);
+        el.playerLyric.style.setProperty('--player-lyric-progress', `${Math.max(0, Math.min(100, progress))}%`);
         el.playerLyric.classList.toggle('is-overflowing', distance > 4);
     }
 
@@ -743,7 +743,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
             setLyricsStatus('Choose a track to load lyrics.');
-            if (el.lyricsCurrentLine) el.lyricsCurrentLine.hidden = true;
             if (el.lyricsEditBtn) el.lyricsEditBtn.style.display = 'none';
             return;
         }
@@ -772,10 +771,6 @@ document.addEventListener('DOMContentLoaded', () => {
             el.lyricsBody.innerHTML = `<div class="lyrics-plain">${escapeHtml(state.plainLyrics).replace(/\n/g, '<br>')}</div>`;
             const firstPlainLine = state.plainLyrics.split(/\r?\n/).find((line) => line.trim())?.trim() || '';
             updatePlayerLyric(renderLyricWords(firstPlainLine), firstPlainLine);
-            if (el.lyricsCurrentLine) {
-                el.lyricsCurrentLine.innerHTML = renderLyricWords(firstPlainLine);
-                el.lyricsCurrentLine.hidden = !firstPlainLine;
-            }
             setLyricsStatus('Plain lyrics only.');
             return;
         }
@@ -855,7 +850,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        let activeNodeForDisplay = null;
+        let lyricProgress = 0;
         if (activeIndex !== -1) {
             const currentLine = state.syncedLyrics[activeIndex];
             const nextLine = state.syncedLyrics[activeIndex + 1];
@@ -865,8 +860,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 100,
                 Math.max(0, ((currentTime - currentLine.timestamp) / lineDuration) * 100),
             );
+            lyricProgress = progress;
             const activeNode = el.lyricsBody.querySelector(`.lyric-line[data-index="${activeIndex}"]`);
-            activeNodeForDisplay = activeNode;
             activeNode?.style.setProperty('--lyric-progress', `${progress}%`);
 
             const wordNodes = activeNode?.querySelectorAll('.lyric-word') || [];
@@ -906,14 +901,11 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
+        const activeNodeForDisplay = activeIndex >= 0
+            ? el.lyricsBody.querySelector(`.lyric-line[data-index="${activeIndex}"]`)
+            : null;
         const currentLyricMarkup = activeNodeForDisplay?.innerHTML || renderLyricWords(currentLyricText);
-        updatePlayerLyric(currentLyricMarkup, currentLyricText);
-        if (el.lyricsCurrentLine) {
-            el.lyricsCurrentLine.classList.add('lyric-line-display');
-            el.lyricsCurrentLine.classList.toggle('active', Boolean(activeNodeForDisplay));
-            el.lyricsCurrentLine.innerHTML = currentLyricMarkup;
-            el.lyricsCurrentLine.hidden = !currentLyricText;
-        }
+        updatePlayerLyric(currentLyricMarkup, currentLyricText, lyricProgress);
 
         if (activeIndex !== -1) {
             const activeNode = el.lyricsBody.querySelector(`.lyric-line[data-index="${activeIndex}"]`);
@@ -945,10 +937,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (el.playerLyric) {
             el.playerLyric.textContent = '';
             el.playerLyric.hidden = true;
-        }
-        if (el.lyricsCurrentLine) {
-            el.lyricsCurrentLine.textContent = '';
-            el.lyricsCurrentLine.hidden = true;
         }
         setLyricsEditing(false);
 
