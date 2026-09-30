@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'psr354-shell-v21';
+const SHELL_CACHE = 'psr354-shell-v22';
 const MEDIA_CACHE = 'psr354-media-v3';
 const RUNTIME_CACHE = 'psr354-runtime-v1';
 const APP_SHELL_KEY = '/?offline-app-shell=1';
@@ -46,6 +46,60 @@ self.addEventListener('message', (event) => {
   }
 });
 
+async function createRangeResponse(request, response) {
+  const rangeHeader = request.headers.get('range');
+  if (!rangeHeader || !response?.ok) return response;
+
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim());
+  if (!match) return response;
+
+  const buffer = await response.clone().arrayBuffer();
+  const size = buffer.byteLength;
+  if (!size) return response;
+
+  let start;
+  let end;
+  if (match[1]) {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : size - 1;
+  } else {
+    const suffixLength = Number(match[2]);
+    if (!suffixLength) return response;
+    start = Math.max(0, size - suffixLength);
+    end = size - 1;
+  }
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start >= size || end < start) {
+    return new Response(null, {
+      status: 416,
+      headers: { 'Content-Range': `bytes */${size}` },
+    });
+  }
+
+  end = Math.min(end, size - 1);
+  const headers = new Headers(response.headers);
+  headers.set('Accept-Ranges', 'bytes');
+  headers.set('Content-Range', `bytes ${start}-${end}/${size}`);
+  headers.set('Content-Length', String(end - start + 1));
+
+  return new Response(buffer.slice(start, end + 1), {
+    status: 206,
+    statusText: 'Partial Content',
+    headers,
+  });
+}
+
+async function serveAudio(request) {
+  const cached = await caches.match(request, { ignoreSearch: true });
+  if (cached) return createRangeResponse(request, cached);
+
+  const response = await fetch(request);
+  if (request.headers.has('range') && response.status === 200) {
+    return createRangeResponse(request, response);
+  }
+  return response;
+}
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.method !== 'GET') return;
@@ -84,7 +138,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.pathname.startsWith('/audio/') || url.pathname.startsWith('/static/album_art/')) {
+  if (url.pathname.startsWith('/audio/')) {
+    event.respondWith(serveAudio(request));
+    return;
+  }
+
+  if (url.pathname.startsWith('/static/album_art/')) {
     event.respondWith(caches.match(request, { ignoreSearch: true }).then((cached) => cached || fetch(request)));
     return;
   }
