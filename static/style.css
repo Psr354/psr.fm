@@ -120,6 +120,7 @@ button { touch-action: manipulation; }
     border-radius: 6px;
     transition: color 0.2s, background 0.2s;
     flex-shrink: 0;
+    touch-action: none;
 }
 .drag-handle:hover {
     color: var(--accent-color);

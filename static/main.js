@@ -4257,35 +4257,63 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (!state.currentPlaylistId) return;
         let draggedItem = null;
 
+        const finishReorder = async (item) => {
+            if (!item) return;
+            item.classList.remove('dragging');
+            draggedItem = null;
+            const songIds = [...container.querySelectorAll('.song-item.is-reorderable')]
+                .map(row => Number.parseInt(row.dataset.id, 10))
+                .filter(Number.isFinite);
+
+            const currentOrder = state.currentPlaylistSongs.map(song => song.id);
+            if (songIds.join(',') === currentOrder.join(',')) return;
+
+            const byId = new Map(state.currentPlaylistSongs.map(song => [song.id, song]));
+            state.currentPlaylistSongs = songIds.map(songId => byId.get(songId)).filter(Boolean);
+            updatePlaylistMeta();
+
+            try {
+                await savePlaylistSongOrder(songIds);
+                showToast('Playlist order saved', 'success');
+                renderSongs(state.currentPlaylistSongs, 'playlist-songs-list', true);
+                highlightPlayingSong();
+            } catch (err) {
+                showToast(err.message || 'Failed to save song order', 'error');
+                if (state.currentPlaylist) openPlaylist(state.currentPlaylist);
+            }
+        };
+
         container.querySelectorAll('.song-item.is-reorderable').forEach((item) => {
             item.addEventListener('dragstart', () => {
                 draggedItem = item;
                 item.classList.add('dragging');
             });
 
-            item.addEventListener('dragend', async () => {
-                item.classList.remove('dragging');
-                draggedItem = null;
-                const songIds = [...container.querySelectorAll('.song-item.is-reorderable')]
-                    .map(row => Number.parseInt(row.dataset.id, 10))
-                    .filter(Number.isFinite);
+            item.addEventListener('dragend', () => finishReorder(item));
 
-                const currentOrder = state.currentPlaylistSongs.map(song => song.id);
-                if (songIds.join(',') === currentOrder.join(',')) return;
-
-                const byId = new Map(state.currentPlaylistSongs.map(song => [song.id, song]));
-                state.currentPlaylistSongs = songIds.map(songId => byId.get(songId)).filter(Boolean);
-                updatePlaylistMeta();
-
-                try {
-                    await savePlaylistSongOrder(songIds);
-                    showToast('Playlist order saved', 'success');
-                    renderSongs(state.currentPlaylistSongs, 'playlist-songs-list', true);
-                    highlightPlayingSong();
-                } catch (err) {
-                    showToast(err.message || 'Failed to save song order', 'error');
-                    if (state.currentPlaylist) openPlaylist(state.currentPlaylist);
-                }
+            const handle = item.querySelector('.drag-handle');
+            if (!handle) return;
+            handle.addEventListener('pointerdown', (event) => {
+                if (event.pointerType === 'mouse') return;
+                event.preventDefault();
+                draggedItem = item;
+                item.classList.add('dragging');
+                handle.setPointerCapture?.(event.pointerId);
+            });
+            handle.addEventListener('pointermove', (event) => {
+                if (draggedItem !== item) return;
+                event.preventDefault();
+                const afterElement = getDragAfterElement(container, event.clientY);
+                if (afterElement == null) container.appendChild(item);
+                else container.insertBefore(item, afterElement);
+            });
+            handle.addEventListener('pointerup', (event) => {
+                if (draggedItem !== item) return;
+                handle.releasePointerCapture?.(event.pointerId);
+                finishReorder(item);
+            });
+            handle.addEventListener('pointercancel', () => {
+                if (draggedItem === item) finishReorder(item);
             });
         });
 
