@@ -127,6 +127,7 @@ button { touch-action: manipulation; }
     background: rgba(29, 185, 84, 0.08);
 }
 .drag-handle:active { cursor: grabbing; }
+.drag-handle { touch-action: none; -webkit-user-select: none; user-select: none; }
 .song-art { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; background: #222; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
 .song-info { flex: 1; overflow: hidden; }
 .song-title { font-size: 15px; font-weight: 650; margin-bottom: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.2s; }

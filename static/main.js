@@ -4293,26 +4293,27 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
             const handle = item.querySelector('.drag-handle');
             if (!handle) return;
-            handle.addEventListener('pointerdown', (event) => {
-                if (event.pointerType === 'mouse') return;
+            handle.addEventListener('touchstart', (event) => {
+                if (event.touches.length !== 1) return;
                 event.preventDefault();
                 draggedItem = item;
                 item.classList.add('dragging');
-                handle.setPointerCapture?.(event.pointerId);
-            });
-            handle.addEventListener('pointermove', (event) => {
+            }, {passive: false});
+            handle.addEventListener('touchmove', (event) => {
                 if (draggedItem !== item) return;
                 event.preventDefault();
-                const afterElement = getDragAfterElement(container, event.clientY);
+                const touch = event.touches[0];
+                if (!touch) return;
+                const afterElement = getDragAfterElement(container, touch.clientY);
                 if (afterElement == null) container.appendChild(item);
                 else container.insertBefore(item, afterElement);
-            });
-            handle.addEventListener('pointerup', (event) => {
+            }, {passive: false});
+            handle.addEventListener('touchend', (event) => {
                 if (draggedItem !== item) return;
-                handle.releasePointerCapture?.(event.pointerId);
+                event.preventDefault();
                 finishReorder(item);
-            });
-            handle.addEventListener('pointercancel', () => {
+            }, {passive: false});
+            handle.addEventListener('touchcancel', () => {
                 if (draggedItem === item) finishReorder(item);
             });
         });
