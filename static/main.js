@@ -52,6 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
         isShuffle: false,
         repeatMode: 0, // 0=Off, 1=RepeatAll, 2=RepeatOne
         currentPlayingSongId: null,
+        playbackStatisticsSongId: null,
         wasPlayingBeforeSeek: false,
         isSeeking: false,
         lastLoggedTime: 0,
@@ -768,8 +769,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 lineBtn.addEventListener('click', () => {
                     const timestamp = Number.parseFloat(lineBtn.dataset.timestamp || '0');
                     if (!Number.isFinite(timestamp)) return;
-                    el.audio.currentTime = timestamp;
-                    state.lastLoggedTime = timestamp;
+                    seekAudio(timestamp);
                     updateSyncedLyrics(true);
                 });
             });
@@ -1486,7 +1486,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function jumpToLoopStart() {
         if (!state.isLooping || state.loopStart < 0) return;
 
-        el.audio.currentTime = state.loopStart;
+        seekAudio(state.loopStart);
 
         const jumpBtn = document.getElementById('jump-loop-btn');
         if (jumpBtn) {
@@ -2653,10 +2653,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             if (el.queueMode) el.queueMode.innerText = '(Shuffled)';
         } else {
             state.shuffleOrder = [];
-            for (let i = 1; i < state.currentPlaylistSongs.length; i++) {
-                const nextIdx = (state.currentSongIndex + i) % state.currentPlaylistSongs.length;
-                state.playQueue.push(state.currentPlaylistSongs[nextIdx]);
-            }
+            state.playQueue = state.currentPlaylistSongs.slice(state.currentSongIndex + 1);
             if (el.queueMode) el.queueMode.innerText = '';
         }
         updateQueueUI();
@@ -2676,7 +2673,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             div.dataset.queueIndex = String(index);
             div.innerHTML = `
                 <button class="queue-drag-handle" type="button" aria-label="Reorder ${escapeHtml(song.title)}" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></button>
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" alt="" loading="lazy" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'36\' height=\'36\' viewBox=\'0 0 24 24\' fill=\'%23555\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/icon-192.png';">
                 <div class="q-info">
                     <div class="q-title">${escapeHtml(song.title)}</div>
                     <div class="q-artist">${escapeHtml(song.artist || 'Unknown')}</div>
@@ -3129,7 +3126,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             }
             if (el.toggleLoopBtn) el.toggleLoopBtn.innerHTML = '<i class="fas fa-pause"></i> Stop';
             if (jumpBtn) jumpBtn.disabled = false;
-            el.audio.currentTime = state.loopStart;
+            seekAudio(state.loopStart);
             updateLoopIndicator();
             showToast('A-B loop started; repeats do not add plays', 'success');
         } else {
@@ -3702,10 +3699,10 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             updateSyncedLyrics();
 
             if (state.isLooping && el.audio.currentTime >= state.loopEnd) {
-                el.audio.currentTime = state.loopStart;
+                seekAudio(state.loopStart);
             }
 
-            if (!el.audio.paused && state.currentPlayingSongId) {
+            if (!el.audio.paused && !el.audio.seeking && !state.isSeeking && state.currentPlayingSongId) {
                 const delta = el.audio.currentTime - state.lastLoggedTime;
                 if (delta >= 5) {
                     logListenDuration(state.currentPlayingSongId, delta);
@@ -3741,7 +3738,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             state.playbackSessionId = null;
             const songId = state.currentPlayingSongId;
             const playbackRequestId = state.playbackRequestId;
-            state.playbackSessionPromise = logPlay(songId);
+            state.playbackSessionPromise = state.playbackStatisticsSongId
+                ? logPlay(state.playbackStatisticsSongId) : Promise.resolve(null);
             state.playbackSessionPromise.then((sessionId) => {
                 if (
                     String(state.currentPlayingSongId) === String(songId)
@@ -3760,6 +3758,11 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
     });
 
+    el.audio.addEventListener('seeking', () => {
+        // The browser has already changed currentTime; do not count that jump.
+        state.lastLoggedTime = el.audio.currentTime;
+    });
+
     el.audio.addEventListener('seeked', () => {
         state.lastLoggedTime = el.audio.currentTime;
         updateSyncedLyrics(true);
@@ -3775,7 +3778,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     // locked. Retry the same track after it becomes playable instead of leaving
     // the player stopped until the page is opened again.
     el.audio.addEventListener('canplay', () => {
-        if (state.shouldBePlaying && el.audio.paused) resumeCurrentSong();
+        if (state.shouldBePlaying && !state.isSeeking && el.audio.paused && !el.audio.ended) resumeCurrentSong();
     });
 
     el.audio.addEventListener('error', () => {
@@ -3798,7 +3801,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             updatePlayPauseIcon(false);
         });
         navigator.mediaSession.setActionHandler('seekto', ({ seekTime }) => {
-            if (Number.isFinite(seekTime)) el.audio.currentTime = seekTime;
+            if (Number.isFinite(seekTime)) seekAudio(seekTime);
         });
     }
 
@@ -3828,7 +3831,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     function flushListenLog() {
         if (state.currentPlayingSongId) {
             const delta = el.audio.currentTime - state.lastLoggedTime;
-            if (delta > 0) {
+            if (delta > 0 && !el.audio.seeking && !state.isSeeking) {
                 logListenDuration(state.currentPlayingSongId, delta);
             }
             state.lastLoggedTime = el.audio.currentTime;
@@ -3837,6 +3840,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
     async function logListen(songId, seconds) {
         // Capture this playback's session before a track switch or repeat.
+        songId = state.playbackStatisticsSongId;
+        if (!songId) return;
         const session = state.playbackSessionPromise || state.playbackSessionId;
         const occurredAt = new Date().toISOString();
         try {
@@ -3856,6 +3861,14 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
     }
 
+    function seekAudio(position) {
+        if (!Number.isFinite(position)) return;
+        flushListenLog();
+        el.audio.currentTime = position;
+        // Reset immediately: pause/timeupdate may arrive before seeked.
+        state.lastLoggedTime = el.audio.currentTime;
+    }
+
     const seekFromPointer = (event) => {
         if (!el.progressBar || !el.audio.duration || isNaN(el.audio.duration)) return;
         const rect = el.progressBar.getBoundingClientRect();
@@ -3863,19 +3876,20 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         const percent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
         const value = percent * 100;
         el.progressBar.value = value;
-        el.audio.currentTime = percent * el.audio.duration;
+        seekAudio(percent * el.audio.duration);
         if (el.progressFill) el.progressFill.style.width = `${value}%`;
         if (el.currentTime) el.currentTime.innerText = formatTime(el.audio.currentTime);
     };
 
     el.progressBar?.addEventListener('input', (e) => {
         if (el.audio.duration && !isNaN(el.audio.duration)) {
-            el.audio.currentTime = (e.target.value / 100) * el.audio.duration;
+            seekAudio((e.target.value / 100) * el.audio.duration);
             if (el.progressFill) el.progressFill.style.width = `${e.target.value}%`;
         }
     });
 
     el.progressBar?.addEventListener('pointerdown', (event) => {
+        flushListenLog();
         state.isSeeking = true;
         state.wasPlayingBeforeSeek = !el.audio.paused;
         if (state.wasPlayingBeforeSeek) el.audio.pause();
@@ -3982,7 +3996,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             div.className = 'song-item library-song-item';
             div.setAttribute('data-id', String(song.id));
             div.innerHTML = `
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/icon-192.png';">
                 <div class="song-info">
                     <div class="song-title">${escapeHtml(song.title)}</div>
                     <div class="song-artist">${escapeHtml(song.artist || 'Unknown')}</div>
@@ -4444,7 +4458,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
             div.innerHTML = `
                 ${canReorder ? '<button class="drag-handle" type="button" aria-label="Reorder song" title="Drag to reorder"><i class="fas fa-grip-lines"></i></button>' : ''}
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/icon-192.png';">
                 <div class="eq-container"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>
                 <div class="song-info"><div class="song-title">${escapeHtml(song.title)}</div><div class="song-artist">${escapeHtml(song.artist || 'Unknown')}</div></div>
                 <div class="song-duration">${formatTime(song.duration_seconds)}</div>
@@ -4559,7 +4573,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             }
 
             div.innerHTML = `
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'48\' height=\'48\' viewBox=\'0 0 24 24\' fill=\'%23b3b3b3\'><path d=\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\'/></svg>';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/icon-192.png';">
                 <div class="eq-container"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>
                 <div class="song-info">
                     <div class="song-title">${escapeHtml(song.title)}</div>
@@ -4699,6 +4713,9 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         state.currentSongIndex = 0;
         state.currentSongMeta = previewSong;
         state.currentPlayingSongId = String(previewSong.id);
+        // Shared library previews count only if this account owns a copy.
+        state.playbackStatisticsSongId = Object.hasOwn(song, 'in_my_library')
+            ? song.owned_song_id : song.id;
         state.playEventLogged = false;
         state.playbackSessionId = null;
         state.playbackSessionPromise = null;
@@ -4735,6 +4752,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         state.currentSongMeta = song;
 
         state.currentPlayingSongId = String(song.id);
+        state.playbackStatisticsSongId = song.id;
         state.playEventLogged = false;
         state.playbackSessionId = null;
         state.playbackSessionPromise = null;
@@ -4799,6 +4817,13 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
         if (state.currentPlaylistSongs.length === 0) return;
 
+        if (isFromSongEnded && state.repeatMode === 0) {
+            state.shouldBePlaying = false;
+            el.audio.pause();
+            updatePlayPauseIcon(false);
+            return;
+        }
+
         // Queue is empty: the whole playlist has played through once.
         if (state.isShuffle) {
             if (state.repeatMode === 0) {
@@ -4827,7 +4852,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     function playPrev() {
         if (state.currentPlaylistSongs.length === 0) return;
         if (el.audio.currentTime > 3) {
-            el.audio.currentTime = 0;
+            seekAudio(0);
             return;
         }
         playSong(state.currentPlaylistSongs, (state.currentSongIndex - 1 + state.currentPlaylistSongs.length) % state.currentPlaylistSongs.length);
@@ -4865,7 +4890,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
 
         try {
-            const response = await fetch(`/api/recap?period=${period}&month=${month}&year=${year}`);
+            const response = await fetch(`/api/recap?period=${period}&month=${month}&year=${year}&tz_offset=${now.getTimezoneOffset()}`);
             if (!response.ok) throw new Error("Failed to fetch recap");
             const data = await response.json();
             state.capsuleData = data;
@@ -4960,7 +4985,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             return songs.map((s, idx) => `
                 <div class="song-item capsule-song-item">
                     <span class="rank-number ${idx < 3 ? 'top-3' : ''}">${idx + 1}</span>
-                    <img src="/static/album_art/${mediaUrlName(s.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.style.background='#282828'; this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'48\\' height=\\'48\\' viewBox=\\'0 0 24 24\\' fill=\\'%23b3b3b3\\'><path d=\\'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z\\'/></svg>';">
+                    <img src="/static/album_art/${mediaUrlName(s.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/icon-192.png';">
                     <div class="song-info">
                         <div class="song-title">${escapeHtml(s.title)}</div>
                         <div class="song-artist">${escapeHtml(s.artist || 'Unknown')}</div>

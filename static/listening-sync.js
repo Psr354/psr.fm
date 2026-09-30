@@ -9,7 +9,7 @@ window.PsrListeningSync = class PsrListeningSync {
         this.dirty = false;
         this.timer = null;
         this.retryDelay = 1000;
-        this.lastWarning = '';
+        this.warnings = new Set();
         this.db = new Promise((resolve, reject) => {
             const request = indexedDB.open('psr354-listening', 1);
             request.onupgradeneeded = () => request.result.createObjectStore('outbox', { keyPath: 'id' });
@@ -24,9 +24,9 @@ window.PsrListeningSync = class PsrListeningSync {
         this.schedule(0);
     }
 
-    notify(message) {
-        if (this.lastWarning === message) return;
-        this.lastWarning = message;
+    notify(message, key = message) {
+        if (this.warnings.has(key)) return;
+        this.warnings.add(key);
         this.warn(message);
     }
 
@@ -104,7 +104,7 @@ window.PsrListeningSync = class PsrListeningSync {
             await this.writes;
             const records = (await this.storage('getAll')).filter(record => record.userId === this.userId);
             if (records.some(record => record.status === 'failed')) {
-                this.notify('Some listening records were rejected. They remain saved on this device for inspection.');
+                this.notify('Some listening records were rejected. They remain saved on this device for inspection.', 'listening-rejected');
             }
             const pending = records.filter(record => record.status === 'pending')
                 .sort((a, b) => (a.type === 'play' ? 0 : 1) - (b.type === 'play' ? 0 : 1)
@@ -142,7 +142,7 @@ window.PsrListeningSync = class PsrListeningSync {
                     const detail = await response.json().catch(() => ({}));
                     await this.storage('put', { ...record, status: 'failed', error: detail.error || `HTTP ${response.status}` });
                     if (record.type === 'play') failedSessions.add(record.id);
-                    this.notify(`Listening record rejected: ${detail.error || response.status}. It remains saved on this device.`);
+                    this.notify(`Listening record rejected: ${detail.error || response.status}. It remains saved on this device.`, 'listening-rejected');
                 } else {
                     retry = true;
                     if ([401, 403].includes(response.status)) {

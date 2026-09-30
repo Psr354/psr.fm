@@ -11,7 +11,7 @@ let resolvePlay;
 let deferPlay = false;
 let rejectListen = false;
 const state = {
-    currentPlayingSongId: '1', playbackRequestId: 0, playEventLogged: false,
+    currentPlayingSongId: '1', playbackStatisticsSongId: '1', playbackRequestId: 0, playEventLogged: false,
     playbackSessionId: null, playbackSessionPromise: null, lastLoggedTime: 0,
     repeatMode: 2,
 };
@@ -122,8 +122,70 @@ await settle();
 assert.equal(sessions.get('psr354-session-5'), 5);
 assert.equal(state.playbackSessionId, newestSession, 'Old response must not replace new session');
 
+// A seek must save only actual playback, including when pause/timeupdate arrive
+// before seeked (mobile pointer controls and keyboard/media-session seeks).
+state.playEventLogged = false;
+state.playbackRequestId++;
+audio.currentTime = 0;
+audio.paused = false;
+listeners.play();
+listeners.playing();
+await settle();
+const seekSession = state.playbackSessionId;
+audio.currentTime = 3;
+context.seekAudio(180);
+listeners.timeupdate();
+listeners.pause();
+listeners.seeked();
+await settle();
+assert.equal(sessions.get(seekSession), 3, 'Skip to 3:00 must not log the skipped 177 seconds');
+listeners.play();
+audio.currentTime = 185;
+listeners.timeupdate();
+await settle();
+assert.equal(sessions.get(seekSession), 8, 'Listening after seek resumes normally');
+
+// Native seeking can report timeupdate before seeking/seeked; its seeking flag
+// protects both the periodic recorder and the delayed pause handler.
+audio.seeking = true;
+audio.currentTime = 250;
+listeners.timeupdate();
+listeners.pause();
+listeners.seeking();
+audio.seeking = false;
+listeners.seeked();
+audio.currentTime = 255;
+listeners.timeupdate();
+await settle();
+assert.equal(sessions.get(seekSession), 13);
+state.isSeeking = true;
+audio.currentTime = 300;
+listeners.timeupdate();
+listeners.pause();
+state.isSeeking = false;
+listeners.seeked();
+audio.currentTime = 305;
+listeners.timeupdate();
+await settle();
+assert.equal(sessions.get(seekSession), 18, 'Dragging the progress bar must not add skipped seconds');
+
+// Preview of another user's library item must not create rejected stats events.
+const beforePreview = nextSession;
+state.playEventLogged = false;
+state.playbackStatisticsSongId = null;
+state.playbackRequestId++;
+audio.currentTime = 0;
+listeners.play();
+listeners.playing();
+audio.currentTime = 5;
+listeners.timeupdate();
+await settle();
+assert.equal(nextSession, beforePreview);
+state.playbackStatisticsSongId = '1';
+state.playbackSessionPromise = Promise.resolve(seekSession);
+
 rejectListen = true;
 await context.logListen('1', 5);
 assert.equal(errors.length, 1, 'HTTP rejection must be reported');
 assert.match(errors[0][1].message, /409/);
-console.log('Listening checks passed: full repeats, early pause, slow session, HTTP rejection.');
+console.log('Listening checks passed: full repeats, early pause, slow session, seek event ordering, HTTP rejection.');

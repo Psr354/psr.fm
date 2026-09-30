@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import closing
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from http.cookies import SimpleCookie
 from unittest.mock import patch
@@ -317,6 +318,19 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(songs_response.status_code, 200)
         self.assertEqual(songs_response.get_json()[0]['source_id'], 'abc12345678')
 
+    def test_shared_library_exposes_current_users_song_copy(self):
+        client = self.app_module.app.test_client()
+        client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
+        source_id = self._create_song(user_id=2, filename='psr354-shared.wav')
+        owned_id = self._create_song(user_id=1, filename='psr354-shared.wav')
+        external_id = self._create_song(user_id=2, filename='psr354-preview.wav')
+        songs = client.get('/api/library-songs').get_json()
+        shared = next(song for song in songs if song['id'] == source_id)
+        preview = next(song for song in songs if song['id'] == external_id)
+        self.assertEqual(shared['owned_song_id'], owned_id)
+        self.assertTrue(shared['in_my_library'])
+        self.assertIsNone(preview['owned_song_id'])
+
     def test_library_song_can_be_previewed_without_adding_to_playlist(self):
         client = self.app_module.app.test_client()
         setup_response = client.post('/api/setup', json={
@@ -540,7 +554,7 @@ class AuthAndDownloadTests(unittest.TestCase):
             )
             self.assertEqual(listen_response.status_code, 200)
 
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         recap_response = client.get(f'/api/recap?period=month&month={now.month}&year={now.year}')
         self.assertEqual(recap_response.status_code, 200)
         recap = recap_response.get_json()
@@ -548,6 +562,27 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(recap['stats']['total_plays'], 2)
         self.assertEqual(recap['stats']['total_seconds'], 30)
         self.assertEqual(recap['top_played'][0]['play_count'], 2)
+
+    def test_recap_respects_user_timezone_at_month_boundary(self):
+        client = self.app_module.app.test_client()
+        client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
+        song_id = self._create_song()
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            conn.execute('INSERT INTO play_events (song_id, user_id, timestamp) VALUES (?, 1, ?)',
+                         (song_id, '2020-09-30 18:00:00'))
+            conn.execute('INSERT INTO listening_logs (song_id, user_id, seconds_listened, timestamp) VALUES (?, 1, 20, ?)',
+                         (song_id, '2020-09-30 18:00:00'))
+            conn.commit()
+        utc = client.get('/api/recap?period=month&year=2020&month=10').get_json()
+        local = client.get('/api/recap?period=month&year=2020&month=10&tz_offset=-420').get_json()
+        self.assertEqual(utc['stats']['total_plays'], 0)
+        self.assertEqual(local['stats']['total_plays'], 1)
+        self.assertEqual(local['stats']['total_seconds'], 20)
+        yearly = client.get('/api/recap?period=year&year=2020&tz_offset=-420').get_json()
+        self.assertEqual(yearly['monthly_breakdown'][0]['month_num'], 10)
+        self.assertEqual(yearly['monthly_breakdown'][0]['top_song']['title'], 'Test Track')
+        for query in ('period=invalid', 'month=13', 'year=invalid', 'tz_offset=invalid'):
+            self.assertEqual(client.get('/api/recap?' + query).status_code, 400)
 
     def test_recap_keeps_play_and_listening_rankings_separate(self):
         client = self.app_module.app.test_client()
@@ -668,6 +703,31 @@ class AuthAndDownloadTests(unittest.TestCase):
             self.assertEqual(conn.execute('SELECT SUM(seconds_listened) FROM listening_logs').fetchone()[0], 30)
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM listening_receipts').fetchone()[0], 1)
 
+    def test_concurrent_play_and_listen_retries_count_once(self):
+        client = self.app_module.app.test_client()
+        setup = client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
+        token = self._csrf_token_from_response(setup)
+        with client.session_transaction() as session:
+            original_session = dict(session)
+        song_id = self._create_song()
+
+        def post(url, payload):
+            worker = self.app_module.app.test_client()
+            with worker.session_transaction() as session:
+                session.update(original_session)
+            response = worker.post(url, json=payload, headers={'X-CSRF-Token': token})
+            return response.status_code
+
+        play = {'user_id': 1, 'playback_session_id': 'psr354-concurrent'}
+        listen = {'user_id': 1, 'song_id': song_id, 'playback_session_id': play['playback_session_id'],
+                  'event_id': 'psr354-concurrent-chunk', 'seconds': 5}
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            self.assertEqual(list(pool.map(lambda _: post(f'/api/songs/{song_id}/play', play), range(4))), [200] * 4)
+            self.assertEqual(list(pool.map(lambda _: post('/api/listen', listen), range(4))), [200] * 4)
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM play_events').fetchone()[0], 1)
+            self.assertEqual(conn.execute('SELECT SUM(seconds_listened) FROM listening_logs').fetchone()[0], 5)
+
     def test_offline_full_repeats_keep_original_period(self):
         client = self.app_module.app.test_client()
         setup = client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
@@ -691,6 +751,31 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(recap['stats']['total_plays'], 3)
         with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
             self.assertEqual([row[0] for row in conn.execute('SELECT seconds_listened FROM playback_sessions')], [338, 338, 338])
+
+    def test_replayed_sections_can_exceed_song_duration_but_not_elapsed_time(self):
+        client = self.app_module.app.test_client()
+        setup = client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
+        headers = {'X-CSRF-Token': self._csrf_token_from_response(setup)}
+        song_id = self._create_song(duration_seconds=10)
+        session_id = 'psr354-seek-replay'
+        started = datetime.now(timezone.utc) - timedelta(minutes=1)
+        client.post(f'/api/songs/{song_id}/play', headers=headers, json={
+            'playback_session_id': session_id, 'occurred_at': started.isoformat()})
+        for index in range(2):
+            response = client.post('/api/listen', headers=headers, json={
+                'song_id': song_id, 'playback_session_id': session_id,
+                'event_id': f'psr354-replay-{index}', 'seconds': 10})
+            self.assertEqual(response.status_code, 200)
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            self.assertEqual(conn.execute('SELECT seconds_listened FROM playback_sessions').fetchone()[0], 20)
+            self.assertEqual(conn.execute('SELECT play_count FROM songs').fetchone()[0], 1)
+        # Sixty more seconds would exceed the actual one-minute session age.
+        client.post('/api/listen', headers=headers, json={
+            'song_id': song_id, 'playback_session_id': session_id, 'event_id': 'psr354-budget-1', 'seconds': 30})
+        response = client.post('/api/listen', headers=headers, json={
+            'song_id': song_id, 'playback_session_id': session_id, 'event_id': 'psr354-budget-2', 'seconds': 30})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()['code'], 'playback_time_exceeded')
 
     def test_queued_events_reject_bad_timestamp_and_session(self):
         client = self.app_module.app.test_client()

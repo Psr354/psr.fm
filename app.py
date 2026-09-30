@@ -832,7 +832,7 @@ def get_library_songs():
     
     search_param = f"%{query}%"
     db = get_db()
-    params = [current_user.id]
+    params = [current_user.id, current_user.id]
     where_clause = ''
     if query:
         where_clause = 'WHERE s.title LIKE ? OR s.artist LIKE ?'
@@ -845,6 +845,7 @@ def get_library_songs():
                 MIN(s.id) AS id,
                 COUNT(DISTINCT s.user_id) AS owner_count,
                 MAX(CASE WHEN s.user_id = ? THEN 1 ELSE 0 END) AS in_my_library,
+                MAX(CASE WHEN s.user_id = ? THEN s.id ELSE NULL END) AS owned_song_id,
                 MAX(s.created_at) AS latest_created_at
             FROM songs s
             {where_clause}
@@ -855,7 +856,7 @@ def get_library_songs():
         )
         SELECT
             s.id, s.title, s.artist, s.filename, s.album_art, s.duration_seconds,
-            s.source_url, s.source_id, grouped.owner_count, grouped.in_my_library
+            s.source_url, s.source_id, grouped.owner_count, grouped.in_my_library, grouped.owned_song_id
         FROM grouped
         JOIN songs s ON s.id = grouped.id
         ORDER BY grouped.latest_created_at DESC, s.title COLLATE NOCASE ASC
@@ -1282,15 +1283,14 @@ def log_listen():
         UPDATE playback_sessions
         SET seconds_listened = seconds_listened + ?
         WHERE id = ? AND song_id = ? AND user_id = ?
-          AND seconds_listened + ? <= COALESCE(NULLIF(duration_seconds, 0), 600)
           AND seconds_listened + ? <=
               ((julianday('now') - julianday(started_at)) * 86400) + 10
         ''',
-        (seconds, session_id, song_id, current_user.id, seconds, seconds),
+        (seconds, session_id, song_id, current_user.id, seconds),
     )
     if accepted.rowcount != 1:
         db.rollback()
-        return jsonify({'error': 'Invalid or expired playback session'}), 409
+        return jsonify({'error': 'Listening exceeds elapsed playback time', 'code': 'playback_time_exceeded'}), 409
     db.execute(
         'INSERT INTO listening_logs (song_id, user_id, seconds_listened, timestamp) VALUES (?, ?, ?, ?)',
         (song_id, current_user.id, seconds, timestamp),
@@ -1655,11 +1655,19 @@ def change_user_role(user_id):
 @login_required
 def get_recap():
     period = request.args.get('period', 'month')
-    now = datetime.now()
-    year = int(request.args.get('year', now.year))
+    try:
+        offset = int(request.args.get('tz_offset', 0))
+        if period not in ('month', 'year') or not -840 <= offset <= 720:
+            raise ValueError('Invalid period or timezone')
+        now = datetime.now(timezone.utc) - timedelta(minutes=offset)
+        year = int(request.args.get('year', now.year))
+        month = int(request.args.get('month', now.month))
+        if not 2 <= year <= 9998 or not 1 <= month <= 12:
+            raise ValueError('Invalid year or month')
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid recap period or timezone'}), 400
     
     if period == 'month':
-        month = int(request.args.get('month', now.month))
         # ponytail: standard library monthrange
         last_day = calendar.monthrange(year, month)[1]
         start_date = datetime(year, month, 1)
@@ -1670,8 +1678,10 @@ def get_recap():
         end_date = datetime(year, 12, 31, 23, 59, 59)
         label = str(year)
         
-    start_str = start_date.strftime('%Y-%m-%d %H:%M:%S')
-    end_str = end_date.strftime('%Y-%m-%d %H:%M:%S')
+    # Logs use UTC; map the user's selected local period to UTC query bounds.
+    start_str = (start_date + timedelta(minutes=offset)).strftime('%Y-%m-%d %H:%M:%S')
+    end_str = (end_date + timedelta(minutes=offset)).strftime('%Y-%m-%d %H:%M:%S')
+    local_modifier = f'{-offset} minutes'
     
     db = get_db()
     
@@ -1725,23 +1735,23 @@ def get_recap():
     if period == 'year':
         monthly_listening_rows = db.execute('''
             SELECT
-                CAST(strftime('%m', timestamp) AS INTEGER) as month_num,
+                CAST(strftime('%m', datetime(timestamp, ?)) AS INTEGER) as month_num,
                 COALESCE(SUM(seconds_listened), 0) as total_seconds,
                 COUNT(DISTINCT song_id) as unique_songs
             FROM listening_logs
             WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
             GROUP BY month_num
             ORDER BY month_num
-        ''', (current_user.id, start_str, end_str)).fetchall()
+        ''', (local_modifier, current_user.id, start_str, end_str)).fetchall()
         monthly_play_rows = db.execute('''
             SELECT
-                CAST(strftime('%m', timestamp) AS INTEGER) as month_num,
+                CAST(strftime('%m', datetime(timestamp, ?)) AS INTEGER) as month_num,
                 COUNT(id) as total_plays
             FROM play_events
             WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
             GROUP BY month_num
             ORDER BY month_num
-        ''', (current_user.id, start_str, end_str)).fetchall()
+        ''', (local_modifier, current_user.id, start_str, end_str)).fetchall()
 
         monthly_stats = {
             row['month_num']: {
@@ -1764,4 +1774,41 @@ def get_recap():
         for m in sorted(monthly_stats):
                         # Top song per month by listening time.
             top_song = db.execute('''
-                           
+                                SELECT s.title, s.artist, s.album_art,
+                                             SUM(l.seconds_listened) as total_listened
+                                FROM listening_logs l JOIN songs s ON l.song_id = s.id
+                                WHERE l.user_id = ? AND strftime('%m', datetime(l.timestamp, ?)) = ?
+                                    AND l.timestamp >= ? AND l.timestamp <= ?
+                                GROUP BY s.id ORDER BY total_listened DESC LIMIT 1
+                        ''', (current_user.id, local_modifier, f'{m:02d}', start_str, end_str)).fetchone()
+            monthly_breakdown.append({
+                'month': month_names[m],
+                'month_num': m,
+                'total_seconds': monthly_stats[m]['total_seconds'],
+                'unique_songs': monthly_stats[m]['unique_songs'],
+                'total_plays': monthly_stats[m]['total_plays'],
+                'top_song': dict(top_song) if top_song else None
+            })
+
+    stats = dict(stats_row) if stats_row else {"total_seconds": 0, "unique_songs": 0}
+    stats["total_plays"] = plays_row["total_plays"] if plays_row else 0
+
+    result = {
+        "period": {
+            "type": period,
+            "start": start_date.isoformat(),
+            "end": end_date.isoformat(),
+            "label": label
+        },
+        "top_played": [dict(r) for r in top_played_rows],
+        "top_listened": [dict(r) for r in top_listened_rows],
+        "stats": stats
+    }
+    if monthly_breakdown:
+        result["monthly_breakdown"] = monthly_breakdown
+
+    return jsonify(result)
+
+
+if __name__ == '__main__':
+    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)

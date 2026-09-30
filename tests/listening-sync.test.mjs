@@ -152,8 +152,11 @@ await sync.flush();
 assert.equal(records.size, 2);
 assert.ok([...records.values()].every(record => record.status === 'failed'));
 const beforeRejectedRetry = requests.length;
+const beforeRejectedWarnings = warnings.length;
+await sync.flush();
 await sync.flush();
 assert.equal(requests.length, beforeRejectedRetry);
+assert.equal(warnings.length, beforeRejectedWarnings, 'Specific and summary rejection messages must not alternate');
 assert.ok(warnings.some(message => message.includes('Song deleted')));
 
 storageFailure = true;
