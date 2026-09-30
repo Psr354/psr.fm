@@ -2,16 +2,11 @@
 
 **Pemutar musik pribadi di server sendiri.**
 
-<!-- Badge build dan version berikut adalah placeholder. Ganti saat CI dan rilis tersedia. -->
-![Build placeholder](https://img.shields.io/badge/build-placeholder-lightgrey)
-![Version placeholder](https://img.shields.io/badge/version-placeholder-blue)
-![License belum ditetapkan](https://img.shields.io/badge/license-belum_ditetapkan-lightgrey)
-
 psr.fm adalah aplikasi musik self-hosted untuk menyimpan koleksi audio, membuat playlist, dan mendengarkan musik dari browser. Tambahkan lagu dari YouTube atau file lokal, lalu akses koleksimu lewat komputer maupun ponsel. Akun, playlist, dan riwayat dengar disimpan di server yang kamu kelola sendiri.
 
 ![Dashboard psr.fm](static/dashboard.png)
 
-[Instalasi](#instalasi--setup) · [Penggunaan](#cara-penggunaan) · [Kontribusi](#berkontribusi) · [Kontak](#lisensi--kontak)
+[Instalasi](#instalasi--setup) · [Penggunaan](#cara-penggunaan) · [Kontribusi](#berkontribusi)
 
 ## ✨ Fitur Utama
 
@@ -227,11 +222,3 @@ node --test tests/listening.test.mjs tests/listening-sync.test.mjs
 ```
 
 Saat melaporkan bug, sertakan langkah reproduksi, perilaku yang diharapkan, serta log atau screenshot yang relevan. Hapus password, cookie, dan secret key dari lampiran.
-
-## Lisensi & Kontak
-
-**Lisensi:** repository ini belum menyertakan file `LICENSE`. Ketentuan penggunaan dan distribusi belum ditetapkan secara eksplisit; hubungi maintainer untuk konfirmasi.
-
-- **Maintainer:** [psr354](https://github.com/Psr354)
-- **Bug dan pertanyaan:** [GitHub Issues](https://github.com/Psr354/psr.fm/issues)
-- **Kontribusi kode:** [Pull Requests](https://github.com/Psr354/psr.fm/pulls)
