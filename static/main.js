@@ -3854,11 +3854,13 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     const seekFromPointer = (event) => {
         if (!el.progressBar || !el.audio.duration || isNaN(el.audio.duration)) return;
         const rect = el.progressBar.getBoundingClientRect();
+        if (!rect.width) return;
         const percent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
         const value = percent * 100;
         el.progressBar.value = value;
         el.audio.currentTime = percent * el.audio.duration;
         if (el.progressFill) el.progressFill.style.width = `${value}%`;
+        if (el.currentTime) el.currentTime.innerText = formatTime(el.audio.currentTime);
     };
 
     el.progressBar?.addEventListener('input', (e) => {
@@ -3869,11 +3871,15 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     });
 
     el.progressBar?.addEventListener('pointerdown', (event) => {
-        el.progressBar.setPointerCapture?.(event.pointerId);
         state.isSeeking = true;
         state.wasPlayingBeforeSeek = !el.audio.paused;
         if (state.wasPlayingBeforeSeek) el.audio.pause();
         seekFromPointer(event);
+        try {
+            el.progressBar.setPointerCapture?.(event.pointerId);
+        } catch (_) {
+            // Some mobile range controls manage pointer capture natively.
+        }
     });
     el.progressBar?.addEventListener('pointermove', (event) => {
         if (state.isSeeking) seekFromPointer(event);
@@ -3881,9 +3887,15 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
     const finishSeek = (event) => {
         if (!state.isSeeking) return;
-        el.progressBar.releasePointerCapture?.(event.pointerId);
+        try {
+            if (el.progressBar.hasPointerCapture?.(event.pointerId)) {
+                el.progressBar.releasePointerCapture(event.pointerId);
+            }
+        } catch (_) {
+            // The browser may already have released capture after a touch ends.
+        }
         state.isSeeking = false;
-        if (state.wasPlayingBeforeSeek) el.audio.play();
+        if (state.wasPlayingBeforeSeek) el.audio.play().catch(() => {});
     };
     el.progressBar?.addEventListener('pointerup', finishSeek);
     el.progressBar?.addEventListener('pointercancel', finishSeek);
