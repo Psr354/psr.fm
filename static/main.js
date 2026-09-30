@@ -91,8 +91,11 @@ document.addEventListener('DOMContentLoaded', () => {
         shouldBePlaying: false,
         playEventLogged: false,
         playbackSessionId: null,
+        playbackSessionPromise: null,
         offlineAudioUrl: null
     };
+    const listeningSync = new window.PsrListeningSync(document.body.dataset.userId,
+        message => showToast(message, 'error'), _originalFetch.bind(window));
 
     // ==========================================
     // DOM ELEMENT CACHING
@@ -3680,8 +3683,10 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
     });
     document.addEventListener('visibilitychange', () => {
+        if (document.hidden) flushListenLog();
         if (!document.hidden) highlightPlayingSong();
     });
+    window.addEventListener('pagehide', flushListenLog);
 
     // ==========================================
     // AUDIO EVENT LISTENERS
@@ -3736,7 +3741,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             state.playbackSessionId = null;
             const songId = state.currentPlayingSongId;
             const playbackRequestId = state.playbackRequestId;
-            logPlay(songId).then((sessionId) => {
+            state.playbackSessionPromise = logPlay(songId);
+            state.playbackSessionPromise.then((sessionId) => {
                 if (
                     String(state.currentPlayingSongId) === String(songId)
                     && state.playbackRequestId === playbackRequestId
@@ -3820,26 +3826,25 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     }
 
     function flushListenLog() {
-        if (state.currentPlayingSongId && state.lastLoggedTime > 0) {
+        if (state.currentPlayingSongId) {
             const delta = el.audio.currentTime - state.lastLoggedTime;
             if (delta > 0) {
                 logListenDuration(state.currentPlayingSongId, delta);
             }
-            state.lastLoggedTime = 0;
+            state.lastLoggedTime = el.audio.currentTime;
         }
     }
 
-    function logListen(songId, seconds) {
-        if (!state.playbackSessionId) return;
-        fetch('/api/listen', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                song_id: songId,
-                seconds,
-                playback_session_id: state.playbackSessionId,
-            })
-        }).catch(e => console.error(e));
+    async function logListen(songId, seconds) {
+        // Capture this playback's session before a track switch or repeat.
+        const session = state.playbackSessionPromise || state.playbackSessionId;
+        const occurredAt = new Date().toISOString();
+        try {
+            const sessionId = await session;
+            if (sessionId) await listeningSync.listen(songId, sessionId, seconds, occurredAt);
+        } catch (error) {
+            console.error('Listening log could not be sent:', error);
+        }
     }
 
     function logListenDuration(songId, seconds) {
@@ -4636,12 +4641,9 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     }
 
     async function logPlay(songId) {
-        if (!songId || isOfflineMode()) return null;
+        if (!songId) return null;
         try {
-            const response = await fetch(`/api/songs/${songId}/play`, { method: 'POST' });
-            if (!response.ok) return null;
-            const data = await response.json();
-            return data.playback_session_id || null;
+            return await listeningSync.play(songId);
         } catch (error) {
             console.error(error);
             return null;
@@ -4699,6 +4701,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         state.currentPlayingSongId = String(previewSong.id);
         state.playEventLogged = false;
         state.playbackSessionId = null;
+        state.playbackSessionPromise = null;
 
         updateMediaSession(previewSong);
         state.playbackRequestId += 1;
@@ -4734,6 +4737,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         state.currentPlayingSongId = String(song.id);
         state.playEventLogged = false;
         state.playbackSessionId = null;
+        state.playbackSessionPromise = null;
 
         updateMediaSession(song);
         state.playbackRequestId += 1;
@@ -4776,7 +4780,11 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
     function playNext(isFromSongEnded = true) {
         if (state.repeatMode === 2 && isFromSongEnded) {
-            logPlay(state.currentPlayingSongId);
+            state.playbackRequestId += 1;
+            state.playEventLogged = false;
+            state.playbackSessionId = null;
+            state.playbackSessionPromise = null;
+            state.lastLoggedTime = 0;
             el.audio.currentTime = 0;
             state.shouldBePlaying = true;
             resumeCurrentSong();

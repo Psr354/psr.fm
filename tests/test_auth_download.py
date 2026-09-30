@@ -4,7 +4,8 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from datetime import datetime
+from contextlib import closing
+from datetime import datetime, timezone, timedelta
 from http.cookies import SimpleCookie
 from unittest.mock import patch
 
@@ -642,6 +643,67 @@ class AuthAndDownloadTests(unittest.TestCase):
             },
         )
         self.assertEqual(forged_response.status_code, 409)
+
+    def test_queued_play_and_listen_retries_count_once(self):
+        client = self.app_module.app.test_client()
+        setup = client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
+        headers = {'X-CSRF-Token': self._csrf_token_from_response(setup)}
+        song_id = self._create_song(duration_seconds=338)
+        started = datetime.now(timezone.utc) - timedelta(minutes=10)
+        play = {'user_id': 1, 'playback_session_id': 'psr354-retry', 'occurred_at': started.isoformat()}
+        for _ in range(3):
+            response = client.post(f'/api/songs/{song_id}/play', json=play, headers=headers)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json()['playback_session_id'], play['playback_session_id'])
+        listen = {'user_id': 1, 'song_id': song_id, 'playback_session_id': play['playback_session_id'],
+                  'event_id': 'psr354-chunk', 'seconds': 30,
+                  'occurred_at': (started + timedelta(seconds=30)).isoformat()}
+        for _ in range(3):
+            self.assertEqual(client.post('/api/listen', json=listen, headers=headers).status_code, 200)
+        self.assertEqual(client.post('/api/listen', json={**listen, 'seconds': 20}, headers=headers).status_code, 409)
+        self.assertEqual(client.post('/api/listen', json={**listen, 'user_id': 2}, headers=headers).status_code, 403)
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            self.assertEqual(conn.execute('SELECT play_count FROM songs WHERE id = ?', (song_id,)).fetchone()[0], 1)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM play_events').fetchone()[0], 1)
+            self.assertEqual(conn.execute('SELECT SUM(seconds_listened) FROM listening_logs').fetchone()[0], 30)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM listening_receipts').fetchone()[0], 1)
+
+    def test_offline_full_repeats_keep_original_period(self):
+        client = self.app_module.app.test_client()
+        setup = client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
+        headers = {'X-CSRF-Token': self._csrf_token_from_response(setup)}
+        song_id = self._create_song(duration_seconds=338)
+        started = datetime(2020, 1, 31, 23, 50, tzinfo=timezone.utc)
+        for repeat in range(3):
+            session_id = f'psr354-offline-{repeat}'
+            session_start = started + timedelta(seconds=338 * repeat)
+            play = {'user_id': 1, 'playback_session_id': session_id, 'occurred_at': session_start.isoformat()}
+            self.assertEqual(client.post(f'/api/songs/{song_id}/play', json=play, headers=headers).status_code, 200)
+            for offset in range(0, 338, 30):
+                seconds = min(30, 338 - offset)
+                listen = {'user_id': 1, 'song_id': song_id, 'playback_session_id': session_id,
+                          'event_id': f'{session_id}-{offset}', 'seconds': seconds,
+                          'occurred_at': (session_start + timedelta(seconds=offset + seconds)).isoformat()}
+                self.assertEqual(client.post('/api/listen', json=listen, headers=headers).status_code, 200)
+                self.assertEqual(client.post('/api/listen', json=listen, headers=headers).status_code, 200)
+        recap = client.get('/api/recap?period=year&year=2020').get_json()
+        self.assertEqual(recap['stats']['total_seconds'], 1014)
+        self.assertEqual(recap['stats']['total_plays'], 3)
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            self.assertEqual([row[0] for row in conn.execute('SELECT seconds_listened FROM playback_sessions')], [338, 338, 338])
+
+    def test_queued_events_reject_bad_timestamp_and_session(self):
+        client = self.app_module.app.test_client()
+        setup = client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
+        headers = {'X-CSRF-Token': self._csrf_token_from_response(setup)}
+        song_id = self._create_song()
+        for timestamp in ['invalid', 123, (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()]:
+            self.assertEqual(client.post(f'/api/songs/{song_id}/play', headers=headers,
+                                        json={'playback_session_id': 'psr354-bad', 'occurred_at': timestamp}).status_code, 400)
+        response = client.post('/api/listen', headers=headers, json={
+            'song_id': song_id, 'playback_session_id': 'psr354-missing', 'event_id': 'psr354-event', 'seconds': 5})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()['code'], 'session_missing')
 
     def test_lyrics_helpers_parse_and_clean(self):
         self.assertEqual(clean_text('Song Title (Official Video) feat. Guest'), 'Song Title')

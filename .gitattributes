@@ -1,0 +1,9 @@
+# Preserve existing files, including those with mixed line endings.
+* -text
+
+README.md text eol=lf
+app.py text eol=lf
+services/database.py text eol=lf
+tests/test_auth_download.py text eol=lf
+static/listening-sync.js text eol=lf
+tests/*.mjs text eol=lf

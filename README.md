@@ -1,346 +1,156 @@
 # psr.fm
 
-psr.fm adalah aplikasi musik self-hosted untuk download audio dari YouTube, YouTube Music, dan tautan track Spotify, menyimpan lagu di server sendiri, membuat playlist, dan streaming dari browser.
+Koleksi musik sendiri, diputar dari browser.
 
-Aplikasi ini cocok untuk server pribadi, keluarga, atau teman kecil-kecilan. Setiap user punya playlist, lagu, riwayat dengar, dan statistik sendiri.
+psr.fm adalah aplikasi musik yang kamu jalankan di komputer atau server sendiri. Tambahkan lagu dari YouTube atau file audio yang sudah kamu punya, susun playlist, lalu dengarkan lewat laptop atau HP. File musik tersimpan di servermu.
 
-![Dashboard Preview](static/dashboard.png)
+![Tampilan psr.fm](static/dashboard.png)
 
-## Fitur Utama
+## Yang bisa kamu lakukan
 
-- Multi-user dengan akun admin dan user biasa.
-- Download lagu dari YouTube ke MP3.
-- Upload file audio lokal ke library dan playlist.
-- Library Songs untuk melihat lagu yang sudah pernah didownload semua user.
-- Add lagu dari Library Songs tanpa download ulang.
-- Menu **Songs** mengelompokkan Library Songs, Download Song, dan Upload Song agar sidebar mobile lebih ringkas.
-- Peringatan kalau link YouTube yang ditempel sudah ada di Library Songs.
-- Playlist pribadi dengan urutan drag-and-drop.
-- Search lagu pribadi.
-- Lyrics biasa, synced lyrics, dan word-synced lyrics jika tersedia.
-- Edit lirik manual jika hasil pencarian tidak tersedia atau perlu dikoreksi.
-- Share Lyrics Card untuk membuat gambar PNG dari potongan lirik dengan cover lagu dan tema warna.
-- Player dengan queue, shuffle, repeat, volume, seek, A-B loop, dan equalizer 16-band.
-- Running lyric text di mini player mengikuti progress baris lirik saat lagu diputar.
-- Dashboard per user: recently added, top played, top listened, dan storage usage.
-- Frequency Focus untuk recap bulanan/tahunan: total waktu dengar, jumlah play, lagu paling sering diputar, lagu paling lama didengar, dan breakdown per bulan untuk mode tahunan.
-- Tampilan mobile dengan drawer sidebar, tombol keluar User Management, dan player bawah yang tidak menutup konten.
+- Download audio dari YouTube dan YouTube Music, atau tambahkan lagu lewat tautan track Spotify.
+- Upload file MP3, WAV, FLAC, OGG, dan M4A.
+- Buat playlist dengan cover sendiri dan atur urutan lagunya.
+- Dengarkan dengan queue, shuffle, repeat, A–B loop, dan equalizer 16-band.
+- Baca lirik yang mengikuti lagu, edit lirik, dan bagikan potongannya sebagai gambar.
+- Simpan playlist di browser untuk didengarkan offline.
+- Lihat lagu yang paling sering diputar dan waktu dengarmu lewat **Frequency Focus**.
+- Buat beberapa akun, masing-masing dengan playlist dan riwayat dengar sendiri.
 
-Dashboard menampilkan maksimal 5 lagu untuk **Recently Added**, **Top Played**, dan **Top Listened** agar halaman tetap ringan.
+## Mulai menggunakan
 
-Catatan perhitungan:
+Siapkan **Git**, **Docker**, dan **Docker Compose**. Di Windows atau macOS, kamu bisa memakai Docker Desktop. Pastikan Docker sudah berjalan dan ada ruang penyimpanan untuk koleksi musikmu.
 
-- **Home > Top Played** memakai total historis `play_count`.
-- **Frequency Focus > Plays** memakai event play bertanggal dari `play_events`, sehingga bisa dihitung per bulan atau tahun.
-- **Frequency Focus > Listening Time** memakai `listening_logs`, yaitu durasi audio yang benar-benar didengar.
-
-## Kebutuhan
-
-- Docker dan Docker Compose
-- Git
-- Koneksi internet
-- Storage kosong untuk file lagu
-
-## Cara Install
-
-### 1. Clone project
+### 1. Ambil aplikasinya
 
 ```bash
 git clone https://github.com/psr354/psr.fm.git
 cd psr.fm
 ```
 
-### 2. Buat file `.env`
+### 2. Buat konfigurasi
+
+Salin `.env.example` menjadi `.env`:
 
 ```bash
 cp .env.example .env
 ```
 
-Lalu isi `SECRET_KEY` dengan nilai random yang panjang.
-
-Contoh Linux/macOS:
+Kamu juga bisa menyalinnya lewat file manager. Buka `.env`, lalu ganti nilai `SECRET_KEY` dengan string acak yang panjang. Untuk membuatnya lewat Docker:
 
 ```bash
-printf "SECRET_KEY=%s\n" "$(openssl rand -hex 32)" > .env
+docker run --rm python:3.12-slim python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-Contoh manual:
+Salin hasilnya ke `.env` setelah `SECRET_KEY=`. Simpan key ini; jangan menggantinya setiap kali aplikasi dijalankan ulang.
 
-```env
-SECRET_KEY=ganti-dengan-random-string-yang-panjang
-```
-
-### 3. Jalankan aplikasi
+### 3. Jalankan
 
 ```bash
 docker compose up -d --build
 ```
 
-Setelah selesai, buka:
+Proses pertama membutuhkan internet untuk mengunduh dependensi. Setelah selesai, buka [http://localhost:5000](http://localhost:5000).
 
-```text
-http://localhost:5000
-```
+Jika aplikasinya berjalan di komputer lain, gunakan alamat IP komputer tersebut, misalnya `http://192.168.1.10:5000`.
 
-Jika di server lain:
+### 4. Buat akun pertama
 
-```text
-http://IP_SERVER:5000
-```
+Halaman setup akan muncul saat aplikasi pertama kali dibuka. Akun yang kamu buat di sini menjadi admin. Untuk menambahkan akun lain, buka **User Management** setelah login.
 
-## Setup Pertama
+## Tambahkan lagu pertamamu
 
-Saat pertama kali dibuka, aplikasi akan masuk ke halaman setup.
+Buat playlist lewat tombol **+** di sidebar, lalu pilih salah satu cara berikut dari menu **Songs**:
 
-1. Buat akun pertama.
-2. Akun pertama otomatis menjadi admin.
-3. Setelah itu halaman setup tidak akan muncul lagi.
-
-Admin bisa menambahkan user lain dari menu **User Management**.
-
-## Cara Pakai
-
-### Download Lagu
-
-1. Klik **Download Song**.
-2. Paste link YouTube, YouTube Music, atau track Spotify.
-3. Pilih playlist tujuan.
-4. Klik **Download**.
-
-Jika lagu sudah ada di **Library Songs**, aplikasi akan memberi peringatan dan lagu bisa langsung ditambahkan tanpa download ulang.
-
-Download menerima URL YouTube, YouTube Music, dan track Spotify dengan durasi maksimal 10 menit. Tautan Spotify dipakai sebagai metadata; audio yang cocok dicari dan diunduh dari YouTube Music/YouTube karena Spotify tidak menyediakan file audio lewat tautan track.
-
-### Upload Lagu
-
-1. Klik **Upload Song**.
-2. Pilih atau drag file audio ke modal upload.
-3. Isi judul/artis jika ingin mengganti hasil otomatis dari nama file.
-4. Pilih minimal satu playlist tujuan.
-5. Klik **Upload**.
-
-Upload menerima file MP3, WAV, FLAC, OGG, dan M4A dengan ukuran maksimal 50 MB. Jika file MP3 punya embedded cover art, cover tersebut akan ikut disimpan sebagai album art.
-
-### Library Songs
-
-Menu **Library Songs** menampilkan lagu yang sudah pernah didownload oleh semua user.
-
-Dari sini user bisa:
-
-- Cari lagu yang sudah ada.
-- Melihat apakah lagu sudah ada di library pribadi.
-- Klik **Add** untuk memasukkan lagu ke playlist tanpa paste link lagi.
-
-### Playlist
-
-- Buat playlist dari tombol plus di sidebar.
-- Buka playlist untuk melihat lagu.
-- Drag lagu untuk mengubah urutan.
-- Upload cover playlist jika ingin.
-- Delete playlist tidak menghapus file lagu.
-
-### Search
-
-Menu **Search** mencari lagu milik akun yang sedang login.
-
-Dari hasil search, lagu bisa langsung ditambahkan ke playlist lain dengan tombol **Add**.
-
-### Frequency Focus
-
-Menu **Frequency Focus** menampilkan recap listening untuk:
-
-- This Month
-- Last Month
-- This Year
-- Last Year
-
-Bagian **Most Played** dihitung dari jumlah lagu mulai diputar pada periode itu. Bagian **Most Listened** dihitung dari total detik yang didengar pada periode itu.
-
-Untuk data lama sebelum tabel `play_events` tersedia, listening time lama tetap bisa muncul, tetapi play count per periode baru akurat setelah aplikasi berjalan dengan versi ini.
-
-### Equalizer
-
-- Klik tombol **Equalizer** di player untuk membuka panel EQ.
-- Aktifkan toggle EQ untuk memakai Web Audio equalizer.
-- Pilih preset seperti Bass Boost, Rock, Pop, Jazz, Classical, Vocal, Electronic, atau Acoustic.
-- Atur 16 band frekuensi dan preamp secara manual jika ingin membuat preset custom.
-- Pengaturan EQ disimpan di browser yang sedang dipakai.
-
-### Lyrics dan Share Card
-
-- Klik tombol **Lyrics** di player untuk membuka panel lirik.
-- Jika lirik tersedia, synced lyrics bisa ditap untuk seek ke bagian lagu.
-- Klik **Edit** untuk menambahkan atau memperbaiki plain lyrics dan synced LRC lyrics secara manual.
-- Klik **Share** di panel lirik untuk membuat card dari potongan lirik.
-- Pilih teks lirik di modal untuk menentukan bagian yang masuk ke card.
-- Pilih tema warna, lalu klik **Download** untuk menyimpan PNG atau **Copy** untuk menyalin gambar ke clipboard.
-
-Share card otomatis memakai cover lagu jika tersedia dan menyesuaikan tinggi card dengan panjang lirik yang dipilih.
-
-### Mobile
-
-- Tombol menu membuka sidebar sebagai drawer.
-- Menu **Songs** membuka submenu Library Songs, Download Song, dan Upload Song.
-- Tap playlist langsung menutup drawer dan membuka playlist.
-- Tekan lama lagu sekitar 0,5 detik untuk membuka menu Play, Play next, Add to queue, Download, atau Add to playlist.
-- Player tetap berada di bawah layar; konten diberi jarak supaya tidak tertutup.
-- Panel Lyrics di mobile tetap memakai daftar baris seperti desktop; baris dapat diketuk untuk seek.
-- User Management punya tombol **Back** untuk kembali ke dashboard.
-
-## Data yang Disimpan
-
-Folder penting:
-
-| Folder | Isi |
+| Menu | Cara menambahkan lagu |
 | --- | --- |
-| `database.db/` | Database SQLite |
-| `downloads/` | File audio library |
-| `static/album_art/` | Cover lagu dan playlist |
-| `logs/` | Log aplikasi |
+| **Download Song** | Tempel tautan YouTube, YouTube Music, atau track Spotify, lalu pilih playlist tujuan. |
+| **Upload Song** | Pilih file audio dari perangkatmu dan masukkan ke playlist. |
+| **Library Songs** | Pilih lagu yang sudah tersedia di server dan klik **Add**, tanpa download ulang. |
 
-Database menyimpan akun, playlist, metadata lagu, event play, listening logs, lyrics cache/manual lyrics, dan statistik recap.
+Download dibatasi sampai **10 menit per lagu**. Upload menerima file sampai **50 MB**.
 
-Sebelum update atau pindah server, backup folder-folder di atas.
+Tautan Spotify digunakan untuk mencari judul dan artis. Audionya dicari dari YouTube Music atau YouTube, sehingga versi yang ditemukan bisa berbeda dari track Spotify.
 
-## Struktur Kode
+**Library Songs** menampilkan koleksi yang tersedia dari semua akun di server. Playlist dan riwayat dengar tetap terpisah per akun.
 
-| Path | Fungsi |
-| --- | --- |
-| `app.py` | Route Flask, auth, API playlist/song/user, upload audio, dan bootstrap aplikasi |
-| `services/database.py` | Schema SQLite, migration ringan, play events, listening logs, dan helper user/song |
-| `services/downloader.py` | Worker download YouTube, metadata, album art, dan event progress |
-| `services/lyrics.py` | Pencarian lyrics/synced lyrics via LRCLIB |
-| `static/main.js` | UI browser: player, playlist, upload modal, dashboard, Frequency Focus, equalizer, lyrics, dan user management |
-| `static/style.css` | Design system visual dan responsive behavior |
-| `templates/` | HTML halaman utama, login, setup, dan maintenance |
+## Mendengarkan
 
-## Update Aplikasi
+Klik lagu untuk mulai memutar. Gunakan queue untuk mengatur lagu berikutnya, atau aktifkan shuffle dan repeat dari player. Di HP, tekan lama sebuah lagu untuk membuka pilihan seperti **Play next** dan **Add to queue**.
+
+Tombol **Lyrics** membuka lirik jika tersedia. Kamu bisa mengetuk baris lirik yang tersinkron untuk pindah ke bagian lagu itu, memakai **Edit** untuk memperbaikinya, atau **Share** untuk membuat gambar dari potongan lirik.
+
+### Offline
+
+Buka playlist saat masih terhubung ke server, klik **Save Offline**, lalu tunggu sampai selesai. Playlist itu disimpan pada browser dan perangkat yang sedang kamu gunakan.
+
+Untuk memakai fitur offline melalui alamat server, gunakan HTTPS. Akses lokal melalui `localhost` juga mendukungnya. Ketersediaannya bergantung pada dukungan dan ruang penyimpanan browser.
+
+Riwayat pemutaran offline akan dikirim saat aplikasi dibuka kembali dan server bisa diakses. Menghapus data situs di browser juga menghapus playlist offline dan riwayat yang belum tersinkron.
+
+### Riwayat dengar
+
+Di dashboard dan **Frequency Focus**, **Most Played** menunjukkan berapa kali lagu mulai diputar, sedangkan **Most Listened** menunjukkan total waktu yang didengarkan. Kamu bisa melihat recap bulan ini, bulan lalu, tahun ini, atau tahun lalu.
+
+Jika koneksi terputus, pencatatan yang sudah tersimpan di perangkat akan dicoba lagi tanpa dihitung dua kali. Jika sinkronisasi membutuhkan login ulang atau ada data yang ditolak, aplikasi akan menampilkan pemberitahuan.
+
+## Mengelola server
+
+### Update
+
+Backup data terlebih dahulu, lalu jalankan dari folder proyek:
 
 ```bash
 git pull
 docker compose up -d --build
 ```
 
-Database migration berjalan otomatis saat aplikasi start.
+Perubahan database diterapkan otomatis saat aplikasi mulai berjalan. Jika tampilan di browser masih memakai versi lama, tutup aplikasi atau tab lalu buka kembali.
 
-Tetap disarankan backup dulu:
+### Backup
 
-```bash
-cp -r database.db database.db.backup
-cp -r downloads downloads.backup
-cp -r static/album_art album_art.backup
-```
+Simpan salinan `.env` dan folder berikut. Hentikan aplikasi sementara saat menyalin agar backup database konsisten.
 
-Jika update dari versi lama, tabel `play_events` akan dibuat otomatis. Play count periode di Frequency Focus mulai akurat dari play yang terjadi setelah update tersebut.
+| Folder | Isi |
+| --- | --- |
+| `database.db/` | Akun, playlist, metadata, lirik, dan riwayat dengar |
+| `downloads/` | File audio |
+| `static/album_art/` | Cover lagu dan playlist |
 
-## Backfill Lagu Lama
+Ketiganya disimpan di folder proyek melalui Docker volume, jadi tetap ada ketika container dijalankan ulang. `docker compose down` juga tidak menghapusnya.
 
-Jika server sudah punya lagu sebelum fitur Library Songs, lagu lama tetap akan muncul di Library Songs.
-
-Namun duplicate warning dari link YouTube akan lebih akurat jika lagu lama punya `source_id`. Untuk mencoba mengisi data itu:
+### Perintah sehari-hari
 
 ```bash
-docker exec -it psr_fm_app python scripts/backfill_song_sources.py --dry-run
-```
-
-Jika hasilnya sudah cocok:
-
-```bash
-docker exec -it psr_fm_app python scripts/backfill_song_sources.py
-```
-
-Catatan: script ini butuh internet dan mencocokkan lagu lama dari judul/artis, jadi cek hasil `--dry-run` dulu.
-
-## Perintah Berguna
-
-```bash
-# Start
-docker compose up -d
-
-# Stop
+# Hentikan aplikasi
 docker compose down
+
+# Jalankan kembali
+docker compose up -d
 
 # Restart
 docker compose restart
-
-# Rebuild setelah update
-docker compose up -d --build
 
 # Lihat log
 docker compose logs -f psr_fm
 ```
 
-Jika perubahan JavaScript atau CSS belum terlihat di HP, tutup PWA/browser lalu buka kembali. Service worker menggunakan versi cache asset agar pembaruan frontend diambil ulang.
+## Jika ada masalah
 
-## Troubleshooting
+**Halaman tidak bisa dibuka** — Pastikan Docker berjalan, lalu periksa container dengan `docker compose ps`. Pastikan port 5000 belum dipakai aplikasi lain. Jika mengakses dari perangkat lain, periksa alamat IP dan firewall server.
 
-### Tidak bisa login setelah restart
+**Download gagal** — Coba tautan lain dan lihat log aplikasi. Video yang dibatasi aksesnya atau tidak tersedia bisa gagal diunduh. Kamu tetap bisa menambahkan file audio lewat **Upload Song**.
 
-Pastikan `.env` ada dan `SECRET_KEY` tidak berubah.
+**Tidak bisa login setelah restart** — Periksa apakah `.env` masih ada dan `SECRET_KEY` sama seperti sebelumnya.
 
-### Permission denied saat download/upload
+**Menu User Management tidak muncul** — Menu ini hanya tersedia untuk akun admin.
 
-Container berjalan sebagai `root`, jadi folder data harus dimiliki `root` juga. Di Linux server, jalankan:
+**Lirik tidak tersedia** — Tidak semua lagu memiliki lirik yang bisa ditemukan otomatis. Gunakan **Edit** di panel Lyrics untuk menambahkannya sendiri.
 
-```bash
-sudo chown -R root:root database.db downloads static/album_art logs
-docker compose restart
-```
+## Akses dari internet
 
-### User Management tidak muncul
+Konfigurasi Docker bawaan cocok untuk mencoba aplikasi di komputer atau jaringan sendiri. Jika ingin mengaksesnya dari internet, gunakan HTTPS melalui reverse proxy seperti Nginx atau Caddy, simpan `SECRET_KEY` dengan baik, dan lakukan backup rutin. Konfigurasi bawaan belum ditujukan sebagai deployment publik yang siap pakai.
 
-Menu itu hanya muncul untuk admin.
+---
 
-### Lupa password admin
-
-Jika masih ada admin lain, reset lewat **User Management**.
-
-Jika tidak ada akses admin sama sekali, database perlu diedit manual atau direset.
-
-### Build Docker gagal karena network
-
-Coba ulang:
-
-```bash
-docker compose up -d --build
-```
-
-Jika masih gagal, restart Docker lalu coba lagi.
-
-## Development Check
-
-Untuk cek cepat:
-
-```bash
-python -m py_compile app.py services/database.py services/downloader.py services/lyrics.py services/metadata.py scripts/backfill_song_sources.py scripts/fetch_lyrics_batch.py
-node --check static/main.js
-```
-
-Untuk menjalankan test:
-
-```bash
-docker compose exec -T psr_fm python -m unittest -q
-```
-
-## Catatan Keamanan
-
-Konfigurasi bawaan di repo ini cocok untuk self-hosted/private use. Sebelum dibuka ke internet publik:
-
-- Pakai HTTPS.
-- Jalankan di balik reverse proxy seperti Nginx/Caddy.
-- Gunakan `SECRET_KEY` yang kuat dan stabil.
-- Batasi akses Socket.IO/CORS ke domain sendiri.
-- Jangan mengandalkan Werkzeug development server sebagai server publik.
-- Pisahkan compose development dan production jika aplikasi dipakai serius; image production sebaiknya tidak bind-mount source code aplikasi.
-- Backup database dan folder lagu secara rutin.
-
-## Tech Stack
-
-- Python + Flask
-- SQLite
-- Flask-Login
-- Flask-SocketIO
-- yt-dlp
-- FFmpeg
-- Vanilla HTML/CSS/JavaScript
-- Docker
+Dibangun dengan Python, Flask, SQLite, JavaScript, yt-dlp, dan FFmpeg.

@@ -3,7 +3,7 @@ import json
 import math
 import mimetypes
 import calendar
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import shutil
 import uuid
 import queue
@@ -1211,25 +1211,72 @@ def search_songs():
     ''', (current_user.id, search_param, search_param))
     return jsonify([dict(row) for row in cursor.fetchall()])
 
+def playback_timestamp(value):
+    """Normalize queued client timestamps to SQLite UTC, rejecting future dates."""
+    if value is None:
+        return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    if parsed.tzinfo is None:
+        raise ValueError('Timezone required')
+    parsed = parsed.astimezone(timezone.utc)
+    if parsed > datetime.now(timezone.utc) + timedelta(seconds=10):
+        raise ValueError('Future timestamp')
+    return parsed.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def valid_playback_id(value):
+    return isinstance(value, str) and 1 <= len(value) <= 128 and all(
+        c.isascii() and (c.isalnum() or c in '-_') for c in value
+    )
+
+
 @app.route('/api/listen', methods=['POST'])
 @login_required
 def log_listen():
     data = request.get_json(silent=True) or {}
     song_id = data.get('song_id')
     session_id = data.get('playback_session_id')
+    event_id = data.get('event_id')
+    if 'user_id' in data and str(data['user_id']) != str(current_user.id):
+        return jsonify({'error': 'Account changed', 'code': 'account_changed'}), 403
     try:
         seconds = float(data.get('seconds', 0))
-    except (TypeError, ValueError):
+        timestamp = playback_timestamp(data.get('occurred_at'))
+    except (TypeError, ValueError, AttributeError):
         return jsonify({'error': 'Invalid listening duration'}), 400
 
     # The player sends chunks of at most 30 seconds. Reject malformed or
     # oversized chunks so client input cannot inflate listening statistics.
     if not song_id or not session_id or not math.isfinite(seconds) or not 0 < seconds <= 30:
         return jsonify({'error': 'Invalid listening duration'}), 400
+    if event_id is not None and not valid_playback_id(event_id):
+        return jsonify({'error': 'Invalid event ID'}), 400
 
     db = get_db()
     if not get_owned_song(db, song_id):
         return jsonify({'error': 'Not found'}), 404
+    # Serialize the receipt check and accounting so concurrent retries count once.
+    db.execute('BEGIN IMMEDIATE')
+    if event_id:
+        receipt = db.execute(
+            'SELECT session_id, seconds FROM listening_receipts WHERE user_id = ? AND event_id = ?',
+            (current_user.id, event_id),
+        ).fetchone()
+        if receipt:
+            db.rollback()
+            if receipt['session_id'] != session_id or receipt['seconds'] != seconds:
+                return jsonify({'error': 'Event ID reused with different data'}), 409
+            return jsonify({'status': 'ok', 'duplicate': True})
+    playback = db.execute(
+        'SELECT started_at FROM playback_sessions WHERE id = ? AND song_id = ? AND user_id = ?',
+        (session_id, song_id, current_user.id),
+    ).fetchone()
+    if not playback:
+        db.rollback()
+        return jsonify({'error': 'Playback session missing', 'code': 'session_missing'}), 409
+    if timestamp < playback['started_at']:
+        db.rollback()
+        return jsonify({'error': 'Listening predates playback'}), 400
     accepted = db.execute(
         '''
         UPDATE playback_sessions
@@ -1242,27 +1289,50 @@ def log_listen():
         (seconds, session_id, song_id, current_user.id, seconds, seconds),
     )
     if accepted.rowcount != 1:
+        db.rollback()
         return jsonify({'error': 'Invalid or expired playback session'}), 409
     db.execute(
-        'INSERT INTO listening_logs (song_id, user_id, seconds_listened) VALUES (?, ?, ?)',
-        (song_id, current_user.id, seconds),
+        'INSERT INTO listening_logs (song_id, user_id, seconds_listened, timestamp) VALUES (?, ?, ?, ?)',
+        (song_id, current_user.id, seconds, timestamp),
     )
+    if event_id:
+        db.execute(
+            'INSERT INTO listening_receipts (user_id, event_id, session_id, seconds) VALUES (?, ?, ?, ?)',
+            (current_user.id, event_id, session_id, seconds),
+        )
     db.commit()
     return jsonify({'status': 'ok'})
 
 @app.route('/api/songs/<int:song_id>/play', methods=['POST'])
 @login_required
 def log_play(song_id):
+    data = request.get_json(silent=True) or {}
+    if 'user_id' in data and str(data['user_id']) != str(current_user.id):
+        return jsonify({'error': 'Account changed', 'code': 'account_changed'}), 403
+    session_id = data.get('playback_session_id')
+    if session_id is not None and not valid_playback_id(session_id):
+        return jsonify({'error': 'Invalid playback ID'}), 400
+    try:
+        timestamp = playback_timestamp(data.get('occurred_at'))
+    except (TypeError, ValueError, AttributeError):
+        return jsonify({'error': 'Invalid playback timestamp'}), 400
     db = get_db()
     song = get_owned_song(db, song_id)
     if not song:
         return jsonify({'error': 'Not found'}), 404
-    session_id = uuid.uuid4().hex
+    session_id = session_id or uuid.uuid4().hex
+    db.execute('BEGIN IMMEDIATE')
+    existing = db.execute('SELECT song_id, user_id FROM playback_sessions WHERE id = ?', (session_id,)).fetchone()
+    if existing:
+        db.rollback()
+        if existing['song_id'] != song_id or existing['user_id'] != current_user.id:
+            return jsonify({'error': 'Playback ID already in use'}), 409
+        return jsonify({'status': 'ok', 'playback_session_id': session_id, 'duplicate': True})
     db.execute('UPDATE songs SET play_count = play_count + 1 WHERE id = ? AND user_id = ?', (song_id, current_user.id))
-    db.execute('INSERT INTO play_events (song_id, user_id) VALUES (?, ?)', (song_id, current_user.id))
+    db.execute('INSERT INTO play_events (song_id, user_id, timestamp) VALUES (?, ?, ?)', (song_id, current_user.id, timestamp))
     db.execute(
-        'INSERT INTO playback_sessions (id, song_id, user_id, duration_seconds) VALUES (?, ?, ?, ?)',
-        (session_id, song_id, current_user.id, song['duration_seconds']),
+        'INSERT INTO playback_sessions (id, song_id, user_id, duration_seconds, started_at) VALUES (?, ?, ?, ?, ?)',
+        (session_id, song_id, current_user.id, song['duration_seconds'], timestamp),
     )
     db.commit()
     return jsonify({'status': 'ok', 'playback_session_id': session_id})

@@ -336,6 +336,17 @@ def init_db(db_path):
         CREATE INDEX IF NOT EXISTS idx_playback_sessions_user_song
         ON playback_sessions (user_id, song_id)
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS listening_receipts (
+            user_id INTEGER NOT NULL,
+            event_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            seconds REAL NOT NULL,
+            PRIMARY KEY (user_id, event_id),
+            FOREIGN KEY (session_id) REFERENCES playback_sessions (id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+    ''')
 
     # Enforce one row per YouTube source for each user when legacy data is clean
     # enough to support it. Older installations may already contain duplicates;
