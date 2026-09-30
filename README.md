@@ -1,156 +1,237 @@
-# psr.fm
+# 🎧 psr.fm
 
-Koleksi musik sendiri, diputar dari browser.
+**Pemutar musik pribadi di server sendiri.**
 
-psr.fm adalah aplikasi musik yang kamu jalankan di komputer atau server sendiri. Tambahkan lagu dari YouTube atau file audio yang sudah kamu punya, susun playlist, lalu dengarkan lewat laptop atau HP. File musik tersimpan di servermu.
+<!-- Badge build dan version berikut adalah placeholder. Ganti saat CI dan rilis tersedia. -->
+![Build placeholder](https://img.shields.io/badge/build-placeholder-lightgrey)
+![Version placeholder](https://img.shields.io/badge/version-placeholder-blue)
+![License belum ditetapkan](https://img.shields.io/badge/license-belum_ditetapkan-lightgrey)
 
-![Tampilan psr.fm](static/dashboard.png)
+psr.fm adalah aplikasi musik self-hosted untuk menyimpan koleksi audio, membuat playlist, dan mendengarkan musik dari browser. Tambahkan lagu dari YouTube atau file lokal, lalu akses koleksimu lewat komputer maupun ponsel. Akun, playlist, dan riwayat dengar disimpan di server yang kamu kelola sendiri.
 
-## Yang bisa kamu lakukan
+![Dashboard psr.fm](static/dashboard.png)
 
-- Download audio dari YouTube dan YouTube Music, atau tambahkan lagu lewat tautan track Spotify.
-- Upload file MP3, WAV, FLAC, OGG, dan M4A.
-- Buat playlist dengan cover sendiri dan atur urutan lagunya.
-- Dengarkan dengan queue, shuffle, repeat, A–B loop, dan equalizer 16-band.
-- Baca lirik yang mengikuti lagu, edit lirik, dan bagikan potongannya sebagai gambar.
-- Simpan playlist di browser untuk didengarkan offline.
-- Lihat lagu yang paling sering diputar dan waktu dengarmu lewat **Frequency Focus**.
-- Buat beberapa akun, masing-masing dengan playlist dan riwayat dengar sendiri.
+[Instalasi](#instalasi--setup) · [Penggunaan](#cara-penggunaan) · [Kontribusi](#berkontribusi) · [Kontak](#lisensi--kontak)
 
-## Mulai menggunakan
+## ✨ Fitur Utama
 
-Siapkan **Git**, **Docker**, dan **Docker Compose**. Di Windows atau macOS, kamu bisa memakai Docker Desktop. Pastikan Docker sudah berjalan dan ada ruang penyimpanan untuk koleksi musikmu.
+- **Koleksi musik:** download dari YouTube/YouTube Music, pencarian audio lewat tautan track Spotify, dan upload file lokal.
+- **Playlist pribadi:** cover, pengaturan urutan lagu, serta penambahan dari koleksi server tanpa download ulang.
+- **Player:** queue, shuffle, repeat, A–B loop, dan equalizer 16-band.
+- **Lirik:** lirik tersinkron jika tersedia, editor manual, dan gambar potongan lirik untuk dibagikan.
+- **Offline:** simpan playlist di browser dan putar tanpa koneksi ke server.
+- **Statistik:** lagu paling sering diputar, total waktu dengar, dan recap bulanan/tahunan melalui Frequency Focus.
+- **Multi-user:** akun admin dan pengguna, dengan playlist serta riwayat dengar masing-masing.
+- **Sinkronisasi listening:** antrean lokal dan retry saat koneksi pulih, dengan perlindungan terhadap pencatatan ganda.
 
-### 1. Ambil aplikasinya
+## 🛠️ Tech Stack
+
+| Komponen | Teknologi |
+| --- | --- |
+| Backend | Python 3.12, Flask, Flask-Login, Flask-SocketIO |
+| Database | SQLite |
+| Frontend | HTML, CSS, JavaScript, Web Audio API |
+| Offline | Service Worker, Cache API, IndexedDB |
+| Audio | yt-dlp, FFmpeg, Mutagen |
+| Deployment | Docker, Docker Compose |
+
+## Prasyarat
+
+Untuk menjalankan aplikasi dengan Docker:
+
+- **Git** untuk mengambil repository.
+- **Docker** dengan **Docker Compose v2**. Docker Desktop dapat digunakan di Windows dan macOS.
+- Koneksi internet untuk build pertama dan download lagu.
+- Ruang penyimpanan untuk file audio dan database.
+- Port **5000** yang tersedia.
+
+Python dan FFmpeg sudah terpasang di image Docker. Node.js tidak diperlukan untuk menjalankan aplikasi; **Node.js 18+** hanya diperlukan jika ingin menjalankan tes JavaScript.
+
+## 🚀 Instalasi & Setup
+
+### 1. Clone repository
 
 ```bash
-git clone https://github.com/psr354/psr.fm.git
+git clone https://github.com/Psr354/psr.fm.git
 cd psr.fm
 ```
 
-### 2. Buat konfigurasi
+### 2. Siapkan konfigurasi
 
-Salin `.env.example` menjadi `.env`:
+Salin file contoh:
 
 ```bash
 cp .env.example .env
 ```
 
-Kamu juga bisa menyalinnya lewat file manager. Buka `.env`, lalu ganti nilai `SECRET_KEY` dengan string acak yang panjang. Untuk membuatnya lewat Docker:
+Di PowerShell, gunakan:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Buat secret key acak dengan Docker:
 
 ```bash
 docker run --rm python:3.12-slim python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-Salin hasilnya ke `.env` setelah `SECRET_KEY=`. Simpan key ini; jangan menggantinya setiap kali aplikasi dijalankan ulang.
+Buka `.env` dan ganti nilai `SECRET_KEY` dengan hasil perintah tersebut:
 
-### 3. Jalankan
+```dotenv
+SECRET_KEY=<hasil-string-acak>
+```
+
+Pertahankan key yang sama saat restart atau update. Jangan masukkan `.env` ke Git.
+
+### 3. Build dan jalankan
 
 ```bash
 docker compose up -d --build
 ```
 
-Proses pertama membutuhkan internet untuk mengunduh dependensi. Setelah selesai, buka [http://localhost:5000](http://localhost:5000).
+Docker akan memasang dependensi Python dan FFmpeg, lalu menjalankan aplikasi. Periksa statusnya:
 
-Jika aplikasinya berjalan di komputer lain, gunakan alamat IP komputer tersebut, misalnya `http://192.168.1.10:5000`.
+```bash
+docker compose ps
+```
 
-### 4. Buat akun pertama
+Buka **[http://localhost:5000](http://localhost:5000)**. Jika aplikasi berjalan di server lain, gunakan `http://<alamat-ip-server>:5000`.
 
-Halaman setup akan muncul saat aplikasi pertama kali dibuka. Akun yang kamu buat di sini menjadi admin. Untuk menambahkan akun lain, buka **User Management** setelah login.
+### 4. Buat akun admin
 
-## Tambahkan lagu pertamamu
+Pada kunjungan pertama, halaman setup akan meminta username dan password. Akun pertama menjadi admin dan dapat menambahkan pengguna lewat **User Management**.
 
-Buat playlist lewat tombol **+** di sidebar, lalu pilih salah satu cara berikut dari menu **Songs**:
+## Cara Penggunaan
 
-| Menu | Cara menambahkan lagu |
-| --- | --- |
-| **Download Song** | Tempel tautan YouTube, YouTube Music, atau track Spotify, lalu pilih playlist tujuan. |
-| **Upload Song** | Pilih file audio dari perangkatmu dan masukkan ke playlist. |
-| **Library Songs** | Pilih lagu yang sudah tersedia di server dan klik **Add**, tanpa download ulang. |
+### Tambahkan musik
 
-Download dibatasi sampai **10 menit per lagu**. Upload menerima file sampai **50 MB**.
+1. Buat playlist melalui tombol **+** di sidebar.
+2. Buka menu **Songs** dan pilih cara menambahkan lagu.
+3. Pilih playlist tujuan, lalu mulai memutar lagu.
 
-Tautan Spotify digunakan untuk mencari judul dan artis. Audionya dicari dari YouTube Music atau YouTube, sehingga versi yang ditemukan bisa berbeda dari track Spotify.
+| Menu | Kegunaan | Batas |
+| --- | --- | --- |
+| **Download Song** | Tempel tautan YouTube, YouTube Music, atau track Spotify. | Maksimal 10 menit per lagu |
+| **Upload Song** | Upload MP3, WAV, FLAC, OGG, atau M4A. | Maksimal 50 MB per file |
+| **Library Songs** | Tambahkan lagu yang sudah tersedia di server. | Koleksi tersedia dari semua akun |
 
-**Library Songs** menampilkan koleksi yang tersedia dari semua akun di server. Playlist dan riwayat dengar tetap terpisah per akun.
+> Tautan Spotify digunakan sebagai metadata untuk mencari audio di YouTube Music/YouTube. Versi audio yang ditemukan dapat berbeda dari track Spotify.
 
-## Mendengarkan
+### Gunakan player dan lirik
 
-Klik lagu untuk mulai memutar. Gunakan queue untuk mengatur lagu berikutnya, atau aktifkan shuffle dan repeat dari player. Di HP, tekan lama sebuah lagu untuk membuka pilihan seperti **Play next** dan **Add to queue**.
+Klik lagu untuk memutar. Gunakan queue untuk menentukan urutan berikutnya, atau aktifkan shuffle dan repeat. Di ponsel, tekan lama lagu untuk membuka pilihan seperti **Play next** dan **Add to queue**.
 
-Tombol **Lyrics** membuka lirik jika tersedia. Kamu bisa mengetuk baris lirik yang tersinkron untuk pindah ke bagian lagu itu, memakai **Edit** untuk memperbaikinya, atau **Share** untuk membuat gambar dari potongan lirik.
+Buka **Lyrics** untuk membaca lirik. Jika tersedia, baris lirik tersinkron dapat diketuk untuk berpindah posisi. Gunakan **Edit** untuk memperbaiki lirik atau **Share** untuk membuat gambar potongan lirik.
 
-### Offline
+### Simpan playlist offline
 
-Buka playlist saat masih terhubung ke server, klik **Save Offline**, lalu tunggu sampai selesai. Playlist itu disimpan pada browser dan perangkat yang sedang kamu gunakan.
+Buka playlist saat terhubung ke server, pilih **Save Offline**, dan tunggu hingga selesai. Playlist tersimpan pada browser dan perangkat yang digunakan.
 
-Untuk memakai fitur offline melalui alamat server, gunakan HTTPS. Akses lokal melalui `localhost` juga mendukungnya. Ketersediaannya bergantung pada dukungan dan ruang penyimpanan browser.
+Fitur offline memerlukan browser yang mendukung Service Worker dan akses melalui **HTTPS** atau **localhost**. Riwayat offline akan disinkronkan ketika aplikasi dibuka dan server kembali tersedia. Menghapus data situs juga menghapus koleksi offline dan antrean yang belum tersinkron.
 
-Riwayat pemutaran offline akan dikirim saat aplikasi dibuka kembali dan server bisa diakses. Menghapus data situs di browser juga menghapus playlist offline dan riwayat yang belum tersinkron.
+### Lihat recap
 
-### Riwayat dengar
+Buka **Frequency Focus** untuk melihat recap bulan atau tahun. **Most Played** menghitung berapa kali lagu mulai diputar; **Most Listened** menghitung total waktu yang didengarkan.
 
-Di dashboard dan **Frequency Focus**, **Most Played** menunjukkan berapa kali lagu mulai diputar, sedangkan **Most Listened** menunjukkan total waktu yang didengarkan. Kamu bisa melihat recap bulan ini, bulan lalu, tahun ini, atau tahun lalu.
+## Pengelolaan Aplikasi
 
-Jika koneksi terputus, pencatatan yang sudah tersimpan di perangkat akan dicoba lagi tanpa dihitung dua kali. Jika sinkronisasi membutuhkan login ulang atau ada data yang ditolak, aplikasi akan menampilkan pemberitahuan.
+### Perintah dasar
 
-## Mengelola server
+```bash
+# Lihat log
+docker compose logs -f psr_fm
+
+# Restart aplikasi
+docker compose restart
+
+# Hentikan aplikasi
+docker compose down
+
+# Jalankan kembali
+docker compose up -d
+```
 
 ### Update
 
-Backup data terlebih dahulu, lalu jalankan dari folder proyek:
+Backup data terlebih dahulu, lalu jalankan:
 
 ```bash
 git pull
 docker compose up -d --build
 ```
 
-Perubahan database diterapkan otomatis saat aplikasi mulai berjalan. Jika tampilan di browser masih memakai versi lama, tutup aplikasi atau tab lalu buka kembali.
+Migrasi database berjalan otomatis saat aplikasi mulai. Jika tampilan masih memakai versi lama, tutup tab atau aplikasi lalu buka kembali.
 
 ### Backup
 
-Simpan salinan `.env` dan folder berikut. Hentikan aplikasi sementara saat menyalin agar backup database konsisten.
+Hentikan aplikasi sementara agar salinan database konsisten. Simpan `.env` beserta folder berikut:
 
-| Folder | Isi |
+| Folder | Data |
 | --- | --- |
 | `database.db/` | Akun, playlist, metadata, lirik, dan riwayat dengar |
 | `downloads/` | File audio |
 | `static/album_art/` | Cover lagu dan playlist |
 
-Ketiganya disimpan di folder proyek melalui Docker volume, jadi tetap ada ketika container dijalankan ulang. `docker compose down` juga tidak menghapusnya.
+Data tersebut disimpan di folder proyek melalui bind mount dan tetap ada setelah `docker compose down`.
 
-### Perintah sehari-hari
+### Pemecahan masalah
 
-```bash
-# Hentikan aplikasi
-docker compose down
+| Masalah | Pemeriksaan awal |
+| --- | --- |
+| Halaman tidak terbuka | Periksa `docker compose ps`, port 5000, alamat IP, dan firewall. |
+| Download gagal | Periksa log dan ketersediaan sumber audio; coba tautan lain atau upload file lokal. |
+| Login bermasalah setelah restart | Pastikan `.env` tersedia dan `SECRET_KEY` tidak berubah. |
+| User Management tidak terlihat | Pastikan akun yang digunakan adalah admin. |
+| Lirik tidak ditemukan | Tambahkan lirik melalui **Edit** di panel Lyrics. |
 
-# Jalankan kembali
-docker compose up -d
+Untuk akses melalui internet, gunakan HTTPS dan reverse proxy. Konfigurasi Docker bawaan ditujukan untuk penggunaan lokal atau pribadi dan perlu disesuaikan sebelum deployment publik.
 
-# Restart
-docker compose restart
+## Struktur Folder
 
-# Lihat log
-docker compose logs -f psr_fm
+```text
+psr.fm/
+├── app.py                  # Aplikasi Flask dan API
+├── services/               # Database, download, metadata, dan lirik
+├── static/                 # JavaScript, CSS, ikon, dan service worker
+├── templates/              # Halaman HTML
+├── scripts/                # Utilitas pengelolaan data
+├── tests/                  # Tes backend dan player
+├── downloads/              # File audio (dibuat saat runtime)
+├── database.db/            # Database SQLite (dibuat saat runtime)
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+└── .env.example
 ```
 
-## Jika ada masalah
+## 🤝 Berkontribusi
 
-**Halaman tidak bisa dibuka** — Pastikan Docker berjalan, lalu periksa container dengan `docker compose ps`. Pastikan port 5000 belum dipakai aplikasi lain. Jika mengakses dari perangkat lain, periksa alamat IP dan firewall server.
+Bug report dan pull request dapat diajukan melalui GitHub. Untuk perubahan besar, buka issue terlebih dahulu agar cakupannya dapat dibahas.
 
-**Download gagal** — Coba tautan lain dan lihat log aplikasi. Video yang dibatasi aksesnya atau tidak tersedia bisa gagal diunduh. Kamu tetap bisa menambahkan file audio lewat **Upload Song**.
+1. Fork repository dan buat branch, misalnya `fix/listening-sync`.
+2. Buat perubahan yang terfokus dan tambahkan tes jika mengubah perilaku aplikasi.
+3. Jalankan pemeriksaan yang sesuai.
+4. Buka pull request dengan penjelasan perubahan dan hasil pengujian.
 
-**Tidak bisa login setelah restart** — Periksa apakah `.env` masih ada dan `SECRET_KEY` sama seperti sebelumnya.
+Tes backend menggunakan container yang sudah berjalan:
 
-**Menu User Management tidak muncul** — Menu ini hanya tersedia untuk akun admin.
+```bash
+docker compose exec -T psr_fm python -m unittest -q
+```
 
-**Lirik tidak tersedia** — Tidak semua lagu memiliki lirik yang bisa ditemukan otomatis. Gunakan **Edit** di panel Lyrics untuk menambahkannya sendiri.
+Tes player dan antrean sinkronisasi dijalankan dari folder proyek dengan Node.js:
 
-## Akses dari internet
+```bash
+node --test tests/listening.test.mjs tests/listening-sync.test.mjs
+```
 
-Konfigurasi Docker bawaan cocok untuk mencoba aplikasi di komputer atau jaringan sendiri. Jika ingin mengaksesnya dari internet, gunakan HTTPS melalui reverse proxy seperti Nginx atau Caddy, simpan `SECRET_KEY` dengan baik, dan lakukan backup rutin. Konfigurasi bawaan belum ditujukan sebagai deployment publik yang siap pakai.
+Saat melaporkan bug, sertakan langkah reproduksi, perilaku yang diharapkan, serta log atau screenshot yang relevan. Hapus password, cookie, dan secret key dari lampiran.
 
----
+## Lisensi & Kontak
 
-Dibangun dengan Python, Flask, SQLite, JavaScript, yt-dlp, dan FFmpeg.
+**Lisensi:** repository ini belum menyertakan file `LICENSE`. Ketentuan penggunaan dan distribusi belum ditetapkan secara eksplisit; hubungi maintainer untuk konfirmasi.
+
+- **Maintainer:** [psr354](https://github.com/Psr354)
+- **Bug dan pertanyaan:** [GitHub Issues](https://github.com/Psr354/psr.fm/issues)
+- **Kontribusi kode:** [Pull Requests](https://github.com/Psr354/psr.fm/pulls)

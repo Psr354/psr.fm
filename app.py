@@ -1764,41 +1764,4 @@ def get_recap():
         for m in sorted(monthly_stats):
                         # Top song per month by listening time.
             top_song = db.execute('''
-                                SELECT s.title, s.artist, s.album_art,
-                                             SUM(l.seconds_listened) as total_listened
-                                FROM listening_logs l JOIN songs s ON l.song_id = s.id
-                                WHERE l.user_id = ? AND strftime('%m', l.timestamp) = ?
-                                    AND l.timestamp >= ? AND l.timestamp <= ?
-                                GROUP BY s.id ORDER BY total_listened DESC LIMIT 1
-                        ''', (current_user.id, f'{m:02d}', start_str, end_str)).fetchone()
-            monthly_breakdown.append({
-                'month': month_names[m],
-                'month_num': m,
-                'total_seconds': monthly_stats[m]['total_seconds'],
-                'unique_songs': monthly_stats[m]['unique_songs'],
-                'total_plays': monthly_stats[m]['total_plays'],
-                'top_song': dict(top_song) if top_song else None
-            })
-
-    stats = dict(stats_row) if stats_row else {"total_seconds": 0, "unique_songs": 0}
-    stats["total_plays"] = plays_row["total_plays"] if plays_row else 0
-
-    result = {
-        "period": {
-            "type": period,
-            "start": start_date.isoformat(),
-            "end": end_date.isoformat(),
-            "label": label
-        },
-        "top_played": [dict(r) for r in top_played_rows],
-        "top_listened": [dict(r) for r in top_listened_rows],
-        "stats": stats
-    }
-    if monthly_breakdown:
-        result["monthly_breakdown"] = monthly_breakdown
-
-    return jsonify(result)
-
-
-if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
+                           
