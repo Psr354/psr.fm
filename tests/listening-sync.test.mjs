@@ -157,7 +157,7 @@ await sync.flush();
 await sync.flush();
 assert.equal(requests.length, beforeRejectedRetry);
 assert.equal(warnings.length, beforeRejectedWarnings, 'Specific and summary rejection messages must not alternate');
-assert.ok(warnings.some(message => message.includes('Song deleted')));
+assert.deepEqual(warnings.slice(beforeRejectedWarnings), [], 'Rejected listening records must remain silent for users');
 
 storageFailure = true;
 await assert.rejects(sync.play(1), /Quota exceeded/);
