@@ -695,12 +695,46 @@ document.addEventListener('DOMContentLoaded', () => {
             content.className = 'player-lyric-content';
             el.playerLyric.replaceChildren(content);
         }
-        content.innerHTML = markup;
+        const lyricChanged = content.dataset.lyricText !== text;
+        if (lyricChanged) {
+            content.innerHTML = markup;
+            content.dataset.lyricText = text;
+        } else {
+            const incoming = document.createElement('template');
+            incoming.innerHTML = markup;
+            const currentWords = content.querySelectorAll('.lyric-word');
+            const incomingWords = incoming.content.querySelectorAll('.lyric-word');
+            if (currentWords.length !== incomingWords.length) {
+                content.innerHTML = markup;
+            } else {
+                incomingWords.forEach((word, index) => {
+                    const currentWord = currentWords[index];
+                    currentWord.className = word.className;
+                    currentWord.style.cssText = word.style.cssText;
+                    const currentChars = currentWord.querySelectorAll('.lyric-char');
+                    word.querySelectorAll('.lyric-char').forEach((character, charIndex) => {
+                        if (!currentChars[charIndex]) return;
+                        currentChars[charIndex].className = character.className;
+                    });
+                });
+            }
+        }
         el.playerLyric.hidden = false;
         const distance = Math.max(0, content.scrollWidth - el.playerLyric.clientWidth);
-        const boundedProgress = Math.max(0, Math.min(100, progress));
-        el.playerLyric.style.setProperty('--player-lyric-offset', `${-(distance * boundedProgress / 100)}px`);
-        el.playerLyric.classList.toggle('is-overflowing', distance > 4);
+        if (distance > 4) {
+            el.playerLyric.style.setProperty('--player-lyric-distance', `${distance}px`);
+            el.playerLyric.style.setProperty('--player-lyric-duration', `${Math.max(7, distance / 18)}s`);
+            if (lyricChanged) {
+                content.style.animation = 'none';
+                content.offsetWidth;
+                content.style.animation = '';
+            }
+            el.playerLyric.classList.add('is-overflowing');
+        } else {
+            el.playerLyric.classList.remove('is-overflowing');
+            el.playerLyric.style.removeProperty('--player-lyric-distance');
+            el.playerLyric.style.removeProperty('--player-lyric-duration');
+        }
     }
 
     function resetPlayerLyric() {
@@ -708,7 +742,8 @@ document.addEventListener('DOMContentLoaded', () => {
         el.playerLyric.replaceChildren();
         el.playerLyric.hidden = true;
         el.playerLyric.classList.remove('is-overflowing');
-        el.playerLyric.style.removeProperty('--player-lyric-offset');
+        el.playerLyric.style.removeProperty('--player-lyric-distance');
+        el.playerLyric.style.removeProperty('--player-lyric-duration');
     }
 
     function syncMobileViewport() {
