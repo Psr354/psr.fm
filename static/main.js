@@ -4085,6 +4085,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         addSongsList.innerHTML = '';
         if (!songs.length) {
             addSongsList.innerHTML = '<p class="empty-compact">No songs found in Library Songs.</p>';
+            updateAddSongsCount();
             return;
         }
         songs.forEach((song) => {
@@ -4112,11 +4113,18 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             }
             addSongsList.appendChild(row);
         });
+        updateAddSongsCount();
+    }
+
+    function getAddSongsSelectedIds() {
+        if (!addSongsList) return [...addSongsSelected];
+        return [...addSongsList.querySelectorAll('input[type="checkbox"]:checked:not(:disabled)')]
+            .map(checkbox => checkbox.value);
     }
 
     function updateAddSongsCount() {
         if (!confirmAddSongsBtn) return;
-        const count = addSongsSelected.size;
+        const count = getAddSongsSelectedIds().length;
         confirmAddSongsBtn.disabled = count === 0;
         if (addSongsCountLabel) addSongsCountLabel.innerText = count ? `(${count})` : '';
     }
@@ -4124,12 +4132,14 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     async function loadAddSongsList(query = '') {
         if (!addSongsList) return;
         addSongsList.innerHTML = '<p class="empty-compact">Loading Library Songs...</p>';
+        updateAddSongsCount();
         try {
             const suffix = query ? `?q=${encodeURIComponent(query)}` : '';
             const songs = await (await fetch(`/api/library-songs${suffix}`)).json();
             renderAddSongsList(songs);
         } catch (err) {
             addSongsList.innerHTML = '<p class="empty-compact">Library unavailable. Try again.</p>';
+            updateAddSongsCount();
         }
     }
 
@@ -4165,7 +4175,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
     confirmAddSongsBtn?.addEventListener('click', async () => {
         const playlistId = state.currentPlaylistId;
-        const songIds = [...addSongsSelected];
+        const songIds = getAddSongsSelectedIds();
         if (!playlistId || songIds.length === 0) return;
 
         confirmAddSongsBtn.disabled = true;
