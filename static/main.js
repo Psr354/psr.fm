@@ -4158,6 +4158,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (e.target === addSongsModal) closeAddSongsModal();
     });
     addSongsSearchInput?.addEventListener('input', debounce((e) => {
+        addSongsSelected.clear();
+        updateAddSongsCount();
         loadAddSongsList(e.target.value.trim());
     }, 300));
 
