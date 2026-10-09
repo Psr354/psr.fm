@@ -86,6 +86,8 @@ document.addEventListener('DOMContentLoaded', () => {
         pendingLibrarySong: null,
         lastDownloadRequest: null,
         librarySongs: [],
+        libraryPage: 1,
+        libraryQuery: '',
         offlineMode: false,
         playbackRequestId: 0,
         playbackRetryCount: 0,
@@ -3995,14 +3997,19 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
     }, 300));
 
-    async function loadLibrarySongs(query = '') {
+    async function loadLibrarySongs(query = state.libraryQuery, page = state.libraryPage) {
         const libraryList = document.getElementById('library-songs-list');
         if (!libraryList) return;
+        const pageSize = 50;
+        state.libraryQuery = query;
+        state.libraryPage = page;
         try {
-            const suffix = query ? `?q=${encodeURIComponent(query)}` : '';
+            const params = new URLSearchParams({limit: pageSize, offset: (page - 1) * pageSize});
+            if (query) params.set('q', query);
+            const suffix = `?${params.toString()}`;
             const songs = await (await fetch(`/api/library-songs${suffix}`)).json();
             state.librarySongs = songs;
-            renderLibrarySongs(songs);
+            renderLibrarySongs(songs, page, pageSize);
         } catch (err) {
             renderEmptyState(libraryList, {
                 icon: 'fa-triangle-exclamation',
@@ -4012,12 +4019,17 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
     }
 
-    function renderLibrarySongs(songs) {
+    function renderLibrarySongs(songs, page = state.libraryPage, pageSize = 50) {
         const container = document.getElementById('library-songs-list');
+        const pagination = document.getElementById('library-pagination');
+        const previousButton = document.getElementById('library-prev-page');
+        const nextButton = document.getElementById('library-next-page');
+        const pageLabel = document.getElementById('library-page-label');
         if (!container) return;
 
         container.innerHTML = '';
         if (!songs.length) {
+            if (pagination) pagination.hidden = true;
             renderEmptyState(container, {
                 icon: 'fa-record-vinyl',
                 title: 'No songs in Library Songs yet',
@@ -4025,6 +4037,11 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             });
             return;
         }
+
+        if (pagination) pagination.hidden = false;
+        if (previousButton) previousButton.disabled = page === 1;
+        if (nextButton) nextButton.disabled = songs.length < pageSize;
+        if (pageLabel) pageLabel.textContent = `Page ${page}`;
 
         songs.forEach((song) => {
             const div = document.createElement('div');
@@ -4066,8 +4083,16 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     }
 
     document.getElementById('library-search-input')?.addEventListener('input', debounce((e) => {
-        loadLibrarySongs(e.target.value.trim());
+        loadLibrarySongs(e.target.value.trim(), 1);
     }, 300));
+
+    document.getElementById('library-prev-page')?.addEventListener('click', () => {
+        if (state.libraryPage > 1) loadLibrarySongs(state.libraryQuery, state.libraryPage - 1);
+    });
+
+    document.getElementById('library-next-page')?.addEventListener('click', () => {
+        loadLibrarySongs(state.libraryQuery, state.libraryPage + 1);
+    });
 
     // ==========================================
     // ADD SONGS TO PLAYLIST (from Library Songs)
@@ -4117,9 +4142,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     }
 
     function getAddSongsSelectedIds() {
-        if (!addSongsList) return [...addSongsSelected];
-        return [...addSongsList.querySelectorAll('input[type="checkbox"]:checked:not(:disabled)')]
-            .map(checkbox => checkbox.value);
+        return [...addSongsSelected];
     }
 
     function updateAddSongsCount() {
@@ -4168,8 +4191,6 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (e.target === addSongsModal) closeAddSongsModal();
     });
     addSongsSearchInput?.addEventListener('input', debounce((e) => {
-        addSongsSelected.clear();
-        updateAddSongsCount();
         loadAddSongsList(e.target.value.trim());
     }, 300));
 

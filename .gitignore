@@ -45,6 +45,8 @@ Thumbs.db
 services/old.py
 *.old
 *backup*
+scripts/import_server_archive.py
+server-import/archive/source/app.py.before-null-fix
 .github/
 
 # ==========================================

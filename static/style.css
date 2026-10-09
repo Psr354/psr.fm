@@ -744,6 +744,9 @@ button { touch-action: manipulation; }
 .library-warning strong { display: block; margin-bottom: 2px; }
 .library-warning span { color: var(--text-secondary); }
 .library-song-item { cursor: default; }
+.library-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 20px 0 8px; color: var(--text-secondary); font-size: 13px; }
+.library-pagination .icon-btn { width: 36px; height: 36px; }
+.library-pagination .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 .library-song-meta {
     display: flex;
     align-items: center;
