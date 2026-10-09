@@ -63,6 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentPlaylist: null,
         lyricsPanelOpen: false,
         lyricsFocusMode: false,
+        lyricsAnimationMode: 'detail',
         syncedLyrics: [],
         wordSyncedLyrics: [],
         plainLyrics: '',
@@ -147,6 +148,8 @@ document.addEventListener('DOMContentLoaded', () => {
         lyricsRetryBtn: document.getElementById('lyrics-retry-btn'),
         lyricsEditBtn: document.getElementById('lyrics-edit-btn'),
         lyricsShareBtn: document.getElementById('lyrics-share-btn'),
+        lyricsAnimationBtn: document.getElementById('lyrics-animation-btn'),
+        lyricsAnimationMenu: document.getElementById('lyrics-animation-menu'),
         lyricsCancelEditBtn: document.getElementById('lyrics-cancel-edit-btn'),
         lyricsSaveBtn: document.getElementById('lyrics-save-btn'),
         shareLyricsModal: document.getElementById('share-lyrics-modal'),
@@ -772,6 +775,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!el.lyricsBody || !el.lyricsTitle || !el.lyricsSubtitle) return;
 
         el.lyricsPanel?.classList.toggle('lyrics-focus-mode', state.lyricsFocusMode);
+        el.lyricsPanel?.classList.toggle('lyrics-line-animation', state.lyricsAnimationMode === 'line');
         el.lyricsFocusBtn?.classList.toggle('active', state.lyricsFocusMode);
         el.lyricsFocusBtn?.setAttribute('aria-pressed', String(state.lyricsFocusMode));
 
@@ -892,9 +896,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     word.classList.remove('spoken', 'active-word');
                     word.style.removeProperty('--word-progress');
                 });
-                    node.querySelectorAll('.lyric-char').forEach((character) => {
-                        character.classList.remove('spoken-char', 'active-char');
-                    });
+                node.querySelectorAll('.lyric-char').forEach((character) => {
+                    character.classList.remove('spoken-char', 'active-char');
+                });
             }
         });
 
@@ -912,41 +916,51 @@ document.addEventListener('DOMContentLoaded', () => {
             const activeNode = el.lyricsBody.querySelector(`.lyric-line[data-index="${activeIndex}"]`);
             activeNode?.style.setProperty('--lyric-progress', `${progress}%`);
 
-            const wordNodes = activeNode?.querySelectorAll('.lyric-word') || [];
-            const exactWordTimings = state.wordSyncedLyrics[activeIndex]?.words || [];
-            const wordWeights = [...wordNodes].map((word) => {
-                const text = word.textContent.trim();
-                const baseWeight = Math.max(text.length, 1);
-                if (/[.!?…]$/.test(text)) return baseWeight * 1.45;
-                if (/[,;:]$/.test(text)) return baseWeight * 1.2;
-                return baseWeight;
-            });
-            const totalWeight = wordWeights.reduce((sum, weight) => sum + weight, 0);
-            let elapsedWeight = 0;
-            wordNodes.forEach((word, wordIndex) => {
-                const wordWeight = wordWeights[wordIndex];
-                const wordStart = totalWeight ? elapsedWeight / totalWeight : 0;
-                elapsedWeight += wordWeight;
-                const wordEnd = totalWeight ? elapsedWeight / totalWeight : 1;
-                const exactTiming = exactWordTimings[wordIndex];
-                const wordProgress = exactTiming
-                    ? Math.min(1, Math.max(0, (currentTime - exactTiming.start) / Math.max(exactTiming.end - exactTiming.start, 0.001)))
-                    : Math.min(1, Math.max(0, (progress / 100 - wordStart) / Math.max(wordEnd - wordStart, 0.001)));
-                word.classList.toggle('spoken', wordProgress >= 1);
-                word.classList.toggle('active-word', wordProgress < 1 && wordProgress > 0);
-                word.style.setProperty('--word-progress', `${wordProgress * 100}%`);
-
-                const characterNodes = word.querySelectorAll('.lyric-char');
-                const characterCount = characterNodes.length;
-                characterNodes.forEach((character, characterIndex) => {
-                    const characterProgress = Math.min(
-                        1,
-                        Math.max(0, (wordProgress * characterCount) - characterIndex),
-                    );
-                    character.classList.toggle('spoken-char', characterProgress >= 1);
-                    character.classList.toggle('active-char', characterProgress > 0 && characterProgress < 1);
+            if (state.lyricsAnimationMode === 'detail') {
+                const wordNodes = activeNode?.querySelectorAll('.lyric-word') || [];
+                const exactWordTimings = state.wordSyncedLyrics[activeIndex]?.words || [];
+                const wordWeights = [...wordNodes].map((word) => {
+                    const text = word.textContent.trim();
+                    const baseWeight = Math.max(text.length, 1);
+                    if (/[.!?…]$/.test(text)) return baseWeight * 1.45;
+                    if (/[,;:]$/.test(text)) return baseWeight * 1.2;
+                    return baseWeight;
                 });
-            });
+                const totalWeight = wordWeights.reduce((sum, weight) => sum + weight, 0);
+                let elapsedWeight = 0;
+                wordNodes.forEach((word, wordIndex) => {
+                    const wordWeight = wordWeights[wordIndex];
+                    const wordStart = totalWeight ? elapsedWeight / totalWeight : 0;
+                    elapsedWeight += wordWeight;
+                    const wordEnd = totalWeight ? elapsedWeight / totalWeight : 1;
+                    const exactTiming = exactWordTimings[wordIndex];
+                    const wordProgress = exactTiming
+                        ? Math.min(1, Math.max(0, (currentTime - exactTiming.start) / Math.max(exactTiming.end - exactTiming.start, 0.001)))
+                        : Math.min(1, Math.max(0, (progress / 100 - wordStart) / Math.max(wordEnd - wordStart, 0.001)));
+                    word.classList.toggle('spoken', wordProgress >= 1);
+                    word.classList.toggle('active-word', wordProgress < 1 && wordProgress > 0);
+                    word.style.setProperty('--word-progress', `${wordProgress * 100}%`);
+
+                    const characterNodes = word.querySelectorAll('.lyric-char');
+                    const characterCount = characterNodes.length;
+                    characterNodes.forEach((character, characterIndex) => {
+                        const characterProgress = Math.min(
+                            1,
+                            Math.max(0, (wordProgress * characterCount) - characterIndex),
+                        );
+                        character.classList.toggle('spoken-char', characterProgress >= 1);
+                        character.classList.toggle('active-char', characterProgress > 0 && characterProgress < 1);
+                    });
+                });
+            } else {
+                activeNode?.querySelectorAll('.lyric-word').forEach((word) => {
+                    word.classList.remove('spoken', 'active-word');
+                    word.style.removeProperty('--word-progress');
+                });
+                activeNode?.querySelectorAll('.lyric-char').forEach((character) => {
+                    character.classList.remove('spoken-char', 'active-char');
+                });
+            }
         }
 
         const activeNodeForDisplay = activeIndex >= 0
@@ -3600,6 +3614,34 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         updateSyncedLyrics(true);
     });
     el.lyricsShareBtn?.addEventListener('click', openShareLyricsModal);
+    el.lyricsAnimationBtn?.addEventListener('click', () => {
+        const isOpen = el.lyricsAnimationMenu?.classList.contains('active');
+        el.lyricsAnimationMenu?.classList.toggle('active', !isOpen);
+        el.lyricsAnimationMenu?.setAttribute('aria-hidden', String(isOpen));
+        el.lyricsAnimationBtn?.setAttribute('aria-expanded', String(!isOpen));
+    });
+    el.lyricsAnimationMenu?.querySelectorAll('[data-lyrics-animation]').forEach((button) => {
+        button.addEventListener('click', () => {
+            state.lyricsAnimationMode = button.dataset.lyricsAnimation === 'line' ? 'line' : 'detail';
+            el.lyricsAnimationMenu.querySelectorAll('[data-lyrics-animation]').forEach((item) => {
+                const selected = item === button;
+                item.classList.toggle('active', selected);
+                item.setAttribute('aria-checked', String(selected));
+            });
+            el.lyricsAnimationMenu.classList.remove('active');
+            el.lyricsAnimationMenu.setAttribute('aria-hidden', 'true');
+            el.lyricsAnimationBtn?.setAttribute('aria-expanded', 'false');
+            renderLyricsPanel();
+            updateSyncedLyrics(true);
+        });
+    });
+    document.addEventListener('click', (event) => {
+        if (el.lyricsAnimationMenu && !event.target.closest('.lyrics-animation-menu-wrap')) {
+            el.lyricsAnimationMenu.classList.remove('active');
+            el.lyricsAnimationMenu.setAttribute('aria-hidden', 'true');
+            el.lyricsAnimationBtn?.setAttribute('aria-expanded', 'false');
+        }
+    });
     el.lyricsEditBtn?.addEventListener('click', () => {
         if (state.currentLyricsSongId) setLyricsEditing(true);
     });

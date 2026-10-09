@@ -514,6 +514,15 @@
             <textarea id="lyrics-synced-input" placeholder="[00:12.34] Lyric line"></textarea>
         </div>
         <div class="lyrics-actions">
+            <div class="lyrics-animation-menu-wrap">
+                <button id="lyrics-animation-btn" class="btn-secondary compact" type="button" aria-label="Change lyrics animation" aria-controls="lyrics-animation-menu" aria-expanded="false">
+                    <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i> Animasi
+                </button>
+                <div id="lyrics-animation-menu" class="lyrics-animation-menu" role="menu" aria-hidden="true">
+                    <button type="button" role="menuitemradio" data-lyrics-animation="detail" class="active" aria-checked="true">Per huruf + kata</button>
+                    <button type="button" role="menuitemradio" data-lyrics-animation="line" aria-checked="false">Per baris</button>
+                </div>
+            </div>
             <button id="lyrics-share-btn" class="btn-secondary compact"><i class="fas fa-share-alt"></i> Share</button>
             <button id="lyrics-edit-btn" class="btn-secondary compact"><i class="fas fa-pen"></i> Edit</button>
             <button id="lyrics-cancel-edit-btn" class="btn-secondary compact" style="display: none;"><i class="fas fa-times"></i> Cancel</button>

@@ -629,6 +629,46 @@ button { touch-action: manipulation; }
     gap: 8px;
 }
 
+.lyrics-animation-menu-wrap { position: relative; }
+.lyrics-animation-menu {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 8px);
+    z-index: 5;
+    display: none;
+    min-width: 168px;
+    padding: 6px;
+    border: 1px solid rgba(29, 185, 84, 0.24);
+    border-radius: 8px;
+    background: #141b18;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
+}
+.lyrics-animation-menu.active { display: grid; gap: 2px; }
+.lyrics-animation-menu button {
+    width: 100%;
+    min-height: 36px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    justify-content: flex-start;
+    font-size: 12px;
+}
+.lyrics-animation-menu button:hover,
+.lyrics-animation-menu button.active { background: rgba(29, 185, 84, 0.12); color: var(--accent-color); }
+.lyrics-panel.is-editing #lyrics-animation-btn { display: none; }
+.lyrics-line-animation .lyric-line:not(.active) { color: var(--text-secondary); opacity: 1; }
+.lyrics-line-animation .lyric-line.active .lyric-word,
+.lyrics-line-animation .lyric-line.past .lyric-word,
+.lyrics-line-animation .lyric-line.active .lyric-char,
+.lyrics-line-animation .lyric-line.past .lyric-char {
+    color: inherit;
+    opacity: 1;
+    text-shadow: none;
+}
+
 #lyrics-edit-btn {
     border-color: rgba(56, 189, 248, 0.42);
     color: #7dd3fc;
