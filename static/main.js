@@ -3861,7 +3861,20 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     });
 
     el.audio.addEventListener('error', () => {
-        if (state.shouldBePlaying) resumeCurrentSong();
+        if (!state.shouldBePlaying) return;
+        if (state.playbackRetryCount < 2) {
+            state.playbackRetryCount += 1;
+            const requestId = state.playbackRequestId;
+            setTimeout(() => {
+                if (!state.shouldBePlaying || requestId !== state.playbackRequestId) return;
+                el.audio.load();
+                resumeCurrentSong(requestId);
+            }, 250);
+            return;
+        }
+
+        state.playbackRetryCount = 0;
+        playNext(true);
     });
 
     // Media Session API: keeps background/locked-screen playback alive so tracks
