@@ -4767,6 +4767,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             }
             if (state.playbackRetryCount >= 2) {
                 console.warn('Playback could not resume', error);
+                state.playbackRetryCount = 0;
+                playNext(true);
                 return;
             }
 
@@ -4800,11 +4802,13 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (isOfflineMode()) {
             const cachedResponse = await caches.match(audioUrl, { ignoreSearch: true });
             if (await isUsableAudioResponse(cachedResponse)) {
-                state.offlineAudioUrl = URL.createObjectURL(await cachedResponse.blob());
+                const offlineAudioUrl = URL.createObjectURL(await cachedResponse.blob());
                 if (requestId !== state.playbackRequestId) {
-                    releaseOfflineAudioUrl();
+                    URL.revokeObjectURL(offlineAudioUrl);
                     return;
                 }
+                releaseOfflineAudioUrl();
+                state.offlineAudioUrl = offlineAudioUrl;
                 el.audio.src = state.offlineAudioUrl;
                 el.audio.load();
                 resumeCurrentSong(requestId);
@@ -4887,6 +4891,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         loadSongAudio(song, state.playbackRequestId).catch((error) => {
             console.error('Offline audio could not be loaded:', error);
             showToast('This song is not available offline. Save the playlist again while online.', 'error');
+            if (state.shouldBePlaying && state.currentPlayingSongId === String(song.id)) playNext(true);
         });
 
         if (el.playerTitle) el.playerTitle.innerText = song.title;
@@ -4939,13 +4944,6 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
 
         if (state.currentPlaylistSongs.length === 0) return;
-
-        if (isFromSongEnded && state.repeatMode === 0) {
-            state.shouldBePlaying = false;
-            el.audio.pause();
-            updatePlayPauseIcon(false);
-            return;
-        }
 
         // Queue is empty: the whole playlist has played through once.
         if (state.isShuffle) {

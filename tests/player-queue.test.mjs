@@ -30,6 +30,35 @@ assert.deepEqual(played, [2, 3]);
 assert.equal(state.shouldBePlaying, false, 'Repeat off stops after the final queued track');
 
 played.length = 0;
+state.currentSongIndex = 0;
+state.playQueue = [];
+state.shouldBePlaying = true;
+context.playNext(true);
+assert.deepEqual(played, [2], 'An empty queue still advances within the playlist');
+
+const activeOfflineUrl = { value: 'blob:current' };
+const revokedUrls = [];
+const offlineContext = vm.createContext({
+    state: { playbackRequestId: 2, offlineAudioUrl: activeOfflineUrl.value },
+    el: { audio: { load() {} } },
+    mediaUrlName: filename => filename,
+    URL: { revokeObjectURL(url) { revokedUrls.push(url); }, createObjectURL() { return 'blob:stale'; } },
+    releaseOfflineAudioUrl() {},
+    isOfflineMode: () => true,
+    caches: {
+        match: async () => ({ blob: async () => new Blob(['audio']) }),
+        open: async () => ({ delete() {} }),
+    },
+    isUsableAudioResponse: async () => true,
+    resumeCurrentSong() {},
+});
+const loadSongAudioStart = source.indexOf('    async function loadSongAudio(');
+const loadSongAudioEnd = source.indexOf('    function playLibrarySong(', loadSongAudioStart);
+vm.runInContext(source.slice(loadSongAudioStart, loadSongAudioEnd), offlineContext);
+await offlineContext.loadSongAudio({ filename: 'stale.mp3' }, 1);
+assert.deepEqual(revokedUrls, ['blob:stale'], 'A stale offline load only revokes its own URL');
+
+played.length = 0;
 state.currentSongIndex = 1;
 state.shouldBePlaying = true;
 context.buildQueue();
