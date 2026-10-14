@@ -1,4 +1,6 @@
 import importlib
+import io
+import json
 import os
 import sqlite3
 import sys
@@ -357,6 +359,33 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.mimetype, 'audio/mpeg')
         self.assertEqual(response.data, b'preview-audio-bytes')
+
+    def test_library_pagination_rejects_invalid_values(self):
+        client = self.app_module.app.test_client()
+        client.post('/api/setup', json={'username': 'admin', 'password': 'secret123'})
+
+        for query in ('limit=abc', 'offset=abc', 'limit=0', 'limit=501', 'offset=-1'):
+            response = client.get(f'/api/library-songs?{query}')
+            self.assertEqual(response.status_code, 400)
+
+    def test_upload_rejects_invalid_audio_and_removes_file(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={'username': 'admin', 'password': 'secret123'})
+        csrf_token = self._csrf_token_from_response(setup_response)
+        playlist_id = self._create_playlist()
+
+        response = client.post(
+            '/api/upload',
+            headers={'X-CSRF-Token': csrf_token},
+            data={
+                'playlist_ids': json.dumps([playlist_id]),
+                'file': (io.BytesIO(b'not-audio'), 'broken.mp3'),
+            },
+            content_type='multipart/form-data',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(os.listdir(self.app_module.LIBRARY_DIR), [])
 
     def test_service_worker_is_served_from_root_without_http_caching(self):
         client = self.app_module.app.test_client()

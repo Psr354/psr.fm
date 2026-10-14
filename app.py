@@ -746,8 +746,12 @@ def upload_song():
 
     from services.metadata import extract_duration
     duration = extract_duration(save_path)
+    if duration <= 0:
+        os.remove(save_path)
+        return jsonify({'error': 'The uploaded file is not a readable audio file'}), 400
 
     album_art_filename = None
+    album_art_path = None
     try:
         from mutagen.id3 import ID3, APIC
         from mutagen.mp3 import MP3 as MutagenMP3
@@ -756,44 +760,55 @@ def upload_song():
             apic = audio_file.tags.getall('APIC')[0]
             art_ext = {'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp'}.get(apic.mime, '.jpg')
             album_art_filename = f"upload_art_{uuid.uuid4().hex[:12]}{art_ext}"
-            art_path = os.path.join(ALBUM_ART_DIR, album_art_filename)
-            with open(art_path, 'wb') as art_file:
+            album_art_path = os.path.join(ALBUM_ART_DIR, album_art_filename)
+            with open(album_art_path, 'wb') as art_file:
                 art_file.write(apic.data)
     except Exception:
+        if album_art_path and os.path.exists(album_art_path):
+            os.remove(album_art_path)
         album_art_filename = None
+        album_art_path = None
 
-    cursor = db.execute(
-        '''
-        INSERT INTO songs (
-            title, artist, filename, album_art, duration_seconds,
-            source_url, source_id, lyrics, synced_lyrics, lyrics_status, lyrics_updated_at, user_id
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''',
-        (title, artist, unique_filename, album_art_filename, duration, None, None, '', '', 'none', None, current_user.id)
-    )
-    song_id = cursor.lastrowid
-
-    added_playlist_ids = []
-    for playlist_id in owned_playlist_ids:
+    try:
         cursor = db.execute(
-            'SELECT 1 FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
-            (playlist_id, song_id)
+            '''
+            INSERT INTO songs (
+                title, artist, filename, album_art, duration_seconds,
+                source_url, source_id, lyrics, synced_lyrics, lyrics_status, lyrics_updated_at, user_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (title, artist, unique_filename, album_art_filename, duration, None, None, '', '', 'none', None, current_user.id)
         )
-        if cursor.fetchone():
-            continue
-        pos_cursor = db.execute(
-            'SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_songs WHERE playlist_id = ?',
-            (playlist_id,)
-        )
-        next_position = pos_cursor.fetchone()[0]
-        db.execute(
-            'INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
-            (playlist_id, song_id, next_position)
-        )
-        added_playlist_ids.append(playlist_id)
+        song_id = cursor.lastrowid
 
-    db.commit()
+        added_playlist_ids = []
+        for playlist_id in owned_playlist_ids:
+            cursor = db.execute(
+                'SELECT 1 FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
+                (playlist_id, song_id)
+            )
+            if cursor.fetchone():
+                continue
+            pos_cursor = db.execute(
+                'SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_songs WHERE playlist_id = ?',
+                (playlist_id,)
+            )
+            next_position = pos_cursor.fetchone()[0]
+            db.execute(
+                'INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
+                (playlist_id, song_id, next_position)
+            )
+            added_playlist_ids.append(playlist_id)
+        db.commit()
+    except Exception:
+        db.rollback()
+        if os.path.exists(save_path):
+            os.remove(save_path)
+        if album_art_path and os.path.exists(album_art_path):
+            os.remove(album_art_path)
+        app.logger.exception('Uploaded song could not be saved')
+        return jsonify({'error': 'Uploaded song could not be saved'}), 500
 
     try:
         socketio.emit('song_added', {
@@ -824,11 +839,13 @@ def upload_song():
 @login_required
 def get_library_songs():
     query = request.args.get('q', '').strip()
-    limit = int(request.args.get('limit', 100))
-    offset = int(request.args.get('offset', 0))
-    
-    # Cap limit to prevent abuse
-    limit = min(limit, 500)
+    try:
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'limit and offset must be integers'}), 400
+    if not 1 <= limit <= 500 or offset < 0:
+        return jsonify({'error': 'limit must be between 1 and 500 and offset cannot be negative'}), 400
     
     search_param = f"%{query}%"
     db = get_db()
