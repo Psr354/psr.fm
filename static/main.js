@@ -92,6 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
         offlineMode: false,
         playbackRequestId: 0,
         playbackRetryCount: 0,
+        playbackRecoveryTimer: null,
         shouldBePlaying: false,
         playEventLogged: false,
         playbackSessionId: null,
@@ -3802,6 +3803,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     });
 
     el.audio.addEventListener('play', () => {
+        cancelPlaybackRecovery();
         state.shouldBePlaying = true;
         state.playbackRetryCount = 0;
         state.lastLoggedTime = el.audio.currentTime;
@@ -3835,6 +3837,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         stopLyricAnimation();
         flushListenLog();
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+        schedulePlaybackRecovery();
     });
 
     el.audio.addEventListener('seeking', () => {
@@ -3848,10 +3851,30 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     });
 
     el.audio.addEventListener('ended', () => {
+        cancelPlaybackRecovery();
         stopLyricAnimation();
         flushListenLog();
         playNext(true);
     });
+
+    el.audio.addEventListener('waiting', schedulePlaybackRecovery);
+    el.audio.addEventListener('stalled', schedulePlaybackRecovery);
+
+    function cancelPlaybackRecovery() {
+        if (state.playbackRecoveryTimer == null) return;
+        clearTimeout(state.playbackRecoveryTimer);
+        state.playbackRecoveryTimer = null;
+    }
+
+    function schedulePlaybackRecovery() {
+        if (!state.shouldBePlaying || state.isSeeking || state.playbackRecoveryTimer !== null) return;
+        const requestId = state.playbackRequestId;
+        state.playbackRecoveryTimer = setTimeout(() => {
+            state.playbackRecoveryTimer = null;
+            if (!state.shouldBePlaying || state.isSeeking || requestId !== state.playbackRequestId || el.audio.ended) return;
+            if (el.audio.paused) resumeCurrentSong(requestId);
+        }, 1500);
+    }
 
     // Mobile browsers can briefly fail a source transition while the screen is
     // locked. Retry the same track after it becomes playable instead of leaving
