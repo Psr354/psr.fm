@@ -3759,10 +3759,19 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             }
         }
     });
+    function resumePlaybackAfterBackground() {
+        if (!state.shouldBePlaying || state.isSeeking || el.audio.ended) return;
+        if (el.audio.paused) resumeCurrentSong();
+    }
+
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) flushListenLog();
-        if (!document.hidden) highlightPlayingSong();
+        else {
+            highlightPlayingSong();
+            resumePlaybackAfterBackground();
+        }
     });
+    window.addEventListener('pageshow', resumePlaybackAfterBackground);
     window.addEventListener('pagehide', flushListenLog);
 
     // ==========================================
@@ -3859,6 +3868,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
     el.audio.addEventListener('waiting', schedulePlaybackRecovery);
     el.audio.addEventListener('stalled', schedulePlaybackRecovery);
+    el.audio.addEventListener('suspend', schedulePlaybackRecovery);
+    el.audio.addEventListener('abort', schedulePlaybackRecovery);
 
     function cancelPlaybackRecovery() {
         if (state.playbackRecoveryTimer == null) return;
