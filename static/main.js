@@ -93,6 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
         playbackRequestId: 0,
         playbackRetryCount: 0,
         playbackRecoveryTimer: null,
+        trackTransitionTimer: null,
         shouldBePlaying: false,
         playEventLogged: false,
         playbackSessionId: null,
@@ -3819,6 +3820,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
     el.audio.addEventListener('play', () => {
         cancelPlaybackRecovery();
+        cancelTrackTransitionRecovery();
         if (typeof resumeEqContext === 'function') resumeEqContext();
         state.shouldBePlaying = true;
         state.playbackRetryCount = 0;
@@ -3872,6 +3874,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         stopLyricAnimation();
         flushListenLog();
         playNext(true);
+        scheduleTrackTransitionRecovery();
     });
 
     el.audio.addEventListener('waiting', schedulePlaybackRecovery);
@@ -3883,6 +3886,23 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (state.playbackRecoveryTimer == null) return;
         clearTimeout(state.playbackRecoveryTimer);
         state.playbackRecoveryTimer = null;
+    }
+
+    function cancelTrackTransitionRecovery() {
+        if (state.trackTransitionTimer == null) return;
+        clearTimeout(state.trackTransitionTimer);
+        state.trackTransitionTimer = null;
+    }
+
+    function scheduleTrackTransitionRecovery() {
+        if (typeof setTimeout !== 'function') return;
+        cancelTrackTransitionRecovery();
+        const requestId = state.playbackRequestId;
+        state.trackTransitionTimer = setTimeout(() => {
+            state.trackTransitionTimer = null;
+            if (!state.shouldBePlaying || requestId !== state.playbackRequestId || el.audio.ended) return;
+            if (el.audio.paused) resumeCurrentSong(requestId);
+        }, 2000);
     }
 
     function schedulePlaybackRecovery() {
