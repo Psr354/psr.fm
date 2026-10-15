@@ -3274,6 +3274,11 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         return eqAudioContext;
     }
 
+    function resumeEqContext() {
+        if (!state.eqEnabled || !eqAudioContext || eqAudioContext.state === 'running') return;
+        eqAudioContext.resume().catch(() => {});
+    }
+
     function attachEqSource() {
         if (!eqAudioContext || !el.audio) return;
         if (eqSource) { try { eqSource.disconnect(); } catch {} eqSource = null; }
@@ -3761,6 +3766,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     });
     function resumePlaybackAfterBackground() {
         if (!state.shouldBePlaying || state.isSeeking || el.audio.ended) return;
+        if (typeof resumeEqContext === 'function') resumeEqContext();
         if (el.audio.paused) resumeCurrentSong();
     }
 
@@ -3813,6 +3819,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
     el.audio.addEventListener('play', () => {
         cancelPlaybackRecovery();
+        if (typeof resumeEqContext === 'function') resumeEqContext();
         state.shouldBePlaying = true;
         state.playbackRetryCount = 0;
         state.lastLoggedTime = el.audio.currentTime;
@@ -3823,6 +3830,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     });
 
     el.audio.addEventListener('playing', () => {
+        if (typeof resumeEqContext === 'function') resumeEqContext();
         if (state.currentPlayingSongId && !state.playEventLogged) {
             state.playEventLogged = true;
             state.playbackSessionId = null;
@@ -4793,6 +4801,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     function resumeCurrentSong(requestId = state.playbackRequestId) {
         if (!state.shouldBePlaying || requestId !== state.playbackRequestId || !el.audio.src) return;
 
+        if (typeof resumeEqContext === 'function') resumeEqContext();
         el.audio.play().catch((error) => {
             if (!state.shouldBePlaying || requestId !== state.playbackRequestId) return;
             if (error?.name === 'NotAllowedError') {
@@ -4809,7 +4818,6 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             state.playbackRetryCount += 1;
             const retry = () => resumeCurrentSong(requestId);
             el.audio.addEventListener('canplay', retry, { once: true });
-            el.audio.load();
         });
     }
 
