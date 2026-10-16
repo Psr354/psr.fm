@@ -7,20 +7,27 @@ window.fetch = async function(url, options = {}) {
     const csrfMatch = document.cookie.match(/csrf_token=([^;]+)/);
     const csrfToken = csrfMatch ? decodeURIComponent(csrfMatch[1]) : null;
 
-    options.headers = options.headers || {};
-    if (csrfToken && ['POST', 'PUT', 'DELETE'].includes(options.method?.toUpperCase())) {
-        options.headers['X-CSRF-Token'] = csrfToken;
+    const requestMethod = options.method || (url instanceof Request ? url.method : 'GET');
+    const headers = new Headers(options.headers || (url instanceof Request ? url.headers : undefined));
+    if (csrfToken && ['POST', 'PUT', 'DELETE'].includes(requestMethod.toUpperCase())) {
+        headers.set('X-CSRF-Token', csrfToken);
     }
+    const requestOptions = {...options, headers};
 
     try {
-        const response = await _originalFetch.call(this, url, options);
+        const response = await _originalFetch.call(this, url, requestOptions);
 
         // Handle 401 Unauthorized (skip untuk auth endpoints)
         if (response.status === 401) {
-            const path = typeof url === 'string' ? url : url.toString();
-            if (!path.includes('/api/login') &&
-                !path.includes('/api/setup') &&
-                !path.includes('/api/users')) {
+            const requestUrl = new URL(
+                url instanceof Request ? url.url : url,
+                window.location.href,
+            );
+            const path = requestUrl.pathname;
+            if (path !== '/api/login' &&
+                path !== '/api/setup' &&
+                path !== '/api/users' &&
+                !path.startsWith('/api/users/')) {
                 window.location.href = '/login';
             }
         }
@@ -93,6 +100,7 @@ document.addEventListener('DOMContentLoaded', () => {
         playbackRequestId: 0,
         playbackRetryCount: 0,
         playbackRecoveryTimer: null,
+        playbackRecoveryInProgress: false,
         trackTransitionTimer: null,
         shouldBePlaying: false,
         playEventLogged: false,
@@ -380,7 +388,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function saveOfflinePlaylist(playlist) {
-        const songs = state.currentPlaylistSongs;
+        const songs = [...state.currentPlaylistSongs];
         if (!songs.length) return showToast('Add songs before saving this playlist offline', 'error');
         const button = document.getElementById('save-playlist-offline-btn');
         if (button) {
@@ -2993,19 +3001,21 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         saveBtn.disabled = true;
         try {
             if (state.isRenaming && state.currentPlaylistId) {
-                await fetch(`/api/playlists/${state.currentPlaylistId}`, {
+                const response = await fetch(`/api/playlists/${state.currentPlaylistId}`, {
                     method: 'PUT',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({name})
                 });
+                if (!response.ok) throw new Error('Failed to rename playlist');
                 if (el.playlistTitle) el.playlistTitle.innerText = name;
                 showToast('Playlist renamed!');
             } else {
-                await fetch('/api/playlists', {
+                const response = await fetch('/api/playlists', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({name})
                 });
+                if (!response.ok) throw new Error('Failed to create playlist');
                 showToast(`Playlist "${name}" created!`);
             }
             if (nameInput) nameInput.value = '';
@@ -3879,8 +3889,6 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
     el.audio.addEventListener('waiting', schedulePlaybackRecovery);
     el.audio.addEventListener('stalled', schedulePlaybackRecovery);
-    el.audio.addEventListener('suspend', schedulePlaybackRecovery);
-    el.audio.addEventListener('abort', schedulePlaybackRecovery);
 
     function cancelPlaybackRecovery() {
         if (state.playbackRecoveryTimer == null) return;
@@ -3900,19 +3908,41 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         const requestId = state.playbackRequestId;
         state.trackTransitionTimer = setTimeout(() => {
             state.trackTransitionTimer = null;
-            if (!state.shouldBePlaying || requestId !== state.playbackRequestId || el.audio.ended) return;
+            if (!state.shouldBePlaying || requestId !== state.playbackRequestId) return;
             if (el.audio.paused) resumeCurrentSong(requestId);
         }, 2000);
     }
 
     function schedulePlaybackRecovery() {
-        if (!state.shouldBePlaying || state.isSeeking || state.playbackRecoveryTimer !== null) return;
+        if (!state.shouldBePlaying || state.isSeeking || state.playbackRecoveryInProgress
+            || state.playbackRecoveryTimer !== null) return;
         const requestId = state.playbackRequestId;
+        const stalledAt = el.audio.currentTime;
         state.playbackRecoveryTimer = setTimeout(() => {
             state.playbackRecoveryTimer = null;
-            if (!state.shouldBePlaying || state.isSeeking || requestId !== state.playbackRequestId || el.audio.ended) return;
-            if (el.audio.paused) resumeCurrentSong(requestId);
-        }, 1500);
+            if (!state.shouldBePlaying || state.isSeeking || requestId !== state.playbackRequestId) return;
+            if (el.audio.currentTime > stalledAt + 0.25) return;
+            if (el.audio.paused) {
+                resumeCurrentSong(requestId);
+                return;
+            }
+
+            // A stalled media element can remain "playing" while its position
+            // stops advancing in a background tab. Reload the same source and
+            // restore its position instead of calling play() on a stuck element.
+            state.playbackRecoveryInProgress = true;
+            const position = el.audio.currentTime;
+            const restorePosition = () => {
+                state.playbackRecoveryInProgress = false;
+                if (!state.shouldBePlaying || requestId !== state.playbackRequestId) return;
+                try { el.audio.currentTime = position; } catch (_) {}
+                resumeCurrentSong(requestId);
+            };
+            el.audio.addEventListener('loadedmetadata', restorePosition, {once: true});
+            el.audio.pause();
+            cancelPlaybackRecovery();
+            el.audio.load();
+        }, 3000);
     }
 
     // Mobile browsers can briefly fail a source transition while the screen is
@@ -4099,13 +4129,19 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     // ==========================================
     // SEARCH
     // ==========================================
+    let searchRequestId = 0;
     document.getElementById('search-input')?.addEventListener('input', debounce(async (e) => {
         const query = e.target.value.trim();
         const searchResults = document.getElementById('search-results');
         if (query.length > 1) {
-            const results = await (await fetch(`/api/search?q=${encodeURIComponent(query)}`)).json();
+            const requestId = ++searchRequestId;
+            const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+            if (!response.ok || requestId !== searchRequestId) return;
+            const results = await response.json();
+            if (requestId !== searchRequestId) return;
             renderSongs(results, 'search-results', false);
         } else {
+            searchRequestId += 1;
             renderEmptyState(searchResults, {
                 icon: 'fa-search',
                 title: 'Search your library',
@@ -4406,7 +4442,11 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (deleteBtn) {
             deleteBtn.onclick = async () => {
                 if (confirm(`Delete playlist "${playlist.name}"? Songs not used by another playlist will also be deleted permanently.`)) {
-                    await fetch(`/api/playlists/${playlist.id}`, {method: 'DELETE'});
+                    const response = await fetch(`/api/playlists/${playlist.id}`, {method: 'DELETE'});
+                    if (!response.ok) {
+                        const data = await response.json().catch(() => ({}));
+                        throw new Error(data.error || 'Failed to delete playlist');
+                    }
                     state.currentPlaylistId = null;
                     loadPlaylists();
                     showView('dashboard');

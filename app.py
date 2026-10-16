@@ -16,6 +16,7 @@ from flask_socketio import SocketIO, join_room
 from flask_wtf.csrf import CSRFProtect, generate_csrf, validate_csrf
 from flask_compress import Compress
 from PIL import Image
+from werkzeug.middleware.proxy_fix import ProxyFix
 import io
 import time
 from threading import Lock
@@ -34,7 +35,18 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', os.urandom(32).hex())
+secret_key = os.environ.get('SECRET_KEY')
+if not secret_key and os.environ.get('FLASK_ENV', '').lower() == 'production':
+    raise RuntimeError('SECRET_KEY must be configured in production')
+app.secret_key = secret_key or os.urandom(32).hex()
+
+trusted_proxy_count = int(os.environ.get('PSR_FM_TRUSTED_PROXY_COUNT', '0'))
+if trusted_proxy_count:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=trusted_proxy_count)
+
+app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get(
+    'PSR_FM_MAX_CONTENT_LENGTH', 55 * 1024 * 1024
+))
 
 # Enable gzip compression for responses
 Compress(app)
@@ -73,8 +85,8 @@ def csrf_protect_api():
             if request.path in ['/api/login', '/api/setup']:
                 return
             
-            # Ambil token dari header atau cookie
-            token = request.headers.get('X-CSRF-Token') or request.cookies.get('csrf_token')
+            # Require an explicit header; cookies are sent automatically by browsers.
+            token = request.headers.get('X-CSRF-Token')
             
             if not token:
                 return jsonify({'error': 'CSRF token missing'}), 403
@@ -89,7 +101,8 @@ login_manager.init_app(app)
 login_manager.login_view = 'login_page'
 login_manager.login_message = None
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+socketio_origins = os.environ.get('PSR_FM_SOCKETIO_ORIGINS', '').strip() or None
+socketio = SocketIO(app, cors_allowed_origins=socketio_origins, async_mode='threading')
 
 
 @socketio.on('connect')
@@ -133,6 +146,11 @@ AUDIO_MIME_TYPES = {
 def audio_mimetype(filename):
     ext = os.path.splitext(filename)[1].lower()
     return AUDIO_MIME_TYPES.get(ext) or mimetypes.guess_type(filename)[0] or 'application/octet-stream'
+
+
+def get_json_object():
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else None
 
 init_db(DATABASE_PATH)
 if os.environ.get('PSR_FM_DISABLE_WORKER') != '1':
@@ -295,8 +313,7 @@ def check_lyrics_rate_limit(user_id):
 
 
 def _login_rate_limit_key(username):
-    remote_addr = request.headers.get('X-Forwarded-For', request.remote_addr or 'unknown')
-    client_ip = remote_addr.split(',')[0].strip().lower()
+    client_ip = (request.remote_addr or 'unknown').strip().lower()
     return f"{client_ip}:{username.strip().lower()}"
 
 
@@ -358,7 +375,9 @@ def setup_page():
 def setup_account():
     if has_any_user(DATABASE_PATH):
         return jsonify({'error': 'Account already exists'}), 403
-    data = request.get_json()
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
     username = data.get('username', '').strip()
     password = data.get('password', '')
     if not username or not password:
@@ -378,7 +397,9 @@ def setup_account():
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    data = request.get_json()
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
     username = data.get('username', '').strip()
     password = data.get('password', '')
     if not username or not password:
@@ -424,7 +445,9 @@ def create_new_user():
     if not is_admin():
         return jsonify({'error': 'Only administrators can create new users'}), 403
 
-    data = request.get_json()
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
     username = data.get('username', '').strip()
     password = data.get('password', '')
     
@@ -466,7 +489,9 @@ def service_worker():
 @app.route('/api/playlists', methods=['POST'])
 @login_required
 def create_playlist():
-    data = request.get_json()
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
     name = data.get('name')
     if not name:
         return jsonify({'error': 'Name is required'}), 400
@@ -488,7 +513,9 @@ def get_playlists():
 @app.route('/api/playlists/<int:playlist_id>', methods=['PUT'])
 @login_required
 def rename_playlist(playlist_id):
-    data = request.get_json()
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
     name = data.get('name')
     if not name:
         return jsonify({'error': 'Name required'}), 400
@@ -513,7 +540,10 @@ def upload_cover(playlist_id):
         return jsonify({'error': 'No file selected'}), 400
 
     try:
-        file_bytes = file.read()
+        max_cover_size = 5 * 1024 * 1024
+        file_bytes = file.read(max_cover_size + 1)
+        if len(file_bytes) > max_cover_size:
+            return jsonify({'error': 'Cover image is too large. Maximum size is 5MB'}), 400
         file.seek(0)
         img = Image.open(io.BytesIO(file_bytes))
         img.verify()
@@ -521,6 +551,9 @@ def upload_cover(playlist_id):
         allowed_formats = ['JPEG', 'PNG', 'WEBP']
         if img.format not in allowed_formats:
             return jsonify({'error': f'Invalid image format: {img.format}'}), 400
+        width, height = img.size
+        if width * height > 25_000_000 or width > 8000 or height > 8000:
+            return jsonify({'error': 'Cover image dimensions are too large'}), 400
         ext_map = {'JPEG': '.jpg', 'PNG': '.png', 'WEBP': '.webp'}
         ext = ext_map[img.format]
     except Exception:
@@ -608,7 +641,9 @@ def reorder_playlist_songs(playlist_id):
     if not get_owned_playlist(db, playlist_id):
         return jsonify({'error': 'Playlist not found'}), 404
 
-    data = request.get_json()
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
     song_ids = data.get('song_ids', [])
     if not isinstance(song_ids, list):
         return jsonify({'error': 'song_ids must be a list'}), 400
@@ -645,7 +680,9 @@ def reorder_playlist_songs(playlist_id):
 @app.route('/api/download', methods=['POST'])
 @login_required
 def download_song():
-    data = request.get_json()
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
     url = data.get('url')
     playlist_ids = data.get('playlist_ids', [])
     if not url or not playlist_ids:
@@ -745,9 +782,16 @@ def upload_song():
     file.save(save_path)
 
     from services.metadata import extract_duration
-    duration = extract_duration(save_path)
+    try:
+        duration = extract_duration(save_path)
+    except Exception:
+        if os.path.exists(save_path):
+            os.remove(save_path)
+        app.logger.exception('Could not extract uploaded audio metadata')
+        return jsonify({'error': 'The uploaded file is not a readable audio file'}), 400
     if duration <= 0:
-        os.remove(save_path)
+        if os.path.exists(save_path):
+            os.remove(save_path)
         return jsonify({'error': 'The uploaded file is not a readable audio file'}), 400
 
     album_art_filename = None
@@ -1218,7 +1262,14 @@ def download_song_file(song_id):
 @app.route('/api/search')
 @login_required
 def search_songs():
-    query = request.args.get('q', '')
+    query = request.args.get('q', '').strip()
+    try:
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'limit and offset must be integers'}), 400
+    if not 1 <= limit <= 500 or offset < 0:
+        return jsonify({'error': 'limit must be between 1 and 500 and offset cannot be negative'}), 400
     db = get_db()
     search_param = f"%{query}%"
     cursor = db.cursor()
@@ -1226,7 +1277,8 @@ def search_songs():
         SELECT * FROM songs
         WHERE user_id = ? AND (title LIKE ? OR artist LIKE ?)
         ORDER BY created_at DESC
-    ''', (current_user.id, search_param, search_param))
+        LIMIT ? OFFSET ?
+    ''', (current_user.id, search_param, search_param, limit, offset))
     return jsonify([dict(row) for row in cursor.fetchall()])
 
 def playback_timestamp(value):
@@ -1286,24 +1338,24 @@ def log_listen():
                 return jsonify({'error': 'Event ID reused with different data'}), 409
             return jsonify({'status': 'ok', 'duplicate': True})
     playback = db.execute(
-        'SELECT started_at FROM playback_sessions WHERE id = ? AND song_id = ? AND user_id = ?',
+        'SELECT started_at, duration_seconds FROM playback_sessions WHERE id = ? AND song_id = ? AND user_id = ?',
         (session_id, song_id, current_user.id),
     ).fetchone()
     if not playback:
         db.rollback()
         return jsonify({'error': 'Playback session missing', 'code': 'session_missing'}), 409
-    if timestamp < playback['started_at']:
-        db.rollback()
-        return jsonify({'error': 'Listening predates playback'}), 400
+    offline_reconciliation = timestamp < playback['started_at']
     accepted = db.execute(
         '''
         UPDATE playback_sessions
         SET seconds_listened = seconds_listened + ?
         WHERE id = ? AND song_id = ? AND user_id = ?
           AND seconds_listened + ? <=
-              ((julianday('now') - julianday(started_at)) * 86400) + 10
+              CASE WHEN ? THEN duration_seconds + 10
+                   ELSE ((julianday('now') - julianday(started_at)) * 86400) + 10
+              END
         ''',
-        (seconds, session_id, song_id, current_user.id, seconds),
+        (seconds, session_id, song_id, current_user.id, seconds, offline_reconciliation),
     )
     if accepted.rowcount != 1:
         db.rollback()
@@ -1330,7 +1382,7 @@ def log_play(song_id):
     if session_id is not None and not valid_playback_id(session_id):
         return jsonify({'error': 'Invalid playback ID'}), 400
     try:
-        timestamp = playback_timestamp(data.get('occurred_at'))
+        client_timestamp = playback_timestamp(data.get('occurred_at'))
     except (TypeError, ValueError, AttributeError):
         return jsonify({'error': 'Invalid playback timestamp'}), 400
     db = get_db()
@@ -1338,6 +1390,7 @@ def log_play(song_id):
     if not song:
         return jsonify({'error': 'Not found'}), 404
     session_id = session_id or uuid.uuid4().hex
+    server_timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     db.execute('BEGIN IMMEDIATE')
     existing = db.execute('SELECT song_id, user_id FROM playback_sessions WHERE id = ?', (session_id,)).fetchone()
     if existing:
@@ -1346,10 +1399,10 @@ def log_play(song_id):
             return jsonify({'error': 'Playback ID already in use'}), 409
         return jsonify({'status': 'ok', 'playback_session_id': session_id, 'duplicate': True})
     db.execute('UPDATE songs SET play_count = play_count + 1 WHERE id = ? AND user_id = ?', (song_id, current_user.id))
-    db.execute('INSERT INTO play_events (song_id, user_id, timestamp) VALUES (?, ?, ?)', (song_id, current_user.id, timestamp))
+    db.execute('INSERT INTO play_events (song_id, user_id, timestamp) VALUES (?, ?, ?)', (song_id, current_user.id, client_timestamp))
     db.execute(
         'INSERT INTO playback_sessions (id, song_id, user_id, duration_seconds, started_at) VALUES (?, ?, ?, ?, ?)',
-        (session_id, song_id, current_user.id, song['duration_seconds'], timestamp),
+        (session_id, song_id, current_user.id, song['duration_seconds'], server_timestamp),
     )
     db.commit()
     return jsonify({'status': 'ok', 'playback_session_id': session_id})
@@ -1618,7 +1671,9 @@ def reset_user_password(user_id):
     if not is_admin():
         return jsonify({'error': 'Admin access required'}), 403
     
-    data = request.get_json()
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
     new_password = data.get('password', '')
     
     if not new_password:
@@ -1646,7 +1701,9 @@ def change_user_role(user_id):
     if user_id == current_user.id:
         return jsonify({'error': 'You cannot change your own role'}), 400
     
-    data = request.get_json()
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
     new_role = data.get('role', '')
     
     if new_role not in ('user', 'admin'):
