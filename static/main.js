@@ -643,9 +643,32 @@ document.addEventListener('DOMContentLoaded', () => {
         if (el.lyricsSaveBtn) el.lyricsSaveBtn.style.display = isEditing ? '' : 'none';
         if (el.lyricsRetryBtn) el.lyricsRetryBtn.style.display = isEditing ? 'none' : '';
         if (isEditing) {
-            if (el.lyricsPlainInput) el.lyricsPlainInput.value = state.plainLyrics || '';
-            if (el.lyricsSyncedInput) el.lyricsSyncedInput.value = state.rawSyncedLyrics || '';
-            el.lyricsPlainInput?.focus();
+            if (el.lyricsPlainInput) {
+                el.lyricsPlainInput.value = state.plainLyrics || '';
+                el.lyricsPlainInput.scrollTop = 0;
+            }
+            if (el.lyricsSyncedInput) {
+                el.lyricsSyncedInput.value = state.rawSyncedLyrics || '';
+                el.lyricsSyncedInput.scrollTop = 0;
+            }
+            if (el.lyricsEditor) el.lyricsEditor.scrollTop = 0;
+            el.lyricsPlainInput?.focus({preventScroll: true});
+            if (el.lyricsPlainInput) {
+                el.lyricsPlainInput.setSelectionRange(0, 0);
+                el.lyricsPlainInput.scrollTop = 0;
+            }
+            requestAnimationFrame(() => {
+                if (!state.lyricsEditing) return;
+                if (el.lyricsEditor) el.lyricsEditor.scrollTop = 0;
+                if (el.lyricsPlainInput) el.lyricsPlainInput.scrollTop = 0;
+                if (el.lyricsSyncedInput) el.lyricsSyncedInput.scrollTop = 0;
+            });
+            setTimeout(() => {
+                if (!state.lyricsEditing) return;
+                if (el.lyricsEditor) el.lyricsEditor.scrollTop = 0;
+                if (el.lyricsPlainInput) el.lyricsPlainInput.scrollTop = 0;
+                if (el.lyricsSyncedInput) el.lyricsSyncedInput.scrollTop = 0;
+            }, 120);
             setLyricsStatus('Editing lyrics for this song.');
         }
     }
