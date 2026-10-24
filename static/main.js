@@ -3798,21 +3798,144 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             }
         }
     });
-    function resumePlaybackAfterBackground() {
+        // ==========================================
+    // PLAYBACK PERSISTENCE (Crash / Reload Recovery)
+    // ==========================================
+    const PLAYBACK_STATE_KEY = 'psr_playback_state';
+    let lastSavePlaybackTime = 0;
+
+    function savePlaybackState(force = false) {
+        if (!state.currentSongMeta || !state.currentPlayingSongId) return;
+        const now = Date.now();
+        if (!force && now - lastSavePlaybackTime < 1500) return;
+        lastSavePlaybackTime = now;
+        try {
+            const data = {
+                songId: state.currentPlayingSongId,
+                songMeta: state.currentSongMeta,
+                playlistId: state.currentPlaylistId,
+                playlistSongs: state.currentPlaylistSongs,
+                songIndex: state.currentSongIndex,
+                currentTime: el.audio ? el.audio.currentTime : 0,
+                duration: el.audio ? el.audio.duration : 0,
+                repeatMode: state.repeatMode,
+                isShuffle: state.isShuffle,
+                timestamp: now
+            };
+            localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(data));
+        } catch (_) {}
+    }
+
+    function restorePlaybackState() {
+        try {
+            const raw = localStorage.getItem(PLAYBACK_STATE_KEY);
+            if (!raw) return;
+            const saved = JSON.parse(raw);
+            if (!saved || !saved.songMeta) return;
+
+            // Don't overwrite if audio is currently playing
+            if (state.currentPlayingSongId || (el.audio && !el.audio.paused)) return;
+
+            state.currentPlaylistId = saved.playlistId || null;
+            state.currentPlaylistSongs = Array.isArray(saved.playlistSongs) && saved.playlistSongs.length ? saved.playlistSongs : [saved.songMeta];
+            state.currentSongIndex = typeof saved.songIndex === 'number' ? saved.songIndex : 0;
+            state.currentSongMeta = saved.songMeta;
+            state.currentPlayingSongId = String(saved.songId || saved.songMeta.id);
+            state.playbackStatisticsSongId = saved.songMeta.id;
+            state.repeatMode = typeof saved.repeatMode === 'number' ? saved.repeatMode : 0;
+            state.isShuffle = Boolean(saved.isShuffle);
+
+            if (el.playerTitle) el.playerTitle.innerText = saved.songMeta.title || '';
+            if (el.playerArtist) el.playerArtist.innerText = saved.songMeta.artist || 'Unknown';
+            if (el.playerArt) {
+                el.playerArt.src = '/static/album_art/' + mediaUrlName(saved.songMeta.album_art);
+                el.playerArt.alt = saved.songMeta.title + ' album artwork';
+            }
+            if (saved.duration && el.duration) {
+                el.duration.innerText = formatTime(saved.duration);
+            }
+            if (saved.currentTime && el.currentTime) {
+                el.currentTime.innerText = formatTime(saved.currentTime);
+                if (saved.duration) {
+                    const pct = (saved.currentTime / saved.duration) * 100;
+                    if (el.progressBar) el.progressBar.value = pct;
+                    if (el.progressFill) el.progressFill.style.width = pct + '%';
+                }
+            }
+
+            const shuffleBtn = document.getElementById('shuffle-btn');
+            if (shuffleBtn) shuffleBtn.classList.toggle('active', state.isShuffle);
+
+            const repeatBtn = document.getElementById('repeat-btn');
+            if (repeatBtn) {
+                repeatBtn.classList.toggle('active', state.repeatMode > 0);
+                repeatBtn.innerHTML = state.repeatMode === 2
+                    ? '<i class="fas fa-redo"></i><span class="repeat-one">1</span>'
+                    : '<i class="fas fa-redo"></i>';
+            }
+
+            updatePlayPauseIcon(false);
+            updateMediaSession(saved.songMeta);
+            buildQueue();
+            loadLyrics(saved.songMeta.id);
+
+            const audioSrc = saved.songMeta.filename
+                ? '/audio/' + mediaUrlName(saved.songMeta.filename)
+                : '/api/library-songs/' + saved.songMeta.id + '/stream';
+            el.audio.src = audioSrc;
+
+            if (saved.currentTime > 0) {
+                const onLoaded = () => {
+                    try { el.audio.currentTime = saved.currentTime; } catch (_) {}
+                };
+                el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
+            }
+        } catch (e) {
+            console.warn('Could not restore previous playback state:', e);
+        }
+    }
+
+function resumePlaybackAfterBackground() {
         if (!state.shouldBePlaying || state.isSeeking || el.audio.ended) return;
         if (typeof resumeEqContext === 'function') resumeEqContext();
         if (el.audio.paused) resumeCurrentSong();
     }
 
     document.addEventListener('visibilitychange', () => {
-        if (document.hidden) flushListenLog();
-        else {
+        if (document.hidden) {
+            flushListenLog();
+            savePlaybackState(true);
+        } else {
+            cancelPlaybackRecovery();
+            cancelTrackTransitionRecovery();
+            state.playbackRecoveryInProgress = false;
             highlightPlayingSong();
             resumePlaybackAfterBackground();
         }
     });
-    window.addEventListener('pageshow', resumePlaybackAfterBackground);
-    window.addEventListener('pagehide', flushListenLog);
+    window.addEventListener('pageshow', () => {
+        cancelPlaybackRecovery();
+        cancelTrackTransitionRecovery();
+        state.playbackRecoveryInProgress = false;
+        resumePlaybackAfterBackground();
+    });
+    window.addEventListener('pagehide', () => {
+        flushListenLog();
+        savePlaybackState(true);
+    });
+    window.addEventListener('beforeunload', () => {
+        savePlaybackState(true);
+    });
+
+    if ('launchQueue' in window && 'setConsumer' in window.launchQueue) {
+        window.launchQueue.setConsumer(() => {
+            cancelPlaybackRecovery();
+            cancelTrackTransitionRecovery();
+            state.playbackRecoveryInProgress = false;
+            highlightPlayingSong();
+            resumePlaybackAfterBackground();
+        });
+    }
 
     // ==========================================
     // AUDIO EVENT LISTENERS
@@ -3839,6 +3962,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                 } else if (delta < 0) {
                     state.lastLoggedTime = el.audio.currentTime;
                 }
+                savePlaybackState(false);
             }
             updateMediaSessionPosition();
         }
@@ -3862,6 +3986,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
         startLyricAnimation();
         updateMediaSessionPosition();
+        savePlaybackState(true);
     });
 
     el.audio.addEventListener('playing', () => {
@@ -3888,8 +4013,11 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (el.nowPlaying) el.nowPlaying.classList.remove('playing');
         stopLyricAnimation();
         flushListenLog();
+        savePlaybackState(true);
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
-        schedulePlaybackRecovery();
+        if (state.shouldBePlaying) {
+            schedulePlaybackRecovery();
+        }
     });
 
     el.audio.addEventListener('seeking', () => {
@@ -3900,6 +4028,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     el.audio.addEventListener('seeked', () => {
         state.lastLoggedTime = el.audio.currentTime;
         updateSyncedLyrics(true);
+        savePlaybackState(true);
     });
 
     el.audio.addEventListener('ended', () => {
@@ -3944,11 +4073,15 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         state.playbackRecoveryTimer = setTimeout(() => {
             state.playbackRecoveryTimer = null;
             if (!state.shouldBePlaying || state.isSeeking || requestId !== state.playbackRequestId) return;
+            if (!el.audio.paused && el.audio.currentTime > stalledAt) return;
             if (el.audio.currentTime > stalledAt + 0.25) return;
             if (el.audio.paused) {
                 resumeCurrentSong(requestId);
                 return;
             }
+
+            // Do not perform destructive source reload while in background tab
+            if (document.hidden) return;
 
             // A stalled media element can remain "playing" while its position
             // stops advancing in a background tab. Reload the same source and
@@ -3972,6 +4105,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     // locked. Retry the same track after it becomes playable instead of leaving
     // the player stopped until the page is opened again.
     el.audio.addEventListener('canplay', () => {
+        if (state.playbackRecoveryInProgress) return;
         if (state.shouldBePlaying && !state.isSeeking && el.audio.paused && !el.audio.ended) resumeCurrentSong();
     });
 
@@ -4994,6 +5128,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (state.isLooping || state.loopStart > 0 || state.loopEnd > 0) {
             resetLoop();
         }
+        savePlaybackState(true);
     }
 
     function playSong(songs, index) {
@@ -5034,6 +5169,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (state.isLooping || state.loopStart > 0 || state.loopEnd > 0) {
             resetLoop();
         }
+        savePlaybackState(true);
     }
 
     function togglePlay() {
@@ -5356,4 +5492,5 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         title: 'Search your library',
         body: 'Type at least two characters to find a song or artist in this account.'
     });
+    restorePlaybackState();
 });
