@@ -3803,26 +3803,49 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     // ==========================================
     const PLAYBACK_STATE_KEY = 'psr_playback_state';
     let lastSavePlaybackTime = 0;
+    let cachedPlaybackPayload = null;
 
     function savePlaybackState(force = false) {
         if (!state.currentSongMeta || !state.currentPlayingSongId) return;
         const now = Date.now();
-        if (!force && now - lastSavePlaybackTime < 1500) return;
+        if (!force && now - lastSavePlaybackTime < 2000) return;
         lastSavePlaybackTime = now;
         try {
-            const data = {
-                songId: state.currentPlayingSongId,
-                songMeta: state.currentSongMeta,
-                playlistId: state.currentPlaylistId,
-                playlistSongs: state.currentPlaylistSongs,
-                songIndex: state.currentSongIndex,
-                currentTime: el.audio ? el.audio.currentTime : 0,
-                duration: el.audio ? el.audio.duration : 0,
-                repeatMode: state.repeatMode,
-                isShuffle: state.isShuffle,
-                timestamp: now
-            };
-            localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(data));
+            const currentTime = el.audio ? el.audio.currentTime : 0;
+            // Recompute the heavy metadata payload only when track/playlist actually changes
+            if (force || !cachedPlaybackPayload || cachedPlaybackPayload.songId !== state.currentPlayingSongId) {
+                const slimSongs = Array.isArray(state.currentPlaylistSongs)
+                    ? state.currentPlaylistSongs.slice(0, 80).map(s => ({
+                        id: s.id,
+                        title: s.title,
+                        artist: s.artist,
+                        album_art: s.album_art,
+                        filename: s.filename,
+                        duration_seconds: s.duration_seconds
+                    }))
+                    : [];
+
+                cachedPlaybackPayload = {
+                    songId: state.currentPlayingSongId,
+                    songMeta: {
+                        id: state.currentSongMeta.id,
+                        title: state.currentSongMeta.title,
+                        artist: state.currentSongMeta.artist,
+                        album_art: state.currentSongMeta.album_art,
+                        filename: state.currentSongMeta.filename,
+                        duration_seconds: state.currentSongMeta.duration_seconds
+                    },
+                    playlistId: state.currentPlaylistId,
+                    playlistSongs: slimSongs,
+                    songIndex: state.currentSongIndex,
+                    duration: el.audio ? el.audio.duration : 0,
+                    repeatMode: state.repeatMode,
+                    isShuffle: state.isShuffle
+                };
+            }
+            cachedPlaybackPayload.currentTime = currentTime;
+            cachedPlaybackPayload.timestamp = now;
+            localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(cachedPlaybackPayload));
         } catch (_) {}
     }
 
