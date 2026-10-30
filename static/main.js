@@ -3004,7 +3004,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (remoteState.deviceId && remoteState.deviceId === CLIENT_DEVICE_ID) {
             return;
         }
-        applySavedPlaybackState(remoteState, false);
+        applySavedPlaybackState(remoteState, remoteState.isPlaying, true);
         try {
             localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(remoteState));
         } catch (_) {}
@@ -3122,11 +3122,21 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     // ==========================================
     // AUDIO CONTROLS
     // ==========================================
-    document.getElementById('play-pause-btn')?.addEventListener('click', togglePlay);
-    document.getElementById('prev-btn')?.addEventListener('click', () => playPrev());
-    document.getElementById('next-btn')?.addEventListener('click', () => playNext(false));
+    document.getElementById('play-pause-btn')?.addEventListener('click', () => {
+        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
+        togglePlay();
+    });
+    document.getElementById('prev-btn')?.addEventListener('click', () => {
+        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
+        playPrev();
+    });
+    document.getElementById('next-btn')?.addEventListener('click', () => {
+        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
+        playNext(false);
+    });
 
     document.getElementById('shuffle-btn')?.addEventListener('click', () => {
+        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
         state.isShuffle = !state.isShuffle;
         document.getElementById('shuffle-btn')?.classList.toggle('active', state.isShuffle);
         if (state.isShuffle) {
@@ -3153,6 +3163,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         state.repeatMode = (state.repeatMode + 1) % 3;
         const btn = document.getElementById('repeat-btn');
         if (btn) {
+            if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
             btn.classList.toggle('active', state.repeatMode > 0);
             btn.innerHTML = state.repeatMode === 2
                 ? '<i class="fas fa-redo"></i><span class="repeat-one">1</span>'
@@ -3817,10 +3828,17 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
         if (e.code === 'Space' || e.keyCode === 32) {
             e.preventDefault();
+            if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
             togglePlay();
         }
-        if (e.code === 'ArrowRight') playNext(false);
-        if (e.code === 'ArrowLeft') playPrev();
+        if (e.code === 'ArrowRight') {
+            if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
+            playNext(false);
+        }
+        if (e.code === 'ArrowLeft') {
+            if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
+            playPrev();
+        }
         if (e.key === 'l' || e.key === 'L') {
             if (state.isLooping) {
                 jumpToLoopStart();
@@ -3828,13 +3846,41 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
     });
         // ==========================================
-    // PLAYBACK PERSISTENCE & CROSS-DEVICE SYNC
+    // PLAYBACK PERSISTENCE & CROSS-DEVICE SYNC (JAM / MULTI-ROOM)
     // ==========================================
     const PLAYBACK_STATE_KEY = 'psr_playback_state';
     let lastSavePlaybackTime = 0;
     let cachedPlaybackPayload = null;
     let lastServerSyncTime = 0;
     let serverSyncTimer = null;
+    let isPrimarySyncLeader = false;
+    let isApplyingRemoteSync = false;
+    let lastRemoteSyncAppliedAt = 0;
+    let syncPromptActive = false;
+
+    function showSyncAutoplayPrompt(targetTime) {
+        if (syncPromptActive) return;
+        syncPromptActive = true;
+        if (typeof showToast === 'function') {
+            showToast('🎵 Sedang diputar di perangkat lain. Ketuk layar untuk ikut mendengarkan barengan.', 'info', 7000);
+        }
+
+        const unlockAudio = () => {
+            syncPromptActive = false;
+            if (state.shouldBePlaying && el.audio) {
+                try {
+                    if (typeof targetTime === 'number' && targetTime > 0) {
+                        el.audio.currentTime = targetTime;
+                    }
+                    if (typeof resumeEqContext === 'function') resumeEqContext();
+                    el.audio.play().catch(() => {});
+                    updatePlayPauseIcon(true);
+                } catch (_) {}
+            }
+        };
+        document.addEventListener('click', unlockAudio, { once: true });
+        document.addEventListener('touchend', unlockAudio, { once: true });
+    }
 
     function syncPlaybackToServer(payload, immediate = false) {
         if (!payload || !navigator.onLine) return;
@@ -3910,39 +3956,60 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             cachedPlaybackPayload.isPlaying = isPlaying;
             cachedPlaybackPayload.timestamp = now;
             cachedPlaybackPayload.deviceId = CLIENT_DEVICE_ID;
+            cachedPlaybackPayload.volume = el.audio ? el.audio.volume : 1;
+            cachedPlaybackPayload.isMuted = el.audio ? el.audio.muted : false;
 
             localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(cachedPlaybackPayload));
-            syncPlaybackToServer(cachedPlaybackPayload, force);
+
+            // Do not bounce remote sync events back to server (prevents feedback loops)
+            if (isApplyingRemoteSync || (now - lastRemoteSyncAppliedAt < 1200)) {
+                return;
+            }
+
+            // Only the active leader sends throttled background progress;
+            // Explicit user actions (force === true) always sync immediately.
+            if (force || isPrimarySyncLeader) {
+                syncPlaybackToServer(cachedPlaybackPayload, force);
+            }
         } catch (_) {}
     }
 
-    function applySavedPlaybackState(saved, startPlaying = false) {
+    function applySavedPlaybackState(saved, startPlaying = false, isRemoteSync = false) {
         if (!saved || !saved.songMeta) return;
 
-        // If audio is currently playing locally and we are not explicitly told to startPlaying:
-        if (!startPlaying && el.audio && !el.audio.paused && saved.deviceId && saved.deviceId !== CLIENT_DEVICE_ID) {
-            // If the other device started playing, pause locally to avoid two devices playing at once
-            if (saved.isPlaying) {
-                state.shouldBePlaying = false;
-                try { el.audio.pause(); } catch (_) {}
-                updatePlayPauseIcon(false);
-                if (typeof showToast === 'function') {
-                    showToast('Playback moved to another device', 'info');
-                }
-            } else {
-                return;
-            }
+        if (isRemoteSync) {
+            isApplyingRemoteSync = true;
+            lastRemoteSyncAppliedAt = Date.now();
+            isPrimarySyncLeader = false;
+            setTimeout(() => { isApplyingRemoteSync = false; }, 1200);
         }
 
+        const now = Date.now();
+        const latencySec = (saved.timestamp && now > saved.timestamp)
+            ? Math.min(8, (now - saved.timestamp) / 1000)
+            : 0;
+
+        const shouldPlay = Boolean(startPlaying !== false && (startPlaying === true || saved.isPlaying));
+        const targetTime = Math.max(
+            0,
+            (typeof saved.currentTime === 'number' ? saved.currentTime : 0) + (shouldPlay ? latencySec : 0)
+        );
+
+        const currentPlayingId = state.currentPlayingSongId;
+        const targetSongId = String(saved.songId || saved.songMeta.id || '');
+        const isSameSong = Boolean(currentPlayingId && targetSongId && currentPlayingId === targetSongId);
+
+        // Update State
         state.currentPlaylistId = saved.playlistId || null;
         state.currentPlaylistSongs = Array.isArray(saved.playlistSongs) && saved.playlistSongs.length ? saved.playlistSongs : [saved.songMeta];
         state.currentSongIndex = typeof saved.songIndex === 'number' ? saved.songIndex : 0;
         state.currentSongMeta = saved.songMeta;
-        state.currentPlayingSongId = String(saved.songId || saved.songMeta.id);
+        state.currentPlayingSongId = targetSongId;
         state.playbackStatisticsSongId = saved.songMeta.id;
         state.repeatMode = typeof saved.repeatMode === 'number' ? saved.repeatMode : 0;
         state.isShuffle = Boolean(saved.isShuffle);
 
+        // Update UI
         if (el.playerTitle) el.playerTitle.innerText = saved.songMeta.title || '';
         if (el.playerArtist) el.playerArtist.innerText = saved.songMeta.artist || 'Unknown';
         if (el.playerArt) {
@@ -3952,13 +4019,23 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (saved.duration && el.duration) {
             el.duration.innerText = formatTime(saved.duration);
         }
-        if (typeof saved.currentTime === 'number' && el.currentTime) {
-            el.currentTime.innerText = formatTime(saved.currentTime);
+        if (typeof targetTime === 'number' && el.currentTime) {
+            el.currentTime.innerText = formatTime(targetTime);
             if (saved.duration && saved.duration > 0) {
-                const pct = (saved.currentTime / saved.duration) * 100;
+                const pct = (targetTime / saved.duration) * 100;
                 if (el.progressBar) el.progressBar.value = pct;
                 if (el.progressFill) el.progressFill.style.width = pct + '%';
             }
+        }
+
+        if (typeof saved.volume === 'number' && el.audio) {
+            const isMuted = Boolean(saved.isMuted);
+            el.audio.volume = Math.max(0, Math.min(1, saved.volume));
+            el.audio.muted = isMuted;
+            const shownVolume = isMuted ? 0 : el.audio.volume;
+            if (el.volumeBar) el.volumeBar.value = String(Math.round(shownVolume * 100));
+            if (el.volumeFill) el.volumeFill.style.width = `${shownVolume * 100}%`;
+            updateVolumeIcon(el.audio.volume);
         }
 
         const shuffleBtn = document.getElementById('shuffle-btn');
@@ -3972,7 +4049,6 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                 : '<i class="fas fa-redo"></i>';
         }
 
-        updatePlayPauseIcon(startPlaying);
         updateMediaSession(saved.songMeta);
         buildQueue();
         loadLyrics(saved.songMeta.id);
@@ -3988,28 +4064,42 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         const targetFilename = mediaUrlName(saved.songMeta.filename || '');
         const isDifferentSrc = !currentSrc || (targetFilename && !currentSrc.includes(encodeURI(targetFilename)));
 
-        if (el.audio) {
-            if (isDifferentSrc) {
-                el.audio.src = audioSrc;
-                if (saved.currentTime > 0) {
-                    const onLoaded = () => {
-                        try { el.audio.currentTime = saved.currentTime; } catch (_) {}
-                    };
-                    el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
+        const triggerPlayback = () => {
+            if (shouldPlay) {
+                state.shouldBePlaying = true;
+                updatePlayPauseIcon(true);
+                if (typeof resumeEqContext === 'function') resumeEqContext();
+                const p = el.audio.play();
+                if (p !== undefined) {
+                    p.catch((err) => {
+                        if (err?.name === 'NotAllowedError') {
+                            showSyncAutoplayPrompt(targetTime);
+                        }
+                    });
                 }
             } else {
-                if (el.audio.paused && typeof saved.currentTime === 'number') {
-                    try {
-                        if (Math.abs(el.audio.currentTime - saved.currentTime) > 2) {
-                            el.audio.currentTime = saved.currentTime;
-                        }
-                    } catch (_) {}
-                }
+                state.shouldBePlaying = false;
+                el.audio.pause();
+                updatePlayPauseIcon(false);
             }
-        }
+        };
 
-        if (startPlaying && typeof playAudio === 'function') {
-            playAudio();
+        if (el.audio) {
+            if (isDifferentSrc || !isSameSong) {
+                el.audio.src = audioSrc;
+                const onLoaded = () => {
+                    try { el.audio.currentTime = targetTime; } catch (_) {}
+                    triggerPlayback();
+                };
+                el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
+            } else {
+                // Same song: check drift
+                const drift = Math.abs((el.audio.currentTime || 0) - targetTime);
+                if (drift > 0.45) {
+                    try { el.audio.currentTime = targetTime; } catch (_) {}
+                }
+                triggerPlayback();
+            }
         }
     }
 
@@ -4032,7 +4122,9 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             }
 
             if ((serverState.timestamp || 0) >= localTime) {
-                applySavedPlaybackState(serverState, false);
+                const now = Date.now();
+                const isActivelyPlaying = Boolean(serverState.isPlaying && (now - (serverState.timestamp || 0) < 20000));
+                applySavedPlaybackState(serverState, isActivelyPlaying, false);
                 localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(serverState));
             }
         } catch (e) {
@@ -4365,6 +4457,7 @@ function resumePlaybackAfterBackground() {
 
     function seekAudio(position) {
         if (!Number.isFinite(position)) return;
+        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
         flushListenLog();
         el.audio.currentTime = position;
         // Reset immediately: pause/timeupdate may arrive before seeked.
@@ -4422,14 +4515,17 @@ function resumePlaybackAfterBackground() {
     el.progressBar?.addEventListener('pointercancel', finishSeek);
 
     el.volumeBar?.addEventListener('input', (e) => {
+        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
         el.audio.volume = e.target.value / 100;
         el.audio.muted = false;
         if (el.audio.volume > 0) state.lastNonZeroVolume = el.audio.volume;
         if (el.volumeFill) el.volumeFill.style.width = `${e.target.value}%`;
         updateVolumeIcon(el.audio.volume);
+        savePlaybackState(true);
     });
     state.lastNonZeroVolume = 1;
     el.volumeBtn?.addEventListener('click', () => {
+        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
         if (el.audio.muted || el.audio.volume === 0) {
             el.audio.muted = false;
             if (el.audio.volume === 0) el.audio.volume = state.lastNonZeroVolume || 1;
@@ -4441,6 +4537,7 @@ function resumePlaybackAfterBackground() {
         if (el.volumeBar) el.volumeBar.value = String(Math.round(shownVolume * 100));
         if (el.volumeFill) el.volumeFill.style.width = `${shownVolume * 100}%`;
         updateVolumeIcon(el.audio.volume);
+        savePlaybackState(true);
     });
     if (el.volumeFill) el.volumeFill.style.width = '100%';
 
@@ -5293,6 +5390,7 @@ function resumePlaybackAfterBackground() {
     }
 
     function playSong(songs, index) {
+        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
         flushListenLog();
         state.currentPlaylistSongs = songs;
         state.currentSongIndex = index;
