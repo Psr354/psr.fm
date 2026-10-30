@@ -23,6 +23,7 @@ const context = vm.createContext({
     state, el: { audio }, navigator: {},
     console: { error: (...args) => errors.push(args) },
     isOfflineMode: () => false,
+    savePlaybackState: () => {},
     resumeCurrentSong: () => { audio.paused = false; listeners.play(); listeners.playing(); },
     startLyricAnimation() {}, stopLyricAnimation() {}, updateMediaSessionPosition() {},
     updateSyncedLyrics() {},

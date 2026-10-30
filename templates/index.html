@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>psr.fm</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=27">
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}">
@@ -33,6 +33,9 @@
                     <div class="user-name" id="user-name">Loading...</div>
                     <div class="user-status">Online</div>
                 </div>
+                <button id="theme-quick-btn" class="icon-btn theme-quick-btn" type="button" title="Customize Theme" aria-label="Customize Theme">
+                    <i class="fas fa-palette"></i>
+                </button>
             </div>
 
             <nav class="nav-menu">
@@ -64,6 +67,9 @@
 
             <button id="add-user-btn" class="add-user-btn">
                 <i class="fas fa-user-plus"></i> Add New Account
+            </button>
+            <button id="theme-settings-btn" class="logout-btn theme-settings-btn" type="button" aria-label="Customize theme">
+                <i class="fas fa-palette"></i> Customize Theme
             </button>
             <button id="logout-btn" class="logout-btn">
                 <i class="fas fa-sign-out-alt"></i> Sign Out
@@ -598,7 +604,7 @@
     </div>
 
     <script src="{{ url_for('static', filename='listening-sync.js') }}?v=3"></script>
-    <script src="{{ url_for('static', filename='main.js') }}?v=24"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=27"></script>
 
     <!-- Equalizer Popover -->
     <div id="eq-popover" class="eq-popover" aria-hidden="true">
@@ -705,6 +711,198 @@
                 <button id="cancel-reset-password" class="btn-secondary">Cancel</button>
                 <button id="confirm-reset-password" class="btn-primary">Reset Password</button>
             </div>
+        </div>
+    </div>
+
+    <!-- ========== THEME SETTINGS MODAL ========== -->
+    <div id="theme-settings-modal" class="modal" aria-hidden="true">
+        <div class="modal-content theme-modal-content" role="dialog" aria-modal="true" aria-labelledby="theme-modal-title">
+
+            <div class="theme-modal-header">
+                <div class="theme-modal-title-wrap">
+                    <h3 id="theme-modal-title"><i class="fas fa-palette"></i> Customize Theme</h3>
+                    <p class="theme-modal-subtitle">Personalize your accents, backgrounds, and navbar</p>
+                </div>
+                <button class="icon-btn theme-modal-close" id="theme-modal-close-btn" aria-label="Close dialog"><i class="fas fa-times"></i></button>
+            </div>
+
+            <div class="theme-modal-body">
+
+                <!-- 1. ACCENT COLOR -->
+                <div class="theme-section">
+                    <div class="theme-section-header">
+                        <span class="theme-section-label">Accent Color</span>
+                        <span class="theme-section-hint">Buttons, active tabs & playback</span>
+                    </div>
+                    <div class="theme-presets" id="theme-presets">
+                        <button class="theme-swatch" data-accent="#30d66b" data-accent-hover="#55e584" title="Emerald (Default)" style="background:#30d66b"></button>
+                        <button class="theme-swatch" data-accent="#3b82f6" data-accent-hover="#60a5fa" title="Sapphire Blue" style="background:#3b82f6"></button>
+                        <button class="theme-swatch" data-accent="#8b5cf6" data-accent-hover="#a78bfa" title="Neon Violet" style="background:#8b5cf6"></button>
+                        <button class="theme-swatch" data-accent="#f43f5e" data-accent-hover="#fb7185" title="Crimson Rose" style="background:#f43f5e"></button>
+                        <button class="theme-swatch" data-accent="#f97316" data-accent-hover="#fb923c" title="Sunset Orange" style="background:#f97316"></button>
+                        <button class="theme-swatch" data-accent="#eab308" data-accent-hover="#facc15" title="Amber Gold" style="background:#eab308"></button>
+                        <button class="theme-swatch" data-accent="#06b6d4" data-accent-hover="#22d3ee" title="Cyber Cyan" style="background:#06b6d4"></button>
+                        <button class="theme-swatch" data-accent="#ec4899" data-accent-hover="#f472b6" title="Hot Pink" style="background:#ec4899"></button>
+                        <button class="theme-swatch" data-accent="#e2e8f0" data-accent-hover="#ffffff" title="Monochrome White" style="background:#e2e8f0"></button>
+                    </div>
+                    <div class="theme-color-row">
+                        <div class="theme-color-picker-wrap">
+                            <input type="color" id="theme-accent-picker" class="theme-color-input" value="#30d66b" aria-label="Pick custom accent color">
+                            <label for="theme-accent-picker" class="theme-color-hex" id="theme-accent-hex">#30d66b</label>
+                        </div>
+                        <span class="theme-color-desc">Custom accent picker</span>
+                    </div>
+                </div>
+
+                <!-- 2. NAVBAR & SIDEBAR COLOR -->
+                <div class="theme-section">
+                    <div class="theme-section-header">
+                        <span class="theme-section-label">Navbar / Sidebar Style</span>
+                        <span class="theme-section-hint">Navigation background & contrast</span>
+                    </div>
+                    <div class="theme-navbar-options" id="theme-sidebar-options">
+                        <button class="theme-pill-btn active" data-sidebar-mode="harmonize" title="Tone matches main background naturally">
+                            <i class="fas fa-magic"></i> Auto Harmonize
+                        </button>
+                        <button class="theme-pill-btn" data-sidebar-mode="match" title="Same color as main background">
+                            <i class="fas fa-clone"></i> Match Background
+                        </button>
+                        <button class="theme-pill-btn" data-sidebar-mode="obsidian" title="Deep dark obsidian black">
+                            <i class="fas fa-moon"></i> Deep Black
+                        </button>
+                        <button class="theme-pill-btn" data-sidebar-mode="custom" id="theme-sidebar-custom-btn" title="Pick your own navbar color">
+                            <i class="fas fa-sliders-h"></i> Custom Color
+                        </button>
+                    </div>
+                    <div class="theme-color-row theme-custom-row" id="theme-sidebar-custom-row" style="display:none;">
+                        <div class="theme-color-picker-wrap">
+                            <input type="color" id="theme-sidebar-picker" class="theme-color-input" value="#0e110f" aria-label="Pick custom navbar color">
+                            <label for="theme-sidebar-picker" class="theme-color-hex" id="theme-sidebar-hex">#0e110f</label>
+                        </div>
+                        <span class="theme-color-desc">Custom navbar background</span>
+                    </div>
+                </div>
+
+                <!-- 3. BACKGROUND COLOR -->
+                <div class="theme-section">
+                    <div class="theme-section-header">
+                        <span class="theme-section-label">Main Background Color</span>
+                        <span class="theme-section-hint">Dashboard & player space</span>
+                    </div>
+                    <div class="theme-bg-presets" id="theme-bg-presets">
+                        <button class="theme-bg-btn active" data-bg="dark" title="Dark Slate (Default)">
+                            <span class="theme-bg-preview" style="background:#070908"></span> Dark Slate
+                        </button>
+                        <button class="theme-bg-btn" data-bg="amoled" title="Pure AMOLED Black">
+                            <span class="theme-bg-preview" style="background:#000000"></span> Pure AMOLED
+                        </button>
+                        <button class="theme-bg-btn" data-bg="midnight" title="Midnight Navy">
+                            <span class="theme-bg-preview" style="background:#0b0f19"></span> Midnight
+                        </button>
+                        <button class="theme-bg-btn" data-bg="charcoal" title="Deep Charcoal">
+                            <span class="theme-bg-preview" style="background:#131518"></span> Charcoal
+                        </button>
+                        <button class="theme-bg-btn" data-bg="warm" title="Warm Espresso">
+                            <span class="theme-bg-preview" style="background:#140f0c"></span> Espresso
+                        </button>
+                        <button class="theme-bg-btn" data-bg="forest" title="Forest Dark">
+                            <span class="theme-bg-preview" style="background:#09120c"></span> Forest
+                        </button>
+                        <button class="theme-bg-btn" data-bg="custom" id="theme-bg-custom-btn" title="Pick any background color">
+                            <span class="theme-bg-preview theme-bg-preview-custom" id="theme-bg-custom-preview" style="background:#070908"></span> Custom
+                        </button>
+                    </div>
+                    <div class="theme-color-row theme-custom-row" id="theme-bg-custom-row" style="display:none;">
+                        <div class="theme-color-picker-wrap">
+                            <input type="color" id="theme-bg-picker" class="theme-color-input" value="#070908" aria-label="Pick custom background color">
+                            <label for="theme-bg-picker" class="theme-color-hex" id="theme-bg-hex">#070908</label>
+                        </div>
+                        <span class="theme-color-desc">Custom main background</span>
+                    </div>
+                </div>
+
+                <!-- 4. FONT / TEXT COLOR -->
+                <div class="theme-section">
+                    <div class="theme-section-header">
+                        <span class="theme-section-label">Font / Text Color</span>
+                        <span class="theme-section-hint">Headings, titles & typography</span>
+                    </div>
+                    <div class="theme-presets" id="theme-text-presets">
+                        <button class="theme-swatch" data-text="#f5f7f5" title="Crisp White (Default)" style="background:#f5f7f5;"></button>
+                        <button class="theme-swatch" data-text="#fef3c7" title="Warm Vanilla / Cream" style="background:#fef3c7;"></button>
+                        <button class="theme-swatch" data-text="#cbd5e1" title="Soft Silver / Cool Grey" style="background:#cbd5e1;"></button>
+                        <button class="theme-swatch" data-text="#d1fae5" title="Pastel Mint" style="background:#d1fae5;"></button>
+                        <button class="theme-swatch" data-text="#ffe4e6" title="Pastel Rose" style="background:#ffe4e6;"></button>
+                        <button class="theme-swatch" data-text="#e0f2fe" title="Cyber Sky" style="background:#e0f2fe;"></button>
+                        <button class="theme-swatch" data-text="#fef08a" title="Retro Amber" style="background:#fef08a;"></button>
+                    </div>
+                    <div class="theme-color-row">
+                        <div class="theme-color-picker-wrap">
+                            <input type="color" id="theme-text-picker" class="theme-color-input" value="#f5f7f5" aria-label="Pick custom text color">
+                            <label for="theme-text-picker" class="theme-color-hex" id="theme-text-hex">#f5f7f5</label>
+                        </div>
+                        <span class="theme-color-desc">Custom font color picker</span>
+                    </div>
+                </div>
+
+                <!-- 5. LIVE INTERACTIVE PREVIEW -->
+                <div class="theme-section">
+                    <span class="theme-section-label">Live Preview</span>
+                    <div class="theme-preview-card" id="theme-preview-card">
+                        <!-- Mini sidebar -->
+                        <div class="theme-preview-sidebar" id="theme-preview-sidebar">
+                            <div class="theme-preview-logo">psr.fm</div>
+                            <div class="theme-preview-nav-item active" id="theme-preview-nav-active">
+                                <i class="fas fa-home"></i> Home
+                            </div>
+                            <div class="theme-preview-nav-item">
+                                <i class="fas fa-search"></i> Search
+                            </div>
+                        </div>
+                        <!-- Mini content -->
+                        <div class="theme-preview-content" id="theme-preview-content">
+                            <div class="theme-preview-heading">Good Evening</div>
+                            <div class="theme-preview-chips">
+                                <span class="theme-preview-btn-play" id="theme-preview-play-btn"><i class="fas fa-play"></i> Play</span>
+                                <span class="theme-preview-now-playing" id="theme-preview-now-playing">
+                                    <span class="theme-preview-pulse-dot" id="theme-preview-pulse-dot"></span> Now Playing
+                                </span>
+                            </div>
+                            <div class="theme-preview-card-item">
+                                <div class="theme-preview-card-art" id="theme-preview-card-art"></div>
+                                <div class="theme-preview-card-text">
+                                    <div class="theme-preview-song-title">Private Frequency</div>
+                                    <div class="theme-preview-song-sub">Active Theme Preview</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 6. INTERFACE SCALE -->
+                <div class="theme-section">
+                    <div class="theme-section-header">
+                        <span class="theme-section-label">Interface Scale</span>
+                        <span class="theme-section-hint">Zoom text & elements</span>
+                    </div>
+                    <div class="theme-scale-row">
+                        <button class="theme-scale-btn" data-scale="0.9" title="Small (90%)">Small</button>
+                        <button class="theme-scale-btn active" data-scale="1.0" title="Normal (100%)">Normal</button>
+                        <button class="theme-scale-btn" data-scale="1.1" title="Large (110%)">Large</button>
+                        <button class="theme-scale-btn" data-scale="1.18" title="Extra Large (118%)">Extra</button>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="modal-actions theme-modal-actions">
+                <button id="theme-reset-btn" class="btn-secondary" type="button"><i class="fas fa-undo"></i> Reset Default</button>
+                <div class="theme-actions-right">
+                    <button id="theme-cancel-btn" class="btn-secondary" type="button">Cancel</button>
+                    <button id="theme-apply-btn" class="btn-primary" type="button"><i class="fas fa-check"></i> Save Theme</button>
+                </div>
+            </div>
+
         </div>
     </div>
 
