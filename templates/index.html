@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>psr.fm</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=27">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=28">
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}">
@@ -604,7 +604,7 @@
     </div>
 
     <script src="{{ url_for('static', filename='listening-sync.js') }}?v=3"></script>
-    <script src="{{ url_for('static', filename='main.js') }}?v=27"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=28"></script>
 
     <!-- Equalizer Popover -->
     <div id="eq-popover" class="eq-popover" aria-hidden="true">
@@ -821,7 +821,36 @@
                     </div>
                 </div>
 
-                <!-- 4. FONT / TEXT COLOR -->
+                <!-- 4. CARDS & CONTAINERS STYLE -->
+                <div class="theme-section">
+                    <div class="theme-section-header">
+                        <span class="theme-section-label">Cards &amp; Boxes Style</span>
+                        <span class="theme-section-hint">Recently Added, Top Played &amp; stat cards</span>
+                    </div>
+                    <div class="theme-navbar-options" id="theme-card-options">
+                        <button class="theme-pill-btn active" data-card-mode="glass" title="Translucent frosted glass blending with background">
+                            <i class="fas fa-layer-group"></i> Frosted Glass
+                        </button>
+                        <button class="theme-pill-btn" data-card-mode="harmonize" title="Solid tone harmonized with background">
+                            <i class="fas fa-magic"></i> Auto Harmonize
+                        </button>
+                        <button class="theme-pill-btn" data-card-mode="contrast" title="Deep dark contrasting cards">
+                            <i class="fas fa-moon"></i> Deep Dark
+                        </button>
+                        <button class="theme-pill-btn" data-card-mode="custom" id="theme-card-custom-btn" title="Pick your own card background color">
+                            <i class="fas fa-sliders-h"></i> Custom Color
+                        </button>
+                    </div>
+                    <div class="theme-color-row theme-custom-row" id="theme-card-custom-row" style="display:none;">
+                        <div class="theme-color-picker-wrap">
+                            <input type="color" id="theme-card-picker" class="theme-color-input" value="#16181b" aria-label="Pick custom card background color">
+                            <label for="theme-card-picker" class="theme-color-hex" id="theme-card-hex">#16181b</label>
+                        </div>
+                        <span class="theme-color-desc">Custom card &amp; box background</span>
+                    </div>
+                </div>
+
+                <!-- 5. FONT / TEXT COLOR -->
                 <div class="theme-section">
                     <div class="theme-section-header">
                         <span class="theme-section-label">Font / Text Color</span>
@@ -845,7 +874,7 @@
                     </div>
                 </div>
 
-                <!-- 5. LIVE INTERACTIVE PREVIEW -->
+                <!-- 6. LIVE INTERACTIVE PREVIEW -->
                 <div class="theme-section">
                     <span class="theme-section-label">Live Preview</span>
                     <div class="theme-preview-card" id="theme-preview-card">
@@ -879,7 +908,7 @@
                     </div>
                 </div>
 
-                <!-- 6. INTERFACE SCALE -->
+                <!-- 7. INTERFACE SCALE -->
                 <div class="theme-section">
                     <div class="theme-section-header">
                         <span class="theme-section-label">Interface Scale</span>

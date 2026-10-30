@@ -1197,7 +1197,7 @@ h1, h2, h3, h4, .section-title, .track-title {
     min-height: 92px;
     padding: 16px;
     border-radius: 14px;
-    background: var(--surface-1);
+    background: var(--bg-card, var(--surface-1)); backdrop-filter: blur(12px);
     border-color: var(--border-subtle);
     backdrop-filter: none;
     box-shadow: inset 0 1px rgba(255,255,255,.025);
@@ -1212,7 +1212,7 @@ h1, h2, h3, h4, .section-title, .track-title {
 .stat-icon { width: 38px; height: 38px; border-radius: 10px; background: rgba(255,255,255,.055); }
 
 .dashboard-columns { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.25fr) minmax(0, 1.25fr); gap: 12px; align-items: start; }
-.dashboard-columns .content-section { min-width: 0; margin-top: 0; padding: 18px; border: 1px solid var(--border-subtle); border-radius: 16px; background: rgba(7,9,8,.62); }
+.dashboard-columns .content-section { min-width: 0; margin-top: 0; padding: 18px; border: 1px solid var(--border-subtle); border-radius: 16px; background: var(--bg-card, rgba(255, 255, 255, 0.04)); backdrop-filter: blur(14px); }
 .dashboard-columns .section-heading { margin-bottom: 10px; }
 .dashboard-columns .section-title { font-size: 16px; }
 .dashboard-columns .section-note { display: none; }
@@ -2701,7 +2701,7 @@ h1, h2, h3, h4, .section-title, .track-title {
     padding: 12px 14px;
     border: 1px solid rgba(223,255,232,.1);
     border-radius: 14px;
-    background: rgba(7,9,8,.38);
+    background: var(--bg-card, rgba(255, 255, 255, 0.04));
 }
 .capsule-hero-metrics strong {
     display: block;
@@ -2783,7 +2783,7 @@ h1, h2, h3, h4, .section-title, .track-title {
     padding: 18px;
     border: 1px solid var(--border-subtle);
     border-radius: 16px;
-    background: rgba(7,9,8,.58);
+    background: var(--bg-card, rgba(255, 255, 255, 0.04)); backdrop-filter: blur(14px);
 }
 .capsule-section .section-heading { margin-bottom: 12px; }
 

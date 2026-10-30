@@ -5606,6 +5606,21 @@ function resumePlaybackAfterBackground() {
             }
         }
 
+        function resolveCardColor(theme, bgVars) {
+            const mode = theme.cardMode || 'glass';
+            if (mode === 'harmonize') {
+                const baseHex = bgVars['--bg-main'];
+                return mixWithWhite(baseHex, 0.055);
+            } else if (mode === 'contrast') {
+                return 'rgba(0, 0, 0, 0.55)';
+            } else if (mode === 'custom' && theme.cardCustom) {
+                return theme.cardCustom;
+            } else {
+                // 'glass' (default) - translucent frosted glass
+                return 'rgba(255, 255, 255, 0.045)';
+            }
+        }
+
         function applyTheme(theme) {
             const root = document.documentElement;
 
@@ -5635,6 +5650,10 @@ function resumePlaybackAfterBackground() {
             // --- Navbar / Sidebar Background ---
             const sidebarColor = resolveSidebarColor(theme, bgVars);
             root.style.setProperty('--bg-sidebar', sidebarColor);
+
+            // --- Cards & Boxes Background ---
+            const cardColor = resolveCardColor(theme, bgVars);
+            root.style.setProperty('--bg-card', cardColor);
 
             // --- Font / Text Color ---
             const textHex = theme.textColor || '#f5f7f5';
@@ -5666,6 +5685,8 @@ function resumePlaybackAfterBackground() {
                 bgCustom: '#070908',
                 sidebarMode: 'harmonize',
                 sidebarCustom: '#0e110f',
+                cardMode: 'glass',
+                cardCustom: '#16181b',
                 textColor: '#f5f7f5',
                 scale: '1.0'
             };
@@ -5705,6 +5726,11 @@ function resumePlaybackAfterBackground() {
             const bgCustomRow       = document.getElementById('theme-bg-custom-row');
             const bgCustomPreview   = document.getElementById('theme-bg-custom-preview');
 
+            const cardOptionsEl     = document.getElementById('theme-card-options');
+            const cardPicker        = document.getElementById('theme-card-picker');
+            const cardHexLabel      = document.getElementById('theme-card-hex');
+            const cardCustomRow     = document.getElementById('theme-card-custom-row');
+
             const textPresetsEl     = document.getElementById('theme-text-presets');
             const textPicker        = document.getElementById('theme-text-picker');
             const textHexLabel      = document.getElementById('theme-text-hex');
@@ -5734,11 +5760,15 @@ function resumePlaybackAfterBackground() {
                     bgVars = BG_CONFIGS[draft.bg || 'dark'] || BG_CONFIGS.dark;
                 }
                 const sidebarColor = resolveSidebarColor(draft, bgVars);
+                const cardColor = resolveCardColor(draft, bgVars);
 
                 if (prevSidebar)    prevSidebar.style.backgroundColor = sidebarColor;
                 if (prevContent) {
                     prevContent.style.backgroundColor = bgVars['--bg-main'];
                     prevContent.style.color = draft.textColor || '#f5f7f5';
+                }
+                if (prevCardArt && prevCardArt.parentElement) {
+                    prevCardArt.parentElement.style.backgroundColor = cardColor;
                 }
                 if (prevNavActive) {
                     prevNavActive.style.backgroundColor = draft.accent;
@@ -5782,7 +5812,19 @@ function resumePlaybackAfterBackground() {
                 if (bgHexLabel) bgHexLabel.textContent = curBgCustom;
                 if (bgCustomPreview) bgCustomPreview.style.backgroundColor = curBgCustom;
 
-                // 4. Text / Font Color
+                // 4. Cards & Boxes Style
+                const currentCardMode = draft.cardMode || 'glass';
+                if (cardOptionsEl) {
+                    cardOptionsEl.querySelectorAll('.theme-pill-btn').forEach(btn => {
+                        btn.classList.toggle('active', btn.dataset.cardMode === currentCardMode);
+                    });
+                }
+                const isCustomCard = currentCardMode === 'custom';
+                if (cardCustomRow) cardCustomRow.style.display = isCustomCard ? 'flex' : 'none';
+                if (cardPicker && draft.cardCustom) cardPicker.value = draft.cardCustom;
+                if (cardHexLabel && draft.cardCustom) cardHexLabel.textContent = draft.cardCustom;
+
+                // 5. Text / Font Color
                 const currentText = draft.textColor || '#f5f7f5';
                 if (textPicker) textPicker.value = currentText;
                 if (textHexLabel) textHexLabel.textContent = currentText;
@@ -5792,14 +5834,14 @@ function resumePlaybackAfterBackground() {
                     });
                 }
 
-                // 5. Scale
+                // 6. Scale
                 if (scaleRow) {
                     scaleRow.querySelectorAll('.theme-scale-btn').forEach(btn => {
                         btn.classList.toggle('active', btn.dataset.scale === (draft.scale || '1.0'));
                     });
                 }
 
-                // 6. Mini Preview & Live Full-App Preview
+                // 7. Mini Preview & Live Full-App Preview
                 syncMiniPreview();
                 applyTheme(draft);
             }
@@ -5899,6 +5941,33 @@ function resumePlaybackAfterBackground() {
                 });
             }
 
+            // Cards & Boxes style pills
+            if (cardOptionsEl) {
+                cardOptionsEl.addEventListener('click', e => {
+                    const btn = e.target.closest('.theme-pill-btn');
+                    if (!btn) return;
+                    const mode = btn.dataset.cardMode;
+                    draft.cardMode = mode;
+                    if (mode === 'custom' && !draft.cardCustom) {
+                        draft.cardCustom = '#16181b';
+                    }
+                    syncUI();
+                    if (mode === 'custom' && cardPicker) {
+                        cardPicker.click();
+                    }
+                });
+            }
+
+            // Cards & Boxes custom picker
+            if (cardPicker) {
+                cardPicker.addEventListener('input', () => {
+                    draft.cardMode = 'custom';
+                    draft.cardCustom = cardPicker.value;
+                    if (cardHexLabel) cardHexLabel.textContent = cardPicker.value;
+                    syncUI();
+                });
+            }
+
             // Text / Font Color presets
             if (textPresetsEl) {
                 textPresetsEl.addEventListener('click', e => {
@@ -5950,6 +6019,8 @@ function resumePlaybackAfterBackground() {
                     bgCustom: '#070908',
                     sidebarMode: 'harmonize',
                     sidebarCustom: '#0e110f',
+                    cardMode: 'glass',
+                    cardCustom: '#16181b',
                     textColor: '#f5f7f5',
                     scale: '1.0'
                 };
