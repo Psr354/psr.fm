@@ -25,7 +25,8 @@ from dotenv import load_dotenv
 from services.database import (
     init_db, get_db_connection, extract_song_source_id,
     get_user_by_username, create_user, has_any_user,
-    get_all_users, get_user_files, delete_user_cascade, update_user_password
+    get_all_users, get_user_files, delete_user_cascade, update_user_password,
+    get_user_playback_state, save_user_playback_state, get_user_theme, save_user_theme
 )
 
 from services.downloader import download_queue, start_worker, validate_song_url
@@ -436,6 +437,42 @@ def me():
         'id': current_user.id,
         'can_add_users': is_admin()
     })
+
+
+@app.route('/api/playback-state', methods=['GET'])
+@login_required
+def get_playback_state_route():
+    state = get_user_playback_state(DATABASE_PATH, current_user.id)
+    return jsonify({'status': 'success', 'playback_state': state})
+
+
+@app.route('/api/playback-state', methods=['POST'])
+@login_required
+def save_playback_state_route():
+    payload = get_json_object()
+    if not payload:
+        return jsonify({'error': 'Invalid JSON'}), 400
+    save_user_playback_state(DATABASE_PATH, current_user.id, payload)
+    socketio.emit('playback_sync', payload, room=f'user_{current_user.id}')
+    return jsonify({'status': 'success'})
+
+
+@app.route('/api/user-settings/theme', methods=['GET'])
+@login_required
+def get_user_theme_route():
+    theme = get_user_theme(DATABASE_PATH, current_user.id)
+    return jsonify({'status': 'success', 'theme': theme})
+
+
+@app.route('/api/user-settings/theme', methods=['POST'])
+@login_required
+def save_user_theme_route():
+    payload = get_json_object()
+    if not payload:
+        return jsonify({'error': 'Invalid JSON'}), 400
+    save_user_theme(DATABASE_PATH, current_user.id, payload)
+    socketio.emit('theme_sync', payload, room=f'user_{current_user.id}')
+    return jsonify({'status': 'success'})
 
 @app.route('/api/users', methods=['POST'])
 @login_required

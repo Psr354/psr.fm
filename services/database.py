@@ -348,6 +348,26 @@ def init_db(db_path):
         )
     ''')
 
+    # ==========================================
+    # CROSS-DEVICE PLAYBACK & SETTINGS STATE
+    # ==========================================
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_playback_state (
+            user_id INTEGER PRIMARY KEY,
+            state_json TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_settings (
+            user_id INTEGER PRIMARY KEY,
+            theme_json TEXT DEFAULT '',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+    ''')
+
     # Enforce one row per YouTube source for each user when legacy data is clean
     # enough to support it. Older installations may already contain duplicates;
     # the worker still performs an atomic lookup before inserting in that case.
@@ -511,6 +531,8 @@ def update_user_password(database_path, user_id, new_password):
         conn.close()
 
 
+
+
 def update_user_role(database_path, user_id, new_role):
     """
     Update user role.
@@ -542,6 +564,8 @@ def update_user_role(database_path, user_id, new_role):
         conn.close()
 
 
+
+
 def update_song_lyrics(database_path, song_id, lyrics, synced_lyrics, word_synced_lyrics='', status='found'):
     conn = get_db_connection(database_path)
     try:
@@ -556,5 +580,78 @@ def update_song_lyrics(database_path, song_id, lyrics, synced_lyrics, word_synce
         )
         conn.commit()
         return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+# ==========================================
+# CROSS-DEVICE PLAYBACK & THEME STATE
+# ==========================================
+def get_user_playback_state(database_path, user_id):
+    import json
+    conn = get_db_connection(database_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT state_json FROM user_playback_state WHERE user_id = ?', (user_id,))
+        row = cursor.fetchone()
+        if row and row['state_json']:
+            try:
+                return json.loads(row['state_json'])
+            except Exception:
+                return None
+        return None
+    finally:
+        conn.close()
+
+
+def save_user_playback_state(database_path, user_id, state_dict):
+    import json
+    conn = get_db_connection(database_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO user_playback_state (user_id, state_json, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                state_json = excluded.state_json,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (user_id, json.dumps(state_dict)))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def get_user_theme(database_path, user_id):
+    import json
+    conn = get_db_connection(database_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT theme_json FROM user_settings WHERE user_id = ?', (user_id,))
+        row = cursor.fetchone()
+        if row and row['theme_json']:
+            try:
+                return json.loads(row['theme_json'])
+            except Exception:
+                return None
+        return None
+    finally:
+        conn.close()
+
+
+def save_user_theme(database_path, user_id, theme_dict):
+    import json
+    conn = get_db_connection(database_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO user_settings (user_id, theme_json, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                theme_json = excluded.theme_json,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (user_id, json.dumps(theme_dict)))
+        conn.commit()
+        return True
     finally:
         conn.close()

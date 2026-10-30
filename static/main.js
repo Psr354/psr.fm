@@ -44,10 +44,23 @@ window.fetch = async function(url, options = {}) {
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
 
+    // Unique device/session identifier for cross-device sync
+    let CLIENT_DEVICE_ID = null;
+    try {
+        CLIENT_DEVICE_ID = sessionStorage.getItem('psr_device_id');
+        if (!CLIENT_DEVICE_ID) {
+            CLIENT_DEVICE_ID = 'dev_' + Math.random().toString(36).slice(2, 10) + '_' + Date.now().toString(36);
+            sessionStorage.setItem('psr_device_id', CLIENT_DEVICE_ID);
+        }
+    } catch (_) {
+        CLIENT_DEVICE_ID = 'dev_' + Date.now();
+    }
+
     // ==========================================
     // STATE MANAGEMENT (Single Source of Truth)
     // ==========================================
     const state = {
+        deviceId: CLIENT_DEVICE_ID,
         capsulePeriod: 'month-current',
         capsuleData: null,
         playQueue: [],
@@ -2984,6 +2997,20 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     });
 
     // ==========================================
+    // CROSS-DEVICE PLAYBACK SYNC (Socket.IO)
+    // ==========================================
+    socket.on('playback_sync', (remoteState) => {
+        if (!remoteState || !remoteState.songMeta) return;
+        if (remoteState.deviceId && remoteState.deviceId === CLIENT_DEVICE_ID) {
+            return;
+        }
+        applySavedPlaybackState(remoteState, false);
+        try {
+            localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(remoteState));
+        } catch (_) {}
+    });
+
+    // ==========================================
     // PLAYLIST MODAL
     // ==========================================
     const playlistModal = document.getElementById('playlist-modal');
@@ -3106,6 +3133,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             state.shuffleOrder = []; // Force a fresh shuffle order when turned on
         }
         buildQueue();
+        savePlaybackState(true);
     });
 
     document.getElementById('queue-btn')?.addEventListener('click', (e) => {
@@ -3133,6 +3161,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             btn.setAttribute('aria-label', label);
             btn.title = label;
             showToast(label, 'success');
+            savePlaybackState(true);
         }
     });
 
@@ -3799,11 +3828,43 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         }
     });
         // ==========================================
-    // PLAYBACK PERSISTENCE (Crash / Reload Recovery)
+    // PLAYBACK PERSISTENCE & CROSS-DEVICE SYNC
     // ==========================================
     const PLAYBACK_STATE_KEY = 'psr_playback_state';
     let lastSavePlaybackTime = 0;
     let cachedPlaybackPayload = null;
+    let lastServerSyncTime = 0;
+    let serverSyncTimer = null;
+
+    function syncPlaybackToServer(payload, immediate = false) {
+        if (!payload || !navigator.onLine) return;
+        const now = Date.now();
+        if (!immediate && now - lastServerSyncTime < 3500) {
+            if (!serverSyncTimer) {
+                serverSyncTimer = setTimeout(() => {
+                    serverSyncTimer = null;
+                    if (cachedPlaybackPayload) {
+                        syncPlaybackToServer(cachedPlaybackPayload, true);
+                    }
+                }, 3500);
+            }
+            return;
+        }
+        if (serverSyncTimer) {
+            clearTimeout(serverSyncTimer);
+            serverSyncTimer = null;
+        }
+        lastServerSyncTime = now;
+
+        try {
+            fetch('/api/playback-state', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                keepalive: true
+            }).catch(() => {});
+        } catch (_) {}
+    }
 
     function savePlaybackState(force = false) {
         if (!state.currentSongMeta || !state.currentPlayingSongId) return;
@@ -3812,6 +3873,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         lastSavePlaybackTime = now;
         try {
             const currentTime = el.audio ? el.audio.currentTime : 0;
+            const isPlaying = el.audio ? !el.audio.paused : false;
+
             // Recompute the heavy metadata payload only when track/playlist actually changes
             if (force || !cachedPlaybackPayload || cachedPlaybackPayload.songId !== state.currentPlayingSongId) {
                 const slimSongs = Array.isArray(state.currentPlaylistSongs)
@@ -3844,79 +3907,154 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
                 };
             }
             cachedPlaybackPayload.currentTime = currentTime;
+            cachedPlaybackPayload.isPlaying = isPlaying;
             cachedPlaybackPayload.timestamp = now;
+            cachedPlaybackPayload.deviceId = CLIENT_DEVICE_ID;
+
             localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(cachedPlaybackPayload));
+            syncPlaybackToServer(cachedPlaybackPayload, force);
         } catch (_) {}
+    }
+
+    function applySavedPlaybackState(saved, startPlaying = false) {
+        if (!saved || !saved.songMeta) return;
+
+        // If audio is currently playing locally and we are not explicitly told to startPlaying:
+        if (!startPlaying && el.audio && !el.audio.paused && saved.deviceId && saved.deviceId !== CLIENT_DEVICE_ID) {
+            // If the other device started playing, pause locally to avoid two devices playing at once
+            if (saved.isPlaying) {
+                state.shouldBePlaying = false;
+                try { el.audio.pause(); } catch (_) {}
+                updatePlayPauseIcon(false);
+                if (typeof showToast === 'function') {
+                    showToast('Playback moved to another device', 'info');
+                }
+            } else {
+                return;
+            }
+        }
+
+        state.currentPlaylistId = saved.playlistId || null;
+        state.currentPlaylistSongs = Array.isArray(saved.playlistSongs) && saved.playlistSongs.length ? saved.playlistSongs : [saved.songMeta];
+        state.currentSongIndex = typeof saved.songIndex === 'number' ? saved.songIndex : 0;
+        state.currentSongMeta = saved.songMeta;
+        state.currentPlayingSongId = String(saved.songId || saved.songMeta.id);
+        state.playbackStatisticsSongId = saved.songMeta.id;
+        state.repeatMode = typeof saved.repeatMode === 'number' ? saved.repeatMode : 0;
+        state.isShuffle = Boolean(saved.isShuffle);
+
+        if (el.playerTitle) el.playerTitle.innerText = saved.songMeta.title || '';
+        if (el.playerArtist) el.playerArtist.innerText = saved.songMeta.artist || 'Unknown';
+        if (el.playerArt) {
+            el.playerArt.src = '/static/album_art/' + mediaUrlName(saved.songMeta.album_art);
+            el.playerArt.alt = (saved.songMeta.title || 'Track') + ' album artwork';
+        }
+        if (saved.duration && el.duration) {
+            el.duration.innerText = formatTime(saved.duration);
+        }
+        if (typeof saved.currentTime === 'number' && el.currentTime) {
+            el.currentTime.innerText = formatTime(saved.currentTime);
+            if (saved.duration && saved.duration > 0) {
+                const pct = (saved.currentTime / saved.duration) * 100;
+                if (el.progressBar) el.progressBar.value = pct;
+                if (el.progressFill) el.progressFill.style.width = pct + '%';
+            }
+        }
+
+        const shuffleBtn = document.getElementById('shuffle-btn');
+        if (shuffleBtn) shuffleBtn.classList.toggle('active', state.isShuffle);
+
+        const repeatBtn = document.getElementById('repeat-btn');
+        if (repeatBtn) {
+            repeatBtn.classList.toggle('active', state.repeatMode > 0);
+            repeatBtn.innerHTML = state.repeatMode === 2
+                ? '<i class="fas fa-redo"></i><span class="repeat-one">1</span>'
+                : '<i class="fas fa-redo"></i>';
+        }
+
+        updatePlayPauseIcon(startPlaying);
+        updateMediaSession(saved.songMeta);
+        buildQueue();
+        loadLyrics(saved.songMeta.id);
+        if (typeof highlightPlayingSong === 'function') {
+            highlightPlayingSong();
+        }
+
+        const audioSrc = saved.songMeta.filename
+            ? '/audio/' + mediaUrlName(saved.songMeta.filename)
+            : '/api/library-songs/' + saved.songMeta.id + '/stream';
+
+        const currentSrc = el.audio ? (el.audio.getAttribute('src') || el.audio.src || '') : '';
+        const targetFilename = mediaUrlName(saved.songMeta.filename || '');
+        const isDifferentSrc = !currentSrc || (targetFilename && !currentSrc.includes(encodeURI(targetFilename)));
+
+        if (el.audio) {
+            if (isDifferentSrc) {
+                el.audio.src = audioSrc;
+                if (saved.currentTime > 0) {
+                    const onLoaded = () => {
+                        try { el.audio.currentTime = saved.currentTime; } catch (_) {}
+                    };
+                    el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
+                }
+            } else {
+                if (el.audio.paused && typeof saved.currentTime === 'number') {
+                    try {
+                        if (Math.abs(el.audio.currentTime - saved.currentTime) > 2) {
+                            el.audio.currentTime = saved.currentTime;
+                        }
+                    } catch (_) {}
+                }
+            }
+        }
+
+        if (startPlaying && typeof playAudio === 'function') {
+            playAudio();
+        }
+    }
+
+    async function syncPlaybackStateFromServer() {
+        if (!navigator.onLine) return;
+        try {
+            const res = await fetch('/api/playback-state');
+            if (!res.ok) return;
+            const data = await res.json();
+            const serverState = data.playback_state;
+            if (!serverState || !serverState.songMeta) return;
+
+            // Don't overwrite if audio is currently playing locally
+            if (el.audio && !el.audio.paused) return;
+
+            const localRaw = localStorage.getItem(PLAYBACK_STATE_KEY);
+            let localTime = 0;
+            if (localRaw) {
+                try { localTime = JSON.parse(localRaw).timestamp || 0; } catch (_) {}
+            }
+
+            if ((serverState.timestamp || 0) >= localTime) {
+                applySavedPlaybackState(serverState, false);
+                localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(serverState));
+            }
+        } catch (e) {
+            console.warn('Could not sync playback state from server:', e);
+        }
     }
 
     function restorePlaybackState() {
         try {
             const raw = localStorage.getItem(PLAYBACK_STATE_KEY);
-            if (!raw) return;
-            const saved = JSON.parse(raw);
-            if (!saved || !saved.songMeta) return;
-
-            // Don't overwrite if audio is currently playing
-            if (state.currentPlayingSongId || (el.audio && !el.audio.paused)) return;
-
-            state.currentPlaylistId = saved.playlistId || null;
-            state.currentPlaylistSongs = Array.isArray(saved.playlistSongs) && saved.playlistSongs.length ? saved.playlistSongs : [saved.songMeta];
-            state.currentSongIndex = typeof saved.songIndex === 'number' ? saved.songIndex : 0;
-            state.currentSongMeta = saved.songMeta;
-            state.currentPlayingSongId = String(saved.songId || saved.songMeta.id);
-            state.playbackStatisticsSongId = saved.songMeta.id;
-            state.repeatMode = typeof saved.repeatMode === 'number' ? saved.repeatMode : 0;
-            state.isShuffle = Boolean(saved.isShuffle);
-
-            if (el.playerTitle) el.playerTitle.innerText = saved.songMeta.title || '';
-            if (el.playerArtist) el.playerArtist.innerText = saved.songMeta.artist || 'Unknown';
-            if (el.playerArt) {
-                el.playerArt.src = '/static/album_art/' + mediaUrlName(saved.songMeta.album_art);
-                el.playerArt.alt = saved.songMeta.title + ' album artwork';
-            }
-            if (saved.duration && el.duration) {
-                el.duration.innerText = formatTime(saved.duration);
-            }
-            if (saved.currentTime && el.currentTime) {
-                el.currentTime.innerText = formatTime(saved.currentTime);
-                if (saved.duration) {
-                    const pct = (saved.currentTime / saved.duration) * 100;
-                    if (el.progressBar) el.progressBar.value = pct;
-                    if (el.progressFill) el.progressFill.style.width = pct + '%';
+            if (raw) {
+                const saved = JSON.parse(raw);
+                if (saved && saved.songMeta && (!el.audio || el.audio.paused)) {
+                    applySavedPlaybackState(saved, false);
                 }
             }
-
-            const shuffleBtn = document.getElementById('shuffle-btn');
-            if (shuffleBtn) shuffleBtn.classList.toggle('active', state.isShuffle);
-
-            const repeatBtn = document.getElementById('repeat-btn');
-            if (repeatBtn) {
-                repeatBtn.classList.toggle('active', state.repeatMode > 0);
-                repeatBtn.innerHTML = state.repeatMode === 2
-                    ? '<i class="fas fa-redo"></i><span class="repeat-one">1</span>'
-                    : '<i class="fas fa-redo"></i>';
-            }
-
-            updatePlayPauseIcon(false);
-            updateMediaSession(saved.songMeta);
-            buildQueue();
-            loadLyrics(saved.songMeta.id);
-
-            const audioSrc = saved.songMeta.filename
-                ? '/audio/' + mediaUrlName(saved.songMeta.filename)
-                : '/api/library-songs/' + saved.songMeta.id + '/stream';
-            el.audio.src = audioSrc;
-
-            if (saved.currentTime > 0) {
-                const onLoaded = () => {
-                    try { el.audio.currentTime = saved.currentTime; } catch (_) {}
-                };
-                el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
-            }
         } catch (e) {
-            console.warn('Could not restore previous playback state:', e);
+            console.warn('Could not restore local playback state:', e);
         }
+        syncPlaybackStateFromServer();
     }
+
 
 function resumePlaybackAfterBackground() {
         if (!state.shouldBePlaying || state.isSeeking || el.audio.ended) return;
@@ -5696,10 +5834,42 @@ function resumePlaybackAfterBackground() {
             try {
                 localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(theme));
             } catch {}
+            if (navigator.onLine) {
+                fetch('/api/user-settings/theme', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(theme)
+                }).catch(() => {});
+            }
         }
 
-        // Apply theme immediately on startup
+        async function syncThemeFromServer() {
+            if (!navigator.onLine) return;
+            try {
+                const res = await fetch('/api/user-settings/theme');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.theme && typeof data.theme === 'object' && Object.keys(data.theme).length > 0) {
+                        localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(data.theme));
+                        applyTheme(data.theme);
+                    }
+                }
+            } catch (_) {}
+        }
+
+        // Apply theme immediately on startup from local, then sync server
         applyTheme(getCurrentTheme());
+        syncThemeFromServer();
+
+        // Listen for real-time theme updates from other devices
+        socket.on('theme_sync', (remoteTheme) => {
+            if (remoteTheme && typeof remoteTheme === 'object') {
+                try {
+                    localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(remoteTheme));
+                } catch (_) {}
+                applyTheme(remoteTheme);
+            }
+        });
 
         // Wire Modal and Interactive Logic
         const initThemeManager = () => {
