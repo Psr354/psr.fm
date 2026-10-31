@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>psr.fm</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=33">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=40">
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}">
@@ -110,15 +110,20 @@
                         <h2>Frequency Focus</h2>
                         <p class="page-subtitle">Your listening recap — see what defined your sound.</p>
                     </div>
-                    <label class="capsule-period-control" for="capsule-period-select">
-                        <span>Period</span>
-                        <select id="capsule-period-select" class="period-selector">
-                            <option value="month-current">This Month</option>
-                            <option value="month-prev">Last Month</option>
-                            <option value="year-current">This Year</option>
-                            <option value="year-prev">Last Year</option>
-                        </select>
-                    </label>
+                    <div class="capsule-header-controls">
+                        <label class="capsule-period-control" for="capsule-period-select">
+                            <span>Period</span>
+                            <select id="capsule-period-select" class="period-selector">
+                                <option value="month-current">This Month</option>
+                                <option value="month-prev">Last Month</option>
+                                <option value="year-current">This Year</option>
+                                <option value="year-prev">Last Year</option>
+                            </select>
+                        </label>
+                        <button id="capsule-share-btn" class="btn-primary compact capsule-share-btn" type="button" aria-label="Share Frequency Focus as image card">
+                            <i class="fas fa-share-alt" aria-hidden="true"></i> Share Card
+                        </button>
+                    </div>
                 </div>
                 <div id="capsule-content">
                     <!-- Populated by JS -->
@@ -603,8 +608,71 @@
         </div>
     </div>
 
+    <!-- ========== SHARE FREQUENCY FOCUS MODAL ========== -->
+    <div id="share-capsule-modal" class="modal" aria-hidden="true">
+        <div class="modal-content share-capsule-modal" role="dialog" aria-modal="true" aria-labelledby="share-capsule-title">
+            <div class="share-modal-header">
+                <div>
+                    <p class="lyrics-eyebrow">Frequency Focus</p>
+                    <h3 id="share-capsule-title">Share Listening Recap</h3>
+                </div>
+                <button id="share-capsule-close-btn" class="lyrics-close-btn" type="button" aria-label="Close share modal">
+                    <i class="fas fa-times" aria-hidden="true"></i>
+                </button>
+            </div>
+
+            <div class="share-capsule-controls">
+                <div class="share-section">
+                    <label>Card Format</label>
+                    <div class="share-format-grid" role="radiogroup" aria-label="Card aspect ratio">
+                        <button type="button" class="share-format-btn active" data-format="story">
+                            <i class="fas fa-mobile-alt"></i> Story (9:16)
+                        </button>
+                        <button type="button" class="share-format-btn" data-format="square">
+                            <i class="fas fa-square"></i> Square (1:1)
+                        </button>
+                    </div>
+                </div>
+
+                <div class="share-section">
+                    <label>Color Theme</label>
+                    <div class="share-theme-grid" id="share-capsule-theme-grid" role="listbox" aria-label="Card theme">
+                        <button class="share-theme active" type="button" data-theme="emerald" title="Emerald Aurora" style="background: linear-gradient(135deg, #064e3b, #10b981);"></button>
+                        <button class="share-theme" type="button" data-theme="sapphire" title="Midnight Sapphire" style="background: linear-gradient(135deg, #0f172a, #3b82f6);"></button>
+                        <button class="share-theme" type="button" data-theme="violet" title="Neon Violet" style="background: linear-gradient(135deg, #2e1065, #a855f7);"></button>
+                        <button class="share-theme" type="button" data-theme="sunset" title="Sunset Crimson" style="background: linear-gradient(135deg, #4c0519, #f43f5e);"></button>
+                        <button class="share-theme" type="button" data-theme="amber" title="Amber Gold" style="background: linear-gradient(135deg, #451a03, #f59e0b);"></button>
+                        <button class="share-theme" type="button" data-theme="obsidian" title="Obsidian Black" style="background: linear-gradient(135deg, #09090b, #27272a);"></button>
+                    </div>
+                    <div class="share-custom-theme" aria-label="Custom card colors">
+                        <span>Custom</span>
+                        <label class="share-color-control" title="Background start color">Start <input id="share-capsule-start" type="color" value="#064e3b" aria-label="Custom background start color"><input id="share-capsule-start-hex" class="share-hex-input" type="text" value="#064E3B" maxlength="7" spellcheck="false" autocomplete="off"></label>
+                        <label class="share-color-control" title="Background end color">End <input id="share-capsule-end" type="color" value="#10b981" aria-label="Custom background end color"><input id="share-capsule-end-hex" class="share-hex-input" type="text" value="#10B981" maxlength="7" spellcheck="false" autocomplete="off"></label>
+                    </div>
+                </div>
+
+                <div class="share-section">
+                    <label for="share-capsule-tagline">Card Tagline</label>
+                    <input type="text" id="share-capsule-tagline" class="theme-color-input" style="width:100%; height:42px; border-radius:8px; padding:0 12px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); color:#fff; font-size:13px; font-weight:600;" value="My Listening Journey" maxlength="40">
+                </div>
+            </div>
+
+            <div class="share-section share-capsule-preview-wrap">
+                <label>Preview</label>
+                <div class="share-capsule-canvas-container">
+                    <canvas id="share-capsule-canvas" class="share-capsule-canvas" width="1080" height="1920" aria-label="Frequency Focus share card preview"></canvas>
+                </div>
+            </div>
+
+            <div class="modal-actions share-actions">
+                <button id="share-capsule-copy-btn" class="btn-secondary" type="button"><i class="fas fa-copy"></i> Copy Image</button>
+                <button id="share-capsule-download-btn" class="btn-primary" type="button"><i class="fas fa-download"></i> Download PNG</button>
+            </div>
+        </div>
+    </div>
+
     <script src="{{ url_for('static', filename='listening-sync.js') }}?v=3"></script>
-    <script src="{{ url_for('static', filename='main.js') }}?v=33"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=40"></script>
 
     <!-- Equalizer Popover -->
     <div id="eq-popover" class="eq-popover" aria-hidden="true">

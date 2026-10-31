@@ -1,12 +1,12 @@
-const SHELL_CACHE = 'psr354-shell-v33';
+const SHELL_CACHE = 'psr354-shell-v40';
 const MEDIA_CACHE = 'psr354-media-v3';
 const RUNTIME_CACHE = 'psr354-runtime-v1';
 const APP_SHELL_KEY = '/?offline-app-shell=1';
 const SHELL_FILES = [
   '/static/offline.html', '/static/offline-register.js',
-  '/static/main.js', '/static/main.js?v=33',
+  '/static/main.js', '/static/main.js?v=40',
   '/static/listening-sync.js', '/static/listening-sync.js?v=3',
-  '/static/style.css', '/static/style.css?v=33',
+  '/static/style.css', '/static/style.css?v=40',
   '/static/site.webmanifest',
   '/static/favicon-32.png', '/static/apple-touch-icon.png',
   '/static/icon-192.png', '/static/icon-512.png', '/static/psrfm.png'

@@ -2695,9 +2695,9 @@ h1, h2, h3, h4, .section-title, .track-title {
 }
 .capsule-hero-metrics {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
-    max-width: 620px;
+    max-width: 380px;
     margin-top: 24px;
 }
 .capsule-hero-metrics div {
@@ -2895,7 +2895,7 @@ h1, h2, h3, h4, .section-title, .track-title {
     .period-selector { width: 100%; }
     .capsule-hero { padding: 18px; border-radius: 16px; }
     .capsule-hero h3 { font-size: 32px; }
-    .capsule-hero-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .capsule-hero-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-width: 100%; }
     .capsule-hero-metrics div { padding: 10px; }
     .capsule-section { padding: 14px; }
     .capsule-song-item .song-stats { display: flex; margin-left: 6px; min-width: 74px; }
@@ -3489,4 +3489,146 @@ h1, h2, h3, h4, .section-title, .track-title {
 .theme-preview-lyric .preview-lyric-active {
     color: #ffffff;
     text-shadow: 0 0 8px rgba(var(--lyric-rgb, var(--accent-rgb)), 0.65);
+}
+
+/* --- Frequency Focus Share Card & Controls --- */
+.capsule-header-controls {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+}
+
+.capsule-share-btn {
+    min-height: 46px;
+    padding: 0 18px;
+    font-weight: 700;
+    gap: 8px;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 10px;
+    white-space: nowrap;
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    background: linear-gradient(135deg, var(--accent-color), var(--accent-hover));
+    color: #061207;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.25);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+
+.capsule-share-btn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.08);
+    box-shadow: 0 6px 18px rgba(var(--accent-rgb), 0.35);
+}
+
+.share-capsule-modal {
+    width: min(940px, calc(100vw - 32px));
+    max-width: 940px;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(280px, 360px);
+    gap: 20px;
+}
+
+.share-capsule-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.share-format-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.share-format-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 11px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.share-format-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.share-format-btn.active {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.2);
+}
+
+.share-capsule-preview-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.share-capsule-canvas-container {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 8px 0;
+}
+
+.share-capsule-canvas {
+    width: 100%;
+    max-width: 320px;
+    height: auto;
+    border-radius: 18px;
+    background: #09090b;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: max-width 0.2s ease;
+}
+
+.share-capsule-canvas.format-square {
+    max-width: 340px;
+}
+
+@media (max-width: 768px) {
+    .capsule-header-controls {
+        width: 100%;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+    .capsule-share-btn {
+        width: 100%;
+        justify-content: center;
+    }
+    .share-capsule-modal {
+        grid-template-columns: 1fr;
+        width: 100%;
+        max-width: none;
+    }
+}
+
+.capsule-vibe-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    font-size: 12px;
+    font-weight: 700;
+    color: #fbbf24;
+    margin-top: 6px;
 }

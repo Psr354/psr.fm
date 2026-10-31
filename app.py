@@ -1876,6 +1876,18 @@ def get_recap():
         LIMIT 10
     ''', (start_str, end_str, current_user.id, start_str, end_str)).fetchall()
     
+    # Peak listening hour
+    peak_hour_row = db.execute('''
+        SELECT CAST(strftime('%H', datetime(timestamp, ?)) AS INTEGER) as hour,
+               SUM(seconds_listened) as total_seconds,
+               COUNT(id) as count
+        FROM listening_logs
+        WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
+        GROUP BY hour
+        ORDER BY total_seconds DESC
+        LIMIT 1
+    ''', (local_modifier, current_user.id, start_str, end_str)).fetchone()
+
     # Stats
     stats_row = db.execute('''
         SELECT 
@@ -1962,6 +1974,7 @@ def get_recap():
         },
         "top_played": [dict(r) for r in top_played_rows],
         "top_listened": [dict(r) for r in top_listened_rows],
+        "peak_hour": dict(peak_hour_row) if peak_hour_row else None,
         "stats": stats
     }
     if monthly_breakdown:
