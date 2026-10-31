@@ -20,7 +20,7 @@ button { touch-action: manipulation; }
 .app-container { display: flex; flex: 1; overflow: hidden; }
 
 .sidebar { width: 280px; background-color: var(--bg-elevated); padding: 24px; display: flex; flex-direction: column; gap: 22px; border-right: 1px solid var(--border-subtle); overflow-y: auto; }
-.logo h1 { font-size: 26px; font-weight: 800; background: linear-gradient(90deg, var(--accent-color), #1ed760); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.logo h1 { font-size: 26px; font-weight: 800; background: linear-gradient(90deg, var(--accent-color), var(--accent-hover)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 .user-info { display: flex; align-items: center; gap: 12px; padding: 12px; background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02)); border: 1px solid var(--border-subtle); border-radius: 8px; }
 .user-avatar { width: 40px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: var(--accent-color); color: #061207; font-weight: 800; flex-shrink: 0; }
 .user-details { min-width: 0; }
@@ -414,12 +414,12 @@ button { touch-action: manipulation; }
 }
 
 .lyric-line:not(.past):not(.active) {
-    color: #3f4b46;
+    color: var(--text-muted);
     opacity: 0.5;
 }
 
 .lyric-line.past {
-    color: #c5dbcd;
+    color: var(--text-secondary);
     opacity: 0.98;
     transform: translateX(0);
     background: rgba(var(--accent-rgb), 0.025);
@@ -427,12 +427,12 @@ button { touch-action: manipulation; }
 }
 
 .lyric-line.past .lyric-word {
-    color: #d7f1df;
+    color: var(--lyric-spoken, var(--accent-hover));
     text-shadow: none;
 }
 
 .lyric-line.past .lyric-char {
-    color: #d7f1df;
+    color: var(--lyric-spoken, var(--accent-hover));
     opacity: 1;
     text-shadow: none;
 }
@@ -454,8 +454,8 @@ button { touch-action: manipulation; }
 .lyric-line.active .lyric-char,
 .lyric-line-display .lyric-char,
 .lyric-line-display.active .lyric-char {
-    color: #425048;
-    opacity: 0.48;
+    color: var(--text-muted);
+    opacity: 0.55;
     text-shadow: none;
 }
 
@@ -485,7 +485,7 @@ button { touch-action: manipulation; }
     width: var(--word-progress, 0%);
     border-radius: 999px;
     pointer-events: none;
-    background: linear-gradient(90deg, #30d66b, #b7f7c9);
+    background: linear-gradient(90deg, var(--lyric-color, var(--accent-color)), var(--lyric-hover, var(--accent-hover)));
     opacity: 0;
     transition: none;
 }
@@ -505,39 +505,39 @@ button { touch-action: manipulation; }
 }
 
 .lyric-word.spoken {
-    color: #d8ffe5;
-    text-shadow: 0 0 10px rgba(var(--accent-rgb), 0.2);
+    color: var(--lyric-spoken, var(--accent-hover));
+    text-shadow: 0 0 10px rgba(var(--lyric-rgb, var(--accent-rgb)), 0.25);
 }
 
 .lyric-word.active-word {
     color: #ffffff;
-    text-shadow: 0 0 12px rgba(134, 239, 172, 0.62), 0 0 24px rgba(var(--accent-rgb), 0.28);
+    text-shadow: 0 0 12px rgba(var(--lyric-rgb, var(--accent-rgb)), 0.65), 0 0 24px rgba(var(--lyric-rgb, var(--accent-rgb)), 0.32);
 }
 
 .lyric-char.active-char {
     color: #ffffff;
     opacity: 1;
-    text-shadow: 0 0 10px rgba(134, 239, 172, 0.7);
+    text-shadow: 0 0 10px rgba(var(--lyric-rgb, var(--accent-rgb)), 0.7);
 }
 
 .lyric-char.spoken-char {
-    color: #d8ffe5;
-    opacity: 0.92;
-    text-shadow: 0 0 7px rgba(var(--accent-rgb), 0.22);
+    color: var(--lyric-spoken, var(--accent-hover));
+    opacity: 0.95;
+    text-shadow: 0 0 7px rgba(var(--lyric-rgb, var(--accent-rgb)), 0.25);
 }
 
 .lyric-line.active .lyric-char.active-char,
 .lyric-line-display .lyric-char.active-char {
     color: #ffffff;
     opacity: 1;
-    text-shadow: 0 0 12px rgba(134, 239, 172, 0.78);
+    text-shadow: 0 0 12px rgba(var(--lyric-rgb, var(--accent-rgb)), 0.78);
 }
 
 .lyric-line.active .lyric-char.spoken-char,
 .lyric-line-display .lyric-char.spoken-char {
-    color: #d8ffe5;
+    color: var(--lyric-spoken, var(--accent-hover));
     opacity: 0.96;
-    text-shadow: 0 0 9px rgba(var(--accent-rgb), 0.28);
+    text-shadow: 0 0 9px rgba(var(--lyric-rgb, var(--accent-rgb)), 0.28);
 }
 
 @keyframes lyricLineRise {
@@ -1103,6 +1103,10 @@ body, .app-container {
     --accent-color: #30d66b;
     --accent-hover: #55e584;
     --accent-rgb: 48, 214, 107;
+    --lyric-color: #30d66b;
+    --lyric-hover: #55e584;
+    --lyric-spoken: #d8ffe5;
+    --lyric-rgb: 48, 214, 107;
     --focus-ring: #6ee7a0;
     --border-subtle: rgba(223, 255, 232, 0.11);
     --surface-1: rgba(255, 255, 255, 0.035);
@@ -2160,7 +2164,7 @@ h1, h2, h3, h4, .section-title, .track-title {
     font-size: 16px;
     color: #000;
     flex-shrink: 0;
-    background: linear-gradient(135deg, var(--accent-color), #1ed760);
+    background: linear-gradient(135deg, var(--accent-color), var(--accent-hover));
     box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.25);
 }
 
@@ -3461,3 +3465,28 @@ h1, h2, h3, h4, .section-title, .track-title {
     border-radius: 10px;
 }
 
+
+
+.theme-preview-lyric {
+    margin-top: 10px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.theme-preview-lyric i {
+    opacity: 0.5;
+    font-size: 10px;
+}
+.theme-preview-lyric .preview-lyric-spoken {
+    color: var(--lyric-spoken, var(--accent-hover));
+}
+.theme-preview-lyric .preview-lyric-active {
+    color: #ffffff;
+    text-shadow: 0 0 8px rgba(var(--lyric-rgb, var(--accent-rgb)), 0.65);
+}

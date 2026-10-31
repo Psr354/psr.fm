@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>psr.fm</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=32">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=33">
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}">
@@ -604,7 +604,7 @@
     </div>
 
     <script src="{{ url_for('static', filename='listening-sync.js') }}?v=3"></script>
-    <script src="{{ url_for('static', filename='main.js') }}?v=32"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=33"></script>
 
     <!-- Equalizer Popover -->
     <div id="eq-popover" class="eq-popover" aria-hidden="true">
@@ -903,7 +903,41 @@
                     </div>
                 </div>
 
-                <!-- 7. LIVE INTERACTIVE PREVIEW -->
+                <!-- 7. LYRICS HIGHLIGHT COLOR -->
+                <div class="theme-section">
+                    <div class="theme-section-header">
+                        <span class="theme-section-label">Lyrics Highlight Color</span>
+                        <span class="theme-section-hint">Mini player bar &amp; karaoke lyrics glow</span>
+                    </div>
+                    <div class="theme-navbar-options" id="theme-lyric-options">
+                        <button class="theme-pill-btn active" data-lyric-mode="accent" title="Matches selected accent color">
+                            <i class="fas fa-magic"></i> Match Accent
+                        </button>
+                        <button class="theme-pill-btn" data-lyric-mode="custom" id="theme-lyric-custom-btn" title="Pick your own lyrics highlight color">
+                            <i class="fas fa-sliders-h"></i> Custom Color
+                        </button>
+                    </div>
+                    <div class="theme-presets" id="theme-lyric-presets" style="margin-top: 10px; display: none;">
+                        <button class="theme-swatch" data-lyric="#30d66b" title="Emerald Green" style="background:#30d66b;"></button>
+                        <button class="theme-swatch" data-lyric="#3b82f6" title="Sapphire Blue" style="background:#3b82f6;"></button>
+                        <button class="theme-swatch" data-lyric="#8b5cf6" title="Neon Violet" style="background:#8b5cf6;"></button>
+                        <button class="theme-swatch" data-lyric="#f43f5e" title="Crimson Rose" style="background:#f43f5e;"></button>
+                        <button class="theme-swatch" data-lyric="#f97316" title="Sunset Orange" style="background:#f97316;"></button>
+                        <button class="theme-swatch" data-lyric="#eab308" title="Amber Gold" style="background:#eab308;"></button>
+                        <button class="theme-swatch" data-lyric="#06b6d4" title="Cyber Cyan" style="background:#06b6d4;"></button>
+                        <button class="theme-swatch" data-lyric="#ec4899" title="Hot Pink" style="background:#ec4899;"></button>
+                        <button class="theme-swatch" data-lyric="#ffffff" title="Pure White" style="background:#ffffff;"></button>
+                    </div>
+                    <div class="theme-color-row theme-custom-row" id="theme-lyric-custom-row" style="display:none;">
+                        <div class="theme-color-picker-wrap">
+                            <input type="color" id="theme-lyric-picker" class="theme-color-input" value="#30d66b" aria-label="Pick custom lyrics color">
+                            <label for="theme-lyric-picker" class="theme-color-hex" id="theme-lyric-hex">#30d66b</label>
+                        </div>
+                        <span class="theme-color-desc">Custom lyrics highlight picker</span>
+                    </div>
+                </div>
+
+                <!-- 8. LIVE INTERACTIVE PREVIEW -->
                 <div class="theme-section">
                     <span class="theme-section-label">Live Preview</span>
                     <div class="theme-preview-card" id="theme-preview-card">
@@ -933,11 +967,16 @@
                                     <div class="theme-preview-song-sub">Active Theme Preview</div>
                                 </div>
                             </div>
+                            <div class="theme-preview-lyric" id="theme-preview-lyric">
+                                <i class="fas fa-quote-left"></i>
+                                <span class="preview-lyric-spoken">On a park bench</span>
+                                <span class="preview-lyric-active">out on the moon</span>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 8. INTERFACE SCALE -->
+                <!-- 9. INTERFACE SCALE -->
                 <div class="theme-section">
                     <div class="theme-section-header">
                         <span class="theme-section-label">Interface Scale</span>

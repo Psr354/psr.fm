@@ -5886,6 +5886,18 @@ function resumePlaybackAfterBackground() {
             root.style.setProperty('--accent-contrast', contrast);
             if (rgb) root.style.setProperty('--accent-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
 
+            // --- Lyrics Highlight Color ---
+            const lyricMode = theme.lyricMode || 'accent';
+            const lyricHex = (lyricMode === 'custom' && theme.lyricColor) ? theme.lyricColor : accentHex;
+            const lyricRgb = hexToRgb(lyricHex) || rgb || { r: 48, g: 214, b: 107 };
+            const lyricHover = theme.lyricHover || lightenHex(lyricHex, 0.35);
+            const lyricSpoken = lightenHex(lyricHex, 0.82);
+
+            root.style.setProperty('--lyric-color', lyricHex);
+            root.style.setProperty('--lyric-hover', lyricHover);
+            root.style.setProperty('--lyric-spoken', lyricSpoken);
+            root.style.setProperty('--lyric-rgb', `${lyricRgb.r}, ${lyricRgb.g}, ${lyricRgb.b}`);
+
             // --- Background Palette ---
             let bgVars;
             if (theme.bg === 'custom' && theme.bgCustom) {
@@ -5951,6 +5963,8 @@ function resumePlaybackAfterBackground() {
                 textColor: '#f5f7f5',
                 statusBarMode: 'accent',
                 statusBarCustom: '#30d66b',
+                lyricMode: 'accent',
+                lyricColor: '#30d66b',
                 scale: '1.0'
             };
         }
@@ -6034,6 +6048,13 @@ function resumePlaybackAfterBackground() {
             const statusbarPicker    = document.getElementById('theme-statusbar-picker');
             const statusbarHexLabel  = document.getElementById('theme-statusbar-hex');
             const statusbarCustomRow = document.getElementById('theme-statusbar-custom-row');
+            const lyricOptionsEl     = document.getElementById('theme-lyric-options');
+            const lyricPresetsEl     = document.getElementById('theme-lyric-presets');
+            const lyricPicker        = document.getElementById('theme-lyric-picker');
+            const lyricHexLabel      = document.getElementById('theme-lyric-hex');
+            const lyricCustomRow     = document.getElementById('theme-lyric-custom-row');
+            const prevLyricSpoken    = document.querySelector('.preview-lyric-spoken');
+            const prevLyricActive    = document.querySelector('.preview-lyric-active');
             const prevCard           = document.getElementById('theme-preview-card');
 
             const scaleRow          = document.querySelector('.theme-scale-row');
@@ -6085,6 +6106,14 @@ function resumePlaybackAfterBackground() {
                 const statusBarColor = resolveStatusBarColor(draft, bgVars);
                 if (prevCard) {
                     prevCard.style.borderTop = `4px solid ${statusBarColor}`;
+                }
+                const lyricMode = draft.lyricMode || 'accent';
+                const lyricHex = (lyricMode === 'custom' && draft.lyricColor) ? draft.lyricColor : (draft.accent || '#30d66b');
+                const lyricRgb = hexToRgb(lyricHex) || { r: 48, g: 214, b: 107 };
+                const lyricSpoken = lightenHex(lyricHex, 0.82);
+                if (prevLyricSpoken) prevLyricSpoken.style.color = lyricSpoken;
+                if (prevLyricActive) {
+                    prevLyricActive.style.textShadow = `0 0 8px rgba(${lyricRgb.r}, ${lyricRgb.g}, ${lyricRgb.b}, 0.65)`;
                 }
             }
 
@@ -6152,7 +6181,26 @@ function resumePlaybackAfterBackground() {
                 if (statusbarPicker) statusbarPicker.value = curStatusBarCustom;
                 if (statusbarHexLabel) statusbarHexLabel.textContent = curStatusBarCustom;
 
-                // 7. Scale
+                // 7. Lyrics Highlight Color
+                const currentLyricMode = draft.lyricMode || 'accent';
+                if (lyricOptionsEl) {
+                    lyricOptionsEl.querySelectorAll('.theme-pill-btn').forEach(btn => {
+                        btn.classList.toggle('active', btn.dataset.lyricMode === currentLyricMode);
+                    });
+                }
+                const isCustomLyric = currentLyricMode === 'custom';
+                if (lyricCustomRow) lyricCustomRow.style.display = isCustomLyric ? 'flex' : 'none';
+                if (lyricPresetsEl) lyricPresetsEl.style.display = isCustomLyric ? 'flex' : 'none';
+                const curLyricColor = draft.lyricColor || draft.accent || '#30d66b';
+                if (lyricPicker) lyricPicker.value = curLyricColor;
+                if (lyricHexLabel) lyricHexLabel.textContent = curLyricColor;
+                if (lyricPresetsEl) {
+                    lyricPresetsEl.querySelectorAll('.theme-swatch').forEach(sw => {
+                        sw.classList.toggle('active', isCustomLyric && sw.dataset.lyric?.toLowerCase() === curLyricColor.toLowerCase());
+                    });
+                }
+
+                // 8. Scale
                 if (scaleRow) {
                     scaleRow.querySelectorAll('.theme-scale-btn').forEach(btn => {
                         btn.classList.toggle('active', btn.dataset.scale === (draft.scale || '1.0'));
@@ -6335,6 +6383,44 @@ function resumePlaybackAfterBackground() {
                 });
             }
 
+            // Lyrics mode pills
+            if (lyricOptionsEl) {
+                lyricOptionsEl.addEventListener('click', e => {
+                    const btn = e.target.closest('.theme-pill-btn');
+                    if (!btn) return;
+                    const mode = btn.dataset.lyricMode;
+                    draft.lyricMode = mode;
+                    if (mode === 'custom' && !draft.lyricColor) {
+                        draft.lyricColor = draft.accent || '#30d66b';
+                    }
+                    syncUI();
+                });
+            }
+
+            // Lyrics presets
+            if (lyricPresetsEl) {
+                lyricPresetsEl.addEventListener('click', e => {
+                    const sw = e.target.closest('.theme-swatch');
+                    if (!sw) return;
+                    draft.lyricMode = 'custom';
+                    draft.lyricColor = sw.dataset.lyric;
+                    syncUI();
+                });
+            }
+
+            // Lyrics custom picker
+            if (lyricPicker) {
+                lyricPicker.addEventListener('input', () => {
+                    draft.lyricMode = 'custom';
+                    draft.lyricColor = lyricPicker.value;
+                    if (lyricHexLabel) lyricHexLabel.textContent = lyricPicker.value;
+                    if (lyricPresetsEl) {
+                        lyricPresetsEl.querySelectorAll('.theme-swatch').forEach(sw => sw.classList.remove('active'));
+                    }
+                    syncUI();
+                });
+            }
+
             // Scale buttons
             if (scaleRow) {
                 scaleRow.addEventListener('click', e => {
@@ -6369,6 +6455,8 @@ function resumePlaybackAfterBackground() {
                     textColor: '#f5f7f5',
                     statusBarMode: 'accent',
                     statusBarCustom: '#30d66b',
+                    lyricMode: 'accent',
+                    lyricColor: '#30d66b',
                     scale: '1.0'
                 };
                 applyTheme(draft);
