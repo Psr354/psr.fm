@@ -5857,6 +5857,20 @@ function resumePlaybackAfterBackground() {
             }
         }
 
+        function resolveStatusBarColor(theme, bgVars) {
+            const mode = theme.statusBarMode || 'accent';
+            if (mode === 'accent') {
+                return theme.accent || '#30d66b';
+            } else if (mode === 'background') {
+                return bgVars['--bg-main'] || '#070908';
+            } else if (mode === 'black') {
+                return '#000000';
+            } else if (mode === 'custom' && theme.statusBarCustom) {
+                return theme.statusBarCustom;
+            }
+            return theme.accent || '#30d66b';
+        }
+
         function applyTheme(theme) {
             const root = document.documentElement;
 
@@ -5891,6 +5905,17 @@ function resumePlaybackAfterBackground() {
             const cardColor = resolveCardColor(theme, bgVars);
             root.style.setProperty('--bg-card', cardColor);
 
+            // --- PWA Status Bar / Frame Color ---
+            const statusBarColor = resolveStatusBarColor(theme, bgVars);
+            root.style.setProperty('--status-bar-color', statusBarColor);
+            let metaTheme = document.querySelector('meta[name="theme-color"]');
+            if (!metaTheme) {
+                metaTheme = document.createElement('meta');
+                metaTheme.name = 'theme-color';
+                document.head.appendChild(metaTheme);
+            }
+            metaTheme.setAttribute('content', statusBarColor);
+
             // --- Font / Text Color ---
             const textHex = theme.textColor || '#f5f7f5';
             const textRgb = hexToRgb(textHex) || { r: 245, g: 247, b: 245 };
@@ -5924,6 +5949,8 @@ function resumePlaybackAfterBackground() {
                 cardMode: 'glass',
                 cardCustom: '#16181b',
                 textColor: '#f5f7f5',
+                statusBarMode: 'accent',
+                statusBarCustom: '#30d66b',
                 scale: '1.0'
             };
         }
@@ -6003,6 +6030,12 @@ function resumePlaybackAfterBackground() {
             const textPicker        = document.getElementById('theme-text-picker');
             const textHexLabel      = document.getElementById('theme-text-hex');
 
+            const statusbarOptionsEl = document.getElementById('theme-statusbar-options');
+            const statusbarPicker    = document.getElementById('theme-statusbar-picker');
+            const statusbarHexLabel  = document.getElementById('theme-statusbar-hex');
+            const statusbarCustomRow = document.getElementById('theme-statusbar-custom-row');
+            const prevCard           = document.getElementById('theme-preview-card');
+
             const scaleRow          = document.querySelector('.theme-scale-row');
 
             // Preview card elements
@@ -6049,6 +6082,10 @@ function resumePlaybackAfterBackground() {
                 if (prevNowPlaying) prevNowPlaying.style.color = draft.accent;
                 if (prevPulseDot)   prevPulseDot.style.backgroundColor = draft.accent;
                 if (prevCardArt)    prevCardArt.style.backgroundColor = draft.accent;
+                const statusBarColor = resolveStatusBarColor(draft, bgVars);
+                if (prevCard) {
+                    prevCard.style.borderTop = `4px solid ${statusBarColor}`;
+                }
             }
 
             function syncUI() {
@@ -6102,7 +6139,20 @@ function resumePlaybackAfterBackground() {
                     });
                 }
 
-                // 6. Scale
+                // 6. PWA Status Bar / Border
+                const currentStatusBarMode = draft.statusBarMode || 'accent';
+                if (statusbarOptionsEl) {
+                    statusbarOptionsEl.querySelectorAll('.theme-pill-btn').forEach(btn => {
+                        btn.classList.toggle('active', btn.dataset.statusbarMode === currentStatusBarMode);
+                    });
+                }
+                const isCustomStatusBar = currentStatusBarMode === 'custom';
+                if (statusbarCustomRow) statusbarCustomRow.style.display = isCustomStatusBar ? 'flex' : 'none';
+                const curStatusBarCustom = draft.statusBarCustom || draft.accent || '#30d66b';
+                if (statusbarPicker) statusbarPicker.value = curStatusBarCustom;
+                if (statusbarHexLabel) statusbarHexLabel.textContent = curStatusBarCustom;
+
+                // 7. Scale
                 if (scaleRow) {
                     scaleRow.querySelectorAll('.theme-scale-btn').forEach(btn => {
                         btn.classList.toggle('active', btn.dataset.scale === (draft.scale || '1.0'));
@@ -6258,6 +6308,33 @@ function resumePlaybackAfterBackground() {
                 });
             }
 
+            // PWA Status Bar / Border mode pills
+            if (statusbarOptionsEl) {
+                statusbarOptionsEl.addEventListener('click', e => {
+                    const btn = e.target.closest('.theme-pill-btn');
+                    if (!btn) return;
+                    const mode = btn.dataset.statusbarMode;
+                    draft.statusBarMode = mode;
+                    if (mode === 'custom' && !draft.statusBarCustom) {
+                        draft.statusBarCustom = draft.accent || '#30d66b';
+                    }
+                    syncUI();
+                    if (mode === 'custom' && statusbarPicker) {
+                        statusbarPicker.click();
+                    }
+                });
+            }
+
+            // PWA Status Bar / Border custom picker
+            if (statusbarPicker) {
+                statusbarPicker.addEventListener('input', () => {
+                    draft.statusBarMode = 'custom';
+                    draft.statusBarCustom = statusbarPicker.value;
+                    if (statusbarHexLabel) statusbarHexLabel.textContent = statusbarPicker.value;
+                    syncUI();
+                });
+            }
+
             // Scale buttons
             if (scaleRow) {
                 scaleRow.addEventListener('click', e => {
@@ -6290,6 +6367,8 @@ function resumePlaybackAfterBackground() {
                     cardMode: 'glass',
                     cardCustom: '#16181b',
                     textColor: '#f5f7f5',
+                    statusBarMode: 'accent',
+                    statusBarCustom: '#30d66b',
                     scale: '1.0'
                 };
                 applyTheme(draft);

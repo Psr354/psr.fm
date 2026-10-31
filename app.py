@@ -45,6 +45,7 @@ trusted_proxy_count = int(os.environ.get('PSR_FM_TRUSTED_PROXY_COUNT', '0'))
 if trusted_proxy_count:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=trusted_proxy_count)
 
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get(
     'PSR_FM_MAX_CONTENT_LENGTH', 55 * 1024 * 1024
 ))
@@ -510,10 +511,58 @@ def create_new_user():
 # ==========================================
 # MAIN & PROTECTED ROUTES
 # ==========================================
+def get_user_status_bar_color(user_id):
+    theme_data = get_user_theme(DATABASE_PATH, user_id)
+    if not theme_data:
+        return '#070908'
+    mode = theme_data.get('statusBarMode', 'accent')
+    if mode == 'accent':
+        return theme_data.get('accent', '#30d66b')
+    elif mode == 'background':
+        return theme_data.get('bgCustom') if theme_data.get('bg') == 'custom' else '#070908'
+    elif mode == 'black':
+        return '#000000'
+    elif mode == 'custom' and theme_data.get('statusBarCustom'):
+        return theme_data.get('statusBarCustom')
+    return theme_data.get('accent', '#30d66b')
+
+
 @app.route('/')
 @login_required
 def index():
-    return render_template('index.html')
+    status_bar_color = get_user_status_bar_color(current_user.id)
+    return render_template('index.html', status_bar_color=status_bar_color)
+
+
+@app.route('/site.webmanifest')
+def site_webmanifest():
+    status_bar_color = '#070908'
+    if current_user.is_authenticated:
+        status_bar_color = get_user_status_bar_color(current_user.id)
+    manifest_data = {
+        "name": "psr.fm",
+        "short_name": "psr.fm",
+        "description": "Personal Self-Hosted Music Streaming Server",
+        "id": "/",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "background_color": "#070908",
+        "theme_color": status_bar_color,
+        "launch_handler": {
+            "client_mode": "focus-existing"
+        },
+        "icons": [
+            { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+            { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+            { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+            { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+        ]
+    }
+    resp = jsonify(manifest_data)
+    resp.mimetype = 'application/manifest+json'
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
 
 @app.route('/service-worker.js')
 def service_worker():

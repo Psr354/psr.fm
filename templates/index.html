@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>psr.fm</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=31">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=32">
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}">
     <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
-    <link rel="manifest" href="{{ url_for('static', filename='site.webmanifest') }}">
-    <meta name="theme-color" content="#1db954">
+    <link rel="manifest" href="/site.webmanifest">
+    <meta name="theme-color" content="{{ status_bar_color or '#070908' }}">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="psr.fm">
@@ -604,7 +604,7 @@
     </div>
 
     <script src="{{ url_for('static', filename='listening-sync.js') }}?v=3"></script>
-    <script src="{{ url_for('static', filename='main.js') }}?v=31"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v=32"></script>
 
     <!-- Equalizer Popover -->
     <div id="eq-popover" class="eq-popover" aria-hidden="true">
@@ -874,7 +874,36 @@
                     </div>
                 </div>
 
-                <!-- 6. LIVE INTERACTIVE PREVIEW -->
+                <!-- 6. PWA STATUS BAR / BORDER COLOR -->
+                <div class="theme-section">
+                    <div class="theme-section-header">
+                        <span class="theme-section-label">PWA Status Bar / Border</span>
+                        <span class="theme-section-hint">Mobile top bar &amp; PWA frame color</span>
+                    </div>
+                    <div class="theme-navbar-options" id="theme-statusbar-options">
+                        <button class="theme-pill-btn active" data-statusbar-mode="accent" title="Matches selected accent color">
+                            <i class="fas fa-palette"></i> Match Accent
+                        </button>
+                        <button class="theme-pill-btn" data-statusbar-mode="background" title="Blends seamlessly with main background">
+                            <i class="fas fa-clone"></i> Match Background
+                        </button>
+                        <button class="theme-pill-btn" data-statusbar-mode="black" title="Deep black for AMOLED">
+                            <i class="fas fa-moon"></i> Pure Black
+                        </button>
+                        <button class="theme-pill-btn" data-statusbar-mode="custom" id="theme-statusbar-custom-btn" title="Pick your own status bar color">
+                            <i class="fas fa-sliders-h"></i> Custom Color
+                        </button>
+                    </div>
+                    <div class="theme-color-row theme-custom-row" id="theme-statusbar-custom-row" style="display:none;">
+                        <div class="theme-color-picker-wrap">
+                            <input type="color" id="theme-statusbar-picker" class="theme-color-input" value="#30d66b" aria-label="Pick custom status bar color">
+                            <label for="theme-statusbar-picker" class="theme-color-hex" id="theme-statusbar-hex">#30d66b</label>
+                        </div>
+                        <span class="theme-color-desc">Custom status bar / border color</span>
+                    </div>
+                </div>
+
+                <!-- 7. LIVE INTERACTIVE PREVIEW -->
                 <div class="theme-section">
                     <span class="theme-section-label">Live Preview</span>
                     <div class="theme-preview-card" id="theme-preview-card">
@@ -908,7 +937,7 @@
                     </div>
                 </div>
 
-                <!-- 7. INTERFACE SCALE -->
+                <!-- 8. INTERFACE SCALE -->
                 <div class="theme-section">
                     <div class="theme-section-header">
                         <span class="theme-section-label">Interface Scale</span>
