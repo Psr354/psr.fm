@@ -1,13 +1,15 @@
-const SHELL_CACHE = 'psr354-shell-v42';
+const SHELL_CACHE = 'psr354-shell-v43';
 const MEDIA_CACHE = 'psr354-media-v3';
 const RUNTIME_CACHE = 'psr354-runtime-v1';
 const APP_SHELL_KEY = '/?offline-app-shell=1';
 const SHELL_FILES = [
   '/static/offline.html', '/static/offline-register.js',
-  '/static/main.js', '/static/main.js?v=41',
+  '/static/main.js',
   '/static/theme.js',
-  '/static/listening-sync.js', '/static/listening-sync.js?v=3',
-  '/static/style.css', '/static/style.css?v=41',
+  '/static/user-mgmt.js',
+  '/static/recap.js',
+  '/static/listening-sync.js',
+  '/static/style.css',
   '/static/site.webmanifest',
   '/static/favicon-32.png', '/static/apple-touch-icon.png',
   '/static/icon-192.png', '/static/icon-512.png', '/static/psrfm.png'
@@ -150,7 +152,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.pathname === '/static/main.js' || url.pathname === '/static/style.css' || url.pathname === '/static/theme.js') {
+  if (url.pathname === '/static/main.js' || url.pathname === '/static/style.css' || url.pathname === '/static/theme.js' || url.pathname === '/static/user-mgmt.js' || url.pathname === '/static/recap.js') {
     // Always fetch fresh JS/CSS so feature updates reach the browser immediately.
     // Fall back to cache only when offline so the PWA stays usable.
     event.respondWith(
