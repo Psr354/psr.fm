@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>psr.fm</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=40">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_version('style.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}">
@@ -485,6 +485,36 @@
         </div>
         <div id="queue-list" class="queue-list"></div>
     </div>
+
+    <!-- Volume Popover (Mobile & Touch) -->
+    <div id="volume-popover" class="volume-popover" aria-hidden="true">
+        <div class="volume-popover-header">
+            <div class="volume-popover-title">
+                <i id="volume-popover-title-icon" class="fas fa-volume-up" aria-hidden="true"></i>
+                <span>Volume</span>
+            </div>
+            <div class="volume-popover-header-actions">
+                <span id="volume-popover-percent" class="volume-popover-percent">100%</span>
+                <button id="volume-popover-close-btn" class="volume-popover-close-btn" type="button" aria-label="Close volume slider"><i class="fas fa-times" aria-hidden="true"></i></button>
+            </div>
+        </div>
+        <div class="volume-popover-slider-row">
+            <button id="volume-popover-mute-btn" class="volume-popover-mute-btn" type="button" aria-label="Toggle mute" title="Toggle mute">
+                <i class="fas fa-volume-up" aria-hidden="true"></i>
+            </button>
+            <div class="slider-container volume-popover-slider-container">
+                <div class="slider-track"><div class="slider-fill" id="volume-popover-fill"></div></div>
+                <input type="range" id="volume-popover-bar" class="volume-bar" min="0" max="100" value="100" aria-label="Volume">
+            </div>
+        </div>
+        <div class="volume-presets">
+            <button type="button" class="volume-preset-btn" data-vol="0">0%</button>
+            <button type="button" class="volume-preset-btn" data-vol="25">25%</button>
+            <button type="button" class="volume-preset-btn" data-vol="50">50%</button>
+            <button type="button" class="volume-preset-btn" data-vol="75">75%</button>
+            <button type="button" class="volume-preset-btn active" data-vol="100">100%</button>
+        </div>
+    </div>
         <div id="song-context-menu" class="song-context-menu" role="menu" aria-hidden="true">
             <button type="button" data-context-action="play"><i class="fas fa-play"></i><span>Play</span></button>
             <button type="button" data-context-action="play-next"><i class="fas fa-forward-step"></i><span>Play next</span></button>
@@ -671,8 +701,9 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='listening-sync.js') }}?v=3"></script>
-    <script src="{{ url_for('static', filename='main.js') }}?v=40"></script>
+    <script src="{{ url_for('static', filename='listening-sync.js') }}?v={{ asset_version('listening-sync.js') }}"></script>
+    <script src="{{ url_for('static', filename='theme.js') }}?v={{ asset_version('theme.js') }}"></script>
+    <script src="{{ url_for('static', filename='main.js') }}?v={{ asset_version('main.js') }}"></script>
 
     <!-- Equalizer Popover -->
     <div id="eq-popover" class="eq-popover" aria-hidden="true">

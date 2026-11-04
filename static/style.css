@@ -1776,6 +1776,184 @@ h1, h2, h3, h4, .section-title, .track-title {
 }
 
 /* ==========================================
+   VOLUME POPOVER (MOBILE & TOUCH)
+   ========================================== */
+.volume-btn.active-popover {
+    color: var(--accent-color);
+    background: rgba(var(--accent-rgb), 0.16);
+}
+
+.volume-popover {
+    position: fixed;
+    bottom: 96px;
+    right: 24px;
+    background: #181818;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 16px;
+    width: 290px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75);
+    z-index: 1000;
+    display: none;
+    box-sizing: border-box;
+}
+
+.volume-popover.active {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.volume-popover-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.volume-popover-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.volume-popover-title i {
+    color: var(--accent-color);
+    font-size: 13px;
+}
+
+.volume-popover-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.volume-popover-percent {
+    font-size: 13px;
+    font-weight: 700;
+    font-family: 'Space Grotesk', monospace;
+    color: var(--text-secondary);
+    min-width: 36px;
+    text-align: right;
+}
+
+.volume-popover-close-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: color 0.15s ease;
+}
+
+.volume-popover-close-btn:hover {
+    color: var(--text-primary);
+}
+
+.volume-popover-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.volume-popover-mute-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+}
+
+.volume-popover-mute-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.volume-popover-mute-btn.active {
+    color: #ff5252;
+    background: rgba(255, 82, 82, 0.14);
+    border-color: rgba(255, 82, 82, 0.3);
+}
+
+.volume-popover-slider-container {
+    height: 36px;
+    flex: 1;
+}
+
+.volume-popover-slider-container .slider-track {
+    height: 6px;
+    border-radius: 3px;
+    background: #333333;
+}
+
+.volume-popover-slider-container .slider-fill {
+    border-radius: 3px;
+    background: var(--accent-color);
+}
+
+.volume-presets {
+    display: flex;
+    gap: 6px;
+    justify-content: space-between;
+}
+
+.volume-preset-btn {
+    flex: 1;
+    padding: 7px 0;
+    border-radius: 6px;
+    border: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'Space Grotesk', monospace;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s ease;
+}
+
+.volume-preset-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+}
+
+.volume-preset-btn.active {
+    background: var(--accent-color);
+    color: #0b0f12;
+    border-color: var(--accent-color);
+}
+
+@media (max-width: 768px) {
+    .volume-popover {
+        right: 12px;
+        left: 12px;
+        width: auto;
+        bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+    }
+}
+
+@media (max-width: 480px) {
+    .volume-popover {
+        bottom: calc(150px + env(safe-area-inset-bottom, 0px));
+    }
+}
+
+/* ==========================================
    EQUALIZER - 16 BAND GRAPHIC EQ
    ========================================== */
 #eq-btn.active { color: var(--accent-color); }

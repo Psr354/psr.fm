@@ -142,6 +142,12 @@ document.addEventListener('DOMContentLoaded', () => {
         duration: document.getElementById('duration'),
         volumeIcon: document.getElementById('volume-icon'),
         volumeBtn: document.getElementById('volume-btn'),
+        volumePopover: document.getElementById('volume-popover'),
+        volumePopoverBar: document.getElementById('volume-popover-bar'),
+        volumePopoverFill: document.getElementById('volume-popover-fill'),
+        volumePopoverPercent: document.getElementById('volume-popover-percent'),
+        volumePopoverMuteBtn: document.getElementById('volume-popover-mute-btn'),
+        volumePopoverCloseBtn: document.getElementById('volume-popover-close-btn'),
         nowPlaying: document.getElementById('now-playing-container'),
         playerTitle: document.getElementById('player-title'),
         playerArtist: document.getElementById('player-artist'),
@@ -237,6 +243,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (liveSocket) liveSocket.on(eventName, handler);
         }
     };
+    window.socket = socket;
+    socket.on('theme_sync', (remoteTheme) => {
+        if (typeof window.handleThemeSync === 'function') {
+            window.handleThemeSync(remoteTheme);
+        }
+    });
 
     function connectRealtime() {
         if (liveSocket || !navigator.onLine) return;
@@ -834,8 +846,26 @@ document.addEventListener('DOMContentLoaded', () => {
     function setQueueOpen(isOpen) {
         const queuePopover = document.getElementById('queue-popover');
         const queueBtn = document.getElementById('queue-btn');
+        if (isOpen) setVolumePopoverOpen(false);
         queuePopover?.classList.toggle('active', isOpen);
         queueBtn?.classList.toggle('active', isOpen);
+    }
+
+    function setVolumePopoverOpen(isOpen) {
+        const popover = document.getElementById('volume-popover');
+        if (!popover) return;
+        if (isOpen) {
+            if (el.loopPopover) el.loopPopover.classList.remove('active');
+            setQueueOpen(false);
+            const eqPopover = document.getElementById('eq-popover');
+            if (eqPopover) {
+                eqPopover.classList.remove('active');
+                eqPopover.setAttribute('aria-hidden', 'true');
+            }
+        }
+        popover.classList.toggle('active', isOpen);
+        popover.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+        el.volumeBtn?.classList.toggle('active-popover', isOpen);
     }
 
     function renderLyricsPanel() {
@@ -1301,6 +1331,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return new Promise((resolve) => {
             if (!src) return resolve(null);
             const img = new Image();
+            img.crossOrigin = 'anonymous';
             img.onload = () => resolve(img);
             img.onerror = () => resolve(null);
             img.src = src;
@@ -1658,14 +1689,15 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('jump-loop-btn')?.addEventListener('click', jumpToLoopStart);
 
     function updateVolumeIcon(vol) {
-        if (!el.volumeIcon) return;
-        const muted = el.audio.muted || vol === 0;
-        if (muted) el.volumeIcon.className = 'fas fa-volume-mute';
-        else if (vol < 0.5) el.volumeIcon.className = 'fas fa-volume-down';
-        else el.volumeIcon.className = 'fas fa-volume-up';
-        el.volumeBtn?.classList.toggle('active', muted);
-        el.volumeBtn?.setAttribute('aria-pressed', String(muted));
-        el.volumeBtn?.setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
+        const isMuted = el.audio ? (el.audio.muted || vol === 0) : (vol === 0);
+        const iconClass = isMuted ? 'fas fa-volume-mute' : (vol < 0.5 ? 'fas fa-volume-down' : 'fas fa-volume-up');
+        if (el.volumeIcon) el.volumeIcon.className = iconClass;
+        el.volumeBtn?.classList.toggle('active', isMuted);
+        el.volumeBtn?.setAttribute('aria-pressed', String(isMuted));
+        el.volumeBtn?.setAttribute('aria-label', isMuted ? 'Unmute' : 'Mute');
+
+        const popoverTitleIcon = document.getElementById('volume-popover-title-icon');
+        if (popoverTitleIcon) popoverTitleIcon.className = iconClass;
     }
 
     function updatePlayPauseIcon(isPlaying) {
@@ -2295,6 +2327,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             // Close popovers
             if (el.loopPopover) el.loopPopover.classList.remove('active');
             setQueueOpen(false);
+            setVolumePopoverOpen(false);
 
             // Close the lyrics side panel when it is open.
             if (state.lyricsPanelOpen) {
@@ -3358,6 +3391,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     let eqFilters = [];
     let eqPreampNode = null;
     let eqAnalyser = null;
+    let masterGainNode = null;
 
     function loadEqState() {
         try {
@@ -3380,44 +3414,75 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
     function ensureEqContext() {
         if (eqAudioContext) return eqAudioContext;
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) { showToast('Equalizer tidak didukung browser ini', 'error'); return null; }
-        eqAudioContext = new AudioCtx();
-        eqPreampNode = eqAudioContext.createGain();
-        eqPreampNode.gain.value = Math.pow(10, state.eqPreamp / 20);
-        eqFilters = EQ_FREQUENCIES.map((freq, i) => {
-            const f = eqAudioContext.createBiquadFilter();
-            if (i === 0) { f.type = 'lowshelf'; f.frequency.value = freq; }
-            else if (i === EQ_FREQUENCIES.length - 1) { f.type = 'highshelf'; f.frequency.value = freq; }
-            else { f.type = 'peaking'; f.frequency.value = freq; f.Q.value = 1.2; }
-            f.gain.value = state.eqEnabled ? state.eqGains[i] : 0;
-            return f;
-        });
-        eqAnalyser = eqAudioContext.createAnalyser();
-        eqAnalyser.fftSize = 256;
-        // Chain: source -> preamp -> filters... -> analyser -> destination
-        // Source is attached lazily in attachEqSource()
-        let last = eqPreampNode;
-        eqFilters.forEach(f => { last.connect(f); last = f; });
-        last.connect(eqAnalyser);
-        eqAnalyser.connect(eqAudioContext.destination);
-        return eqAudioContext;
+        if (!AudioCtx) { return null; }
+        try {
+            eqAudioContext = new AudioCtx();
+            eqPreampNode = eqAudioContext.createGain();
+            eqPreampNode.gain.value = Math.pow(10, (state.eqEnabled ? state.eqPreamp : 0) / 20);
+            eqFilters = EQ_FREQUENCIES.map((freq, i) => {
+                const f = eqAudioContext.createBiquadFilter();
+                if (i === 0) { f.type = 'lowshelf'; f.frequency.value = freq; }
+                else if (i === EQ_FREQUENCIES.length - 1) { f.type = 'highshelf'; f.frequency.value = freq; }
+                else { f.type = 'peaking'; f.frequency.value = freq; f.Q.value = 1.2; }
+                f.gain.value = state.eqEnabled ? state.eqGains[i] : 0;
+                return f;
+            });
+            eqAnalyser = eqAudioContext.createAnalyser();
+            eqAnalyser.fftSize = 256;
+            masterGainNode = eqAudioContext.createGain();
+            const currentVol = typeof state.userVolume === 'number' ? state.userVolume : (el.audio && !el.audio.muted ? el.audio.volume : 1);
+            const currentMuted = Boolean(state.userMuted !== undefined ? state.userMuted : (el.audio ? el.audio.muted : false));
+            masterGainNode.gain.value = currentMuted ? 0 : currentVol;
+
+            // Chain: source -> preamp -> filters... -> analyser -> masterGainNode -> destination
+            let last = eqPreampNode;
+            eqFilters.forEach(f => { last.connect(f); last = f; });
+            last.connect(eqAnalyser);
+            eqAnalyser.connect(masterGainNode);
+            masterGainNode.connect(eqAudioContext.destination);
+            return eqAudioContext;
+        } catch (e) {
+            console.warn('Web Audio init failed:', e);
+            return null;
+        }
     }
 
     function resumeEqContext() {
-        if (!state.eqEnabled || !eqAudioContext || eqAudioContext.state === 'running') return;
+        if (!eqAudioContext || eqAudioContext.state === 'running') return;
         eqAudioContext.resume().catch(() => {});
     }
 
     function attachEqSource() {
-        if (!eqAudioContext || !el.audio) return;
-        if (eqSource) { try { eqSource.disconnect(); } catch {} eqSource = null; }
+        if (!eqAudioContext || !el.audio || eqSource) return;
         try {
             eqSource = eqAudioContext.createMediaElementSource(el.audio);
-            eqSource.connect(eqPreampNode);
+            if (eqPreampNode) {
+                eqSource.connect(eqPreampNode);
+            }
         } catch (e) {
-            // Already connected (can only create once per element) -> reuse
-            // In that case we need to handle the error gracefully
             console.warn('EQ source attach failed (maybe already connected):', e);
+        }
+    }
+
+    function applyMasterVolume(vol, isMuted) {
+        if (!masterGainNode || !eqAudioContext) return;
+        const target = isMuted ? 0 : Math.max(0, Math.min(1, Number(vol)));
+        try {
+            masterGainNode.gain.setTargetAtTime(target, eqAudioContext.currentTime, 0.015);
+        } catch {
+            masterGainNode.gain.value = target;
+        }
+    }
+
+    function initAudioGraph() {
+        const ctx = ensureEqContext();
+        if (ctx) {
+            if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+            if (!eqSource) attachEqSource();
+            applyEqGains();
+            const vol = typeof state.userVolume === 'number' ? state.userVolume : (el.audio ? el.audio.volume : 1);
+            const isMuted = Boolean(state.userMuted !== undefined ? state.userMuted : (el.audio ? el.audio.muted : false));
+            setAppVolume(vol, isMuted, false);
         }
     }
 
@@ -3698,6 +3763,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         // Close other popovers
         el.loopPopover?.classList.remove('active');
         document.getElementById('queue-popover')?.classList.remove('active');
+        setVolumePopoverOpen(false);
         if (eqPopover) {
             eqPopover.classList.toggle('active', !isActive);
             eqPopover.setAttribute('aria-hidden', isActive ? 'true' : 'false');
@@ -3717,19 +3783,18 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
 
     // Ensure crossOrigin for Web Audio (required for MediaElementSource)
     if (el.audio) el.audio.crossOrigin = 'anonymous';
-    // Resume EQ context on play (autoplay policy) and ensure source is attached
+    // Resume Web Audio context on play (autoplay policy) and ensure source is attached
     el.audio?.addEventListener('play', () => {
-        if (!state.eqEnabled) return;
-        if (!eqAudioContext) {
-            const ctx = ensureEqContext();
-            if (ctx && !eqSource) attachEqSource();
-            if (ctx && ctx.state === 'suspended') ctx.resume();
-            applyEqGains();
-        } else {
-            if (!eqSource) attachEqSource();
-            if (eqAudioContext.state === 'suspended') eqAudioContext.resume();
-        }
+        initAudioGraph();
     });
+
+    const unlockAudioGraph = () => {
+        initAudioGraph();
+        document.removeEventListener('pointerdown', unlockAudioGraph);
+        document.removeEventListener('keydown', unlockAudioGraph);
+    };
+    document.addEventListener('pointerdown', unlockAudioGraph, { once: true });
+    document.addEventListener('keydown', unlockAudioGraph, { once: true });
 
     el.lyricsBtn?.addEventListener('click', () => {
         if (state.lyricsPanelOpen) {
@@ -3917,7 +3982,7 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
         if (syncPromptActive) return;
         syncPromptActive = true;
         if (typeof showToast === 'function') {
-            showToast('🎵 Sedang diputar di perangkat lain. Ketuk layar untuk ikut mendengarkan barengan.', 'info', 7000);
+            showToast('Sedang diputar di perangkat lain. Ketuk layar untuk ikut mendengarkan barengan.', 'info', 7000);
         }
 
         const unlockAudio = () => {
@@ -4011,8 +4076,8 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             cachedPlaybackPayload.isPlaying = isPlaying;
             cachedPlaybackPayload.timestamp = now;
             cachedPlaybackPayload.deviceId = CLIENT_DEVICE_ID;
-            cachedPlaybackPayload.volume = el.audio ? el.audio.volume : 1;
-            cachedPlaybackPayload.isMuted = el.audio ? el.audio.muted : false;
+            cachedPlaybackPayload.volume = typeof state.userVolume === 'number' ? state.userVolume : (el.audio ? el.audio.volume : 1);
+            cachedPlaybackPayload.isMuted = Boolean(state.userMuted !== undefined ? state.userMuted : (el.audio ? el.audio.muted : false));
 
             localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(cachedPlaybackPayload));
 
@@ -4083,14 +4148,9 @@ document.querySelectorAll('.user-filter-btn').forEach(btn => {
             }
         }
 
-        if (typeof saved.volume === 'number' && el.audio) {
+        if (typeof saved.volume === 'number') {
             const isMuted = Boolean(saved.isMuted);
-            el.audio.volume = Math.max(0, Math.min(1, saved.volume));
-            el.audio.muted = isMuted;
-            const shownVolume = isMuted ? 0 : el.audio.volume;
-            if (el.volumeBar) el.volumeBar.value = String(Math.round(shownVolume * 100));
-            if (el.volumeFill) el.volumeFill.style.width = `${shownVolume * 100}%`;
-            updateVolumeIcon(el.audio.volume);
+            setAppVolume(saved.volume, isMuted, false);
         }
 
         const shuffleBtn = document.getElementById('shuffle-btn');
@@ -4569,32 +4629,137 @@ function resumePlaybackAfterBackground() {
     el.progressBar?.addEventListener('pointerup', finishSeek);
     el.progressBar?.addEventListener('pointercancel', finishSeek);
 
-    el.volumeBar?.addEventListener('input', (e) => {
-        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
-        el.audio.volume = e.target.value / 100;
-        el.audio.muted = false;
-        if (el.audio.volume > 0) state.lastNonZeroVolume = el.audio.volume;
-        if (el.volumeFill) el.volumeFill.style.width = `${e.target.value}%`;
-        updateVolumeIcon(el.audio.volume);
-        savePlaybackState(true);
-    });
     state.lastNonZeroVolume = 1;
-    el.volumeBtn?.addEventListener('click', () => {
+    state.userVolume = 1;
+    state.userMuted = false;
+
+    function setAppVolume(vol, isMuted = false, shouldSave = true) {
         if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
-        if (el.audio.muted || el.audio.volume === 0) {
-            el.audio.muted = false;
-            if (el.audio.volume === 0) el.audio.volume = state.lastNonZeroVolume || 1;
-        } else {
-            state.lastNonZeroVolume = el.audio.volume;
-            el.audio.muted = true;
+        const normalized = Math.max(0, Math.min(1, Number(vol)));
+        if (!isMuted && normalized > 0) {
+            state.lastNonZeroVolume = normalized;
         }
-        const shownVolume = el.audio.muted ? 0 : el.audio.volume;
-        if (el.volumeBar) el.volumeBar.value = String(Math.round(shownVolume * 100));
-        if (el.volumeFill) el.volumeFill.style.width = `${shownVolume * 100}%`;
-        updateVolumeIcon(el.audio.volume);
-        savePlaybackState(true);
+        state.userVolume = normalized;
+        state.userMuted = Boolean(isMuted);
+
+        const effective = isMuted ? 0 : normalized;
+
+        if (eqSource && masterGainNode) {
+            // Web Audio pipeline is active: masterGainNode controls volume attenuation.
+            // Keep native audio element unattenuated to prevent double attenuation in Chromium/Firefox.
+            try { el.audio.volume = 1; } catch {}
+            try { el.audio.muted = Boolean(isMuted); } catch {}
+            applyMasterVolume(effective, isMuted);
+        } else {
+            // Fallback before Web Audio is connected or if unsupported
+            if (el.audio) {
+                try { el.audio.volume = effective; } catch {}
+                try { el.audio.muted = Boolean(isMuted); } catch {}
+            }
+        }
+
+        // Update desktop volume slider
+        const percent = Math.round(effective * 100);
+        if (el.volumeBar) el.volumeBar.value = String(percent);
+        if (el.volumeFill) el.volumeFill.style.width = `${percent}%`;
+
+        // Update mobile popover controls
+        const popoverBar = document.getElementById('volume-popover-bar');
+        const popoverFill = document.getElementById('volume-popover-fill');
+        const popoverPercent = document.getElementById('volume-popover-percent');
+        const popoverMuteBtn = document.getElementById('volume-popover-mute-btn');
+        if (popoverBar) popoverBar.value = String(percent);
+        if (popoverFill) popoverFill.style.width = `${percent}%`;
+        if (popoverPercent) popoverPercent.textContent = `${percent}%`;
+        if (popoverMuteBtn) {
+            popoverMuteBtn.classList.toggle('active', isMuted || effective === 0);
+            const muteIcon = popoverMuteBtn.querySelector('i');
+            if (muteIcon) {
+                muteIcon.className = (isMuted || effective === 0) ? 'fas fa-volume-mute' : (effective < 0.5 ? 'fas fa-volume-down' : 'fas fa-volume-up');
+            }
+        }
+
+        // Update volume preset buttons active state
+        document.querySelectorAll('.volume-preset-btn').forEach(btn => {
+            const btnVal = parseInt(btn.getAttribute('data-vol'), 10);
+            btn.classList.toggle('active', !isMuted && btnVal === percent);
+        });
+
+        updateVolumeIcon(effective);
+        if (shouldSave) savePlaybackState(true);
+    }
+
+    el.volumeBar?.addEventListener('input', (e) => {
+        setAppVolume(Number(e.target.value) / 100, false);
     });
-    if (el.volumeFill) el.volumeFill.style.width = '100%';
+
+    el.volumeBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
+        const isMobile = window.innerWidth <= 768;
+        if (isMobile) {
+            const popover = document.getElementById('volume-popover');
+            const isOpen = popover?.classList.contains('active');
+            setVolumePopoverOpen(!isOpen);
+        } else {
+            // Desktop: toggle mute inline
+            const currentlyMuted = state.userMuted || (el.audio ? el.audio.muted : false) || (state.userVolume === 0);
+            if (currentlyMuted) {
+                const targetVol = state.lastNonZeroVolume > 0 ? state.lastNonZeroVolume : 1;
+                setAppVolume(targetVol, false);
+            } else {
+                state.lastNonZeroVolume = state.userVolume > 0 ? state.userVolume : 1;
+                setAppVolume(state.lastNonZeroVolume, true);
+            }
+        }
+    });
+
+    // Mobile Volume Popover Event Listeners
+    document.getElementById('volume-popover-bar')?.addEventListener('input', (e) => {
+        setAppVolume(Number(e.target.value) / 100, false);
+    });
+
+    document.getElementById('volume-popover-mute-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const currentlyMuted = state.userMuted || (el.audio ? el.audio.muted : false) || (state.userVolume === 0);
+        if (currentlyMuted) {
+            const targetVol = state.lastNonZeroVolume > 0 ? state.lastNonZeroVolume : 1;
+            setAppVolume(targetVol, false);
+        } else {
+            state.lastNonZeroVolume = state.userVolume > 0 ? state.userVolume : 1;
+            setAppVolume(state.lastNonZeroVolume, true);
+        }
+    });
+
+    document.getElementById('volume-popover-close-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setVolumePopoverOpen(false);
+    });
+
+    document.querySelectorAll('.volume-preset-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const volVal = parseInt(btn.getAttribute('data-vol'), 10);
+            if (isNaN(volVal)) return;
+            if (volVal === 0) {
+                setAppVolume(state.lastNonZeroVolume || 1, true);
+            } else {
+                setAppVolume(volVal / 100, false);
+            }
+        });
+    });
+
+    document.addEventListener('click', (e) => {
+        const popover = document.getElementById('volume-popover');
+        if (popover && popover.classList.contains('active')) {
+            if (!e.target.closest('#volume-popover') && !e.target.closest('#volume-btn')) {
+                setVolumePopoverOpen(false);
+            }
+        }
+    });
+
+    // Initialize UI volume state
+    setAppVolume(1, false, false);
 
     // ==========================================
     // SEARCH
@@ -5791,26 +5956,7 @@ function resumePlaybackAfterBackground() {
             return { tag: 'NIGHT OWL', subtitle: `Peak groove at ${hourLabel}`, peakHour: hourLabel, faIcon: 'fas fa-moon' };
         }
     }
-
-    function drawRoundRect(ctx, x, y, width, height, radius) {
-        ctx.beginPath();
-        ctx.moveTo(x + radius, y);
-        ctx.arcTo(x + width, y, x + width, y + height, radius);
-        ctx.arcTo(x + width, y + height, x, y + height, radius);
-        ctx.arcTo(x, y + height, x, y, radius);
-        ctx.arcTo(x, y, x + width, y, radius);
-        ctx.closePath();
-    }
-
-    function drawRoundedImage(ctx, img, x, y, size, radius) {
-        ctx.save();
-        drawRoundRect(ctx, x, y, size, size, radius);
-        ctx.clip();
-        ctx.drawImage(img, x, y, size, size);
-        ctx.restore();
-    }
-
-    function drawCoverFallback(ctx, x, y, size, radius) {
+    function drawVinylCoverFallback(ctx, x, y, size, radius) {
         ctx.save();
         drawRoundRect(ctx, x, y, size, size, radius);
         ctx.clip();
@@ -5835,53 +5981,6 @@ function resumePlaybackAfterBackground() {
         ctx.arc(x + center, y + center, size * 0.08, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
-    }
-
-    function loadCanvasImage(src) {
-        return new Promise((resolve) => {
-            if (!src) return resolve(null);
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => resolve(img);
-            img.onerror = () => resolve(null);
-            img.src = src;
-        });
-    }
-
-    function fitCanvasText(ctx, text, maxWidth) {
-        if (!text) return '';
-        if (ctx.measureText(text).width <= maxWidth) return text;
-        let str = text;
-        while (str.length > 0 && ctx.measureText(str + '...').width > maxWidth) {
-            str = str.slice(0, -1);
-        }
-        return str.trim() + '...';
-    }
-
-    function wrapCanvasLines(ctx, text, maxWidth, maxLines = 2) {
-        if (!text) return [];
-        const words = text.split(/\s+/);
-        const lines = [];
-        let current = '';
-
-        for (let i = 0; i < words.length; i++) {
-            const testLine = current ? `${current} ${words[i]}` : words[i];
-            if (ctx.measureText(testLine).width <= maxWidth) {
-                current = testLine;
-            } else {
-                if (current) lines.push(current);
-                current = words[i];
-                if (lines.length === maxLines - 1) {
-                    const remainingWords = words.slice(i).join(' ');
-                    lines.push(fitCanvasText(ctx, remainingWords, maxWidth));
-                    return lines;
-                }
-            }
-        }
-        if (current && lines.length < maxLines) {
-            lines.push(current);
-        }
-        return lines;
     }
 
     function drawSoundBars(ctx, cx, cy, width, height, count, color) {
@@ -6067,7 +6166,7 @@ function resumePlaybackAfterBackground() {
             if (heroCover) {
                 drawRoundedImage(ctx, heroCover, artX, artY, artSize, 22);
             } else {
-                drawCoverFallback(ctx, artX, artY, artSize, 22);
+                drawVinylCoverFallback(ctx, artX, artY, artSize, 22);
             }
 
             // Right Column in Hero Card
@@ -6078,7 +6177,7 @@ function resumePlaybackAfterBackground() {
             ctx.textAlign = 'left';
 
             // 1. Kicker Badge (Pill)
-            const kickerText = '★ #1 TOP ROTATION';
+            const kickerText = '#1 TOP ROTATION';
             ctx.font = '700 17px Space Grotesk, Manrope, sans-serif';
             const kickerW = ctx.measureText(kickerText).width + 24;
             const kickerY = heroCardY + 34;
@@ -6303,7 +6402,7 @@ function resumePlaybackAfterBackground() {
                 if (thumbImg) {
                     drawRoundedImage(ctx, thumbImg, thumbX, thumbY, 66, 12);
                 } else {
-                    drawCoverFallback(ctx, thumbX, thumbY, 66, 12);
+                    drawVinylCoverFallback(ctx, thumbX, thumbY, 66, 12);
                 }
 
                 // Title & Artist (Starts at x = pad + 162)
@@ -6415,14 +6514,14 @@ function resumePlaybackAfterBackground() {
             if (heroCover) {
                 drawRoundedImage(ctx, heroCover, artX, artY, artSize, 20);
             } else {
-                drawCoverFallback(ctx, artX, artY, artSize, 20);
+                drawVinylCoverFallback(ctx, artX, artY, artSize, 20);
             }
 
             ctx.textAlign = 'left';
             ctx.textBaseline = 'alphabetic';
 
             // Kicker Pill
-            const sKickerText = '★ #1 TOP ROTATION';
+            const sKickerText = '#1 TOP ROTATION';
             ctx.font = '700 16px Space Grotesk, Manrope, sans-serif';
             const sKickerW = ctx.measureText(sKickerText).width + 22;
             const sKickerY = artY + artSize + 16;
@@ -6641,7 +6740,7 @@ function resumePlaybackAfterBackground() {
                 if (tImg) {
                     drawRoundedImage(ctx, tImg, tX, tY, 58, 12);
                 } else {
-                    drawCoverFallback(ctx, tX, tY, 58, 12);
+                    drawVinylCoverFallback(ctx, tX, tY, 58, 12);
                 }
 
                 // Title & Artist
@@ -6989,723 +7088,9 @@ function resumePlaybackAfterBackground() {
             // ==========================================
     // THEME CUSTOMIZATION ENGINE (COHESIVE & HARMONIZED)
     // ==========================================
-    (function () {
-        const THEME_STORAGE_KEY = 'psr_theme_v2';
-        const LEGACY_KEY = 'psr_theme_v1';
-
-        const BG_CONFIGS = {
-            dark:     { '--bg-main': '#070908', '--bg-elevated': '#0e110f', '--bg-highlight': '#181d1a', '--bg-soft': '#111512' },
-            amoled:   { '--bg-main': '#000000', '--bg-elevated': '#070707', '--bg-highlight': '#111111', '--bg-soft': '#090909' },
-            midnight: { '--bg-main': '#0b0f19', '--bg-elevated': '#111726', '--bg-highlight': '#1b243b', '--bg-soft': '#0f1422' },
-            charcoal: { '--bg-main': '#131518', '--bg-elevated': '#1a1d22', '--bg-highlight': '#23272e', '--bg-soft': '#17191d' },
-            warm:     { '--bg-main': '#140f0c', '--bg-elevated': '#1c1511', '--bg-highlight': '#271e18', '--bg-soft': '#17110d' },
-            forest:   { '--bg-main': '#09120c', '--bg-elevated': '#0e1a12', '--bg-highlight': '#15261b', '--bg-soft': '#0c160f' },
-        };
-
-        function hexToRgb(hex) {
-            const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec((hex || '').trim());
-            return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : null;
-        }
-
-        function getContrastColor(hex) {
-            const rgb = hexToRgb(hex);
-            if (!rgb) return '#061109';
-            const lum = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
-            return lum > 150 ? '#061109' : '#ffffff';
-        }
-
-        function lightenHex(hex, amount = 0.22) {
-            const rgb = hexToRgb(hex);
-            if (!rgb) return hex;
-            const r = Math.min(255, Math.round(rgb.r + (255 - rgb.r) * amount));
-            const g = Math.min(255, Math.round(rgb.g + (255 - rgb.g) * amount));
-            const b = Math.min(255, Math.round(rgb.b + (255 - rgb.b) * amount));
-            return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
-        }
-
-        function darkenHex(hex, amount = 0.2) {
-            const rgb = hexToRgb(hex);
-            if (!rgb) return hex;
-            const r = Math.max(0, Math.round(rgb.r * (1 - amount)));
-            const g = Math.max(0, Math.round(rgb.g * (1 - amount)));
-            const b = Math.max(0, Math.round(rgb.b * (1 - amount)));
-            return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
-        }
-
-        function mixWithWhite(hex, amount) {
-            const rgb = hexToRgb(hex);
-            if (!rgb) return hex;
-            const r = Math.min(255, Math.round(rgb.r + (255 - rgb.r) * amount));
-            const g = Math.min(255, Math.round(rgb.g + (255 - rgb.g) * amount));
-            const b = Math.min(255, Math.round(rgb.b + (255 - rgb.b) * amount));
-            return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
-        }
-
-        function bgPaletteFromBase(baseHex) {
-            const rgb = hexToRgb(baseHex) || { r: 10, g: 10, b: 10 };
-            const lum = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
-            if (lum < 120) {
-                return {
-                    '--bg-main':      baseHex,
-                    '--bg-elevated':  mixWithWhite(baseHex, 0.05),
-                    '--bg-highlight': mixWithWhite(baseHex, 0.11),
-                    '--bg-soft':      mixWithWhite(baseHex, 0.03),
-                };
-            } else {
-                return {
-                    '--bg-main':      baseHex,
-                    '--bg-elevated':  darkenHex(baseHex, 0.06),
-                    '--bg-highlight': darkenHex(baseHex, 0.12),
-                    '--bg-soft':      darkenHex(baseHex, 0.03),
-                };
-            }
-        }
-
-        function resolveSidebarColor(theme, bgVars) {
-            const mode = theme.sidebarMode || 'harmonize';
-            if (mode === 'match') {
-                return bgVars['--bg-main'];
-            } else if (mode === 'obsidian') {
-                return '#000000';
-            } else if (mode === 'custom' && theme.sidebarCustom) {
-                return theme.sidebarCustom;
-            } else {
-                // harmonize (default)
-                return bgVars['--bg-elevated'];
-            }
-        }
-
-        function resolveCardColor(theme, bgVars) {
-            const mode = theme.cardMode || 'glass';
-            if (mode === 'harmonize') {
-                const baseHex = bgVars['--bg-main'];
-                return mixWithWhite(baseHex, 0.055);
-            } else if (mode === 'contrast') {
-                return 'rgba(0, 0, 0, 0.55)';
-            } else if (mode === 'custom' && theme.cardCustom) {
-                return theme.cardCustom;
-            } else {
-                // 'glass' (default) - translucent frosted glass
-                return 'rgba(255, 255, 255, 0.045)';
-            }
-        }
-
-        function resolveStatusBarColor(theme, bgVars) {
-            const mode = theme.statusBarMode || 'accent';
-            if (mode === 'accent') {
-                return theme.accent || '#30d66b';
-            } else if (mode === 'background') {
-                return bgVars['--bg-main'] || '#070908';
-            } else if (mode === 'black') {
-                return '#000000';
-            } else if (mode === 'custom' && theme.statusBarCustom) {
-                return theme.statusBarCustom;
-            }
-            return theme.accent || '#30d66b';
-        }
-
-        function applyTheme(theme) {
-            const root = document.documentElement;
-
-            // --- Accent ---
-            const accentHex = theme.accent || '#30d66b';
-            const rgb = hexToRgb(accentHex);
-            const accentHover = theme.accentHover || lightenHex(accentHex, 0.22);
-            const contrast = getContrastColor(accentHex);
-
-            root.style.setProperty('--accent-color', accentHex);
-            root.style.setProperty('--accent-hover', accentHover);
-            root.style.setProperty('--focus-ring', lightenHex(accentHex, 0.45));
-            root.style.setProperty('--accent-contrast', contrast);
-            if (rgb) root.style.setProperty('--accent-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
-
-            // --- Lyrics Highlight Color ---
-            const lyricMode = theme.lyricMode || 'accent';
-            const lyricHex = (lyricMode === 'custom' && theme.lyricColor) ? theme.lyricColor : accentHex;
-            const lyricRgb = hexToRgb(lyricHex) || rgb || { r: 48, g: 214, b: 107 };
-            const lyricHover = theme.lyricHover || lightenHex(lyricHex, 0.35);
-            const lyricSpoken = lightenHex(lyricHex, 0.82);
-
-            root.style.setProperty('--lyric-color', lyricHex);
-            root.style.setProperty('--lyric-hover', lyricHover);
-            root.style.setProperty('--lyric-spoken', lyricSpoken);
-            root.style.setProperty('--lyric-rgb', `${lyricRgb.r}, ${lyricRgb.g}, ${lyricRgb.b}`);
-
-            // --- Background Palette ---
-            let bgVars;
-            if (theme.bg === 'custom' && theme.bgCustom) {
-                bgVars = bgPaletteFromBase(theme.bgCustom);
-            } else {
-                bgVars = BG_CONFIGS[theme.bg || 'dark'] || BG_CONFIGS.dark;
-            }
-            for (const [prop, val] of Object.entries(bgVars)) {
-                root.style.setProperty(prop, val);
-            }
-
-            // --- Navbar / Sidebar Background ---
-            const sidebarColor = resolveSidebarColor(theme, bgVars);
-            root.style.setProperty('--bg-sidebar', sidebarColor);
-
-            // --- Cards & Boxes Background ---
-            const cardColor = resolveCardColor(theme, bgVars);
-            root.style.setProperty('--bg-card', cardColor);
-
-            // --- PWA Status Bar / Frame Color ---
-            const statusBarColor = resolveStatusBarColor(theme, bgVars);
-            root.style.setProperty('--status-bar-color', statusBarColor);
-            let metaTheme = document.querySelector('meta[name="theme-color"]');
-            if (!metaTheme) {
-                metaTheme = document.createElement('meta');
-                metaTheme.name = 'theme-color';
-                document.head.appendChild(metaTheme);
-            }
-            metaTheme.setAttribute('content', statusBarColor);
-
-            // --- Font / Text Color ---
-            const textHex = theme.textColor || '#f5f7f5';
-            const textRgb = hexToRgb(textHex) || { r: 245, g: 247, b: 245 };
-            root.style.setProperty('--text-primary', textHex);
-            root.style.setProperty('--text-secondary', `rgba(${textRgb.r}, ${textRgb.g}, ${textRgb.b}, 0.72)`);
-            root.style.setProperty('--text-muted', `rgba(${textRgb.r}, ${textRgb.g}, ${textRgb.b}, 0.48)`);
-
-            // --- Scale (Font & Interface Zoom) ---
-            const scale = parseFloat(theme.scale || '1.0');
-            root.style.setProperty('--ui-scale', scale);
-            root.style.setProperty('--font-scale', scale);
-            if ('zoom' in root.style) {
-                root.style.zoom = scale !== 1.0 ? scale : '';
-            } else {
-                root.style.fontSize = scale !== 1.0 ? `${scale * 100}%` : '';
-            }
-        }
-
-        function getCurrentTheme() {
-            try {
-                const raw = localStorage.getItem(THEME_STORAGE_KEY) || localStorage.getItem(LEGACY_KEY);
-                if (raw) return JSON.parse(raw);
-            } catch {}
-            return {
-                accent: '#30d66b',
-                accentHover: '#55e584',
-                bg: 'dark',
-                bgCustom: '#070908',
-                sidebarMode: 'harmonize',
-                sidebarCustom: '#0e110f',
-                cardMode: 'glass',
-                cardCustom: '#16181b',
-                textColor: '#f5f7f5',
-                statusBarMode: 'accent',
-                statusBarCustom: '#30d66b',
-                lyricMode: 'accent',
-                lyricColor: '#30d66b',
-                scale: '1.0'
-            };
-        }
-
-        function saveTheme(theme) {
-            try {
-                localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(theme));
-            } catch {}
-            if (navigator.onLine) {
-                fetch('/api/user-settings/theme', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(theme)
-                }).catch(() => {});
-            }
-        }
-
-        async function syncThemeFromServer() {
-            if (!navigator.onLine) return;
-            try {
-                const res = await fetch('/api/user-settings/theme');
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data && data.theme && typeof data.theme === 'object' && Object.keys(data.theme).length > 0) {
-                        localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(data.theme));
-                        applyTheme(data.theme);
-                    }
-                }
-            } catch (_) {}
-        }
-
-        // Apply theme immediately on startup from local, then sync server
-        applyTheme(getCurrentTheme());
-        syncThemeFromServer();
-
-        // Listen for real-time theme updates from other devices
-        socket.on('theme_sync', (remoteTheme) => {
-            if (remoteTheme && typeof remoteTheme === 'object') {
-                try {
-                    localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(remoteTheme));
-                } catch (_) {}
-                applyTheme(remoteTheme);
-            }
-        });
-
-        // Wire Modal and Interactive Logic
-        const initThemeManager = () => {
-            const modalEl           = document.getElementById('theme-settings-modal');
-            const openBtn           = document.getElementById('theme-settings-btn');
-            const quickBtn          = document.getElementById('theme-quick-btn');
-            const closeBtn          = document.getElementById('theme-modal-close-btn');
-            const cancelBtn         = document.getElementById('theme-cancel-btn');
-            const applyBtn          = document.getElementById('theme-apply-btn');
-            const resetBtn          = document.getElementById('theme-reset-btn');
-
-            const accentPicker      = document.getElementById('theme-accent-picker');
-            const accentHexLabel    = document.getElementById('theme-accent-hex');
-            const presetsEl         = document.getElementById('theme-presets');
-
-            const sidebarOptionsEl  = document.getElementById('theme-sidebar-options');
-            const sidebarPicker     = document.getElementById('theme-sidebar-picker');
-            const sidebarHexLabel   = document.getElementById('theme-sidebar-hex');
-            const sidebarCustomRow  = document.getElementById('theme-sidebar-custom-row');
-
-            const bgPresetsEl       = document.getElementById('theme-bg-presets');
-            const bgPicker          = document.getElementById('theme-bg-picker');
-            const bgHexLabel        = document.getElementById('theme-bg-hex');
-            const bgCustomRow       = document.getElementById('theme-bg-custom-row');
-            const bgCustomPreview   = document.getElementById('theme-bg-custom-preview');
-
-            const cardOptionsEl     = document.getElementById('theme-card-options');
-            const cardPicker        = document.getElementById('theme-card-picker');
-            const cardHexLabel      = document.getElementById('theme-card-hex');
-            const cardCustomRow     = document.getElementById('theme-card-custom-row');
-
-            const textPresetsEl     = document.getElementById('theme-text-presets');
-            const textPicker        = document.getElementById('theme-text-picker');
-            const textHexLabel      = document.getElementById('theme-text-hex');
-
-            const statusbarOptionsEl = document.getElementById('theme-statusbar-options');
-            const statusbarPicker    = document.getElementById('theme-statusbar-picker');
-            const statusbarHexLabel  = document.getElementById('theme-statusbar-hex');
-            const statusbarCustomRow = document.getElementById('theme-statusbar-custom-row');
-            const lyricOptionsEl     = document.getElementById('theme-lyric-options');
-            const lyricPresetsEl     = document.getElementById('theme-lyric-presets');
-            const lyricPicker        = document.getElementById('theme-lyric-picker');
-            const lyricHexLabel      = document.getElementById('theme-lyric-hex');
-            const lyricCustomRow     = document.getElementById('theme-lyric-custom-row');
-            const prevLyricSpoken    = document.querySelector('.preview-lyric-spoken');
-            const prevLyricActive    = document.querySelector('.preview-lyric-active');
-            const prevCard           = document.getElementById('theme-preview-card');
-
-            const scaleRow          = document.querySelector('.theme-scale-row');
-
-            // Preview card elements
-            const prevSidebar       = document.getElementById('theme-preview-sidebar');
-            const prevContent       = document.getElementById('theme-preview-content');
-            const prevNavActive     = document.getElementById('theme-preview-nav-active');
-            const prevPlayBtn       = document.getElementById('theme-preview-play-btn');
-            const prevNowPlaying    = document.getElementById('theme-preview-now-playing');
-            const prevPulseDot      = document.getElementById('theme-preview-pulse-dot');
-            const prevCardArt       = document.getElementById('theme-preview-card-art');
-
-            if (!modalEl) return;
-
-            let initialTheme = { ...getCurrentTheme() };
-            let draft = { ...initialTheme };
-
-            function syncMiniPreview() {
-                const contrast = getContrastColor(draft.accent || '#30d66b');
-                let bgVars;
-                if (draft.bg === 'custom' && draft.bgCustom) {
-                    bgVars = bgPaletteFromBase(draft.bgCustom);
-                } else {
-                    bgVars = BG_CONFIGS[draft.bg || 'dark'] || BG_CONFIGS.dark;
-                }
-                const sidebarColor = resolveSidebarColor(draft, bgVars);
-                const cardColor = resolveCardColor(draft, bgVars);
-
-                if (prevSidebar)    prevSidebar.style.backgroundColor = sidebarColor;
-                if (prevContent) {
-                    prevContent.style.backgroundColor = bgVars['--bg-main'];
-                    prevContent.style.color = draft.textColor || '#f5f7f5';
-                }
-                if (prevCardArt && prevCardArt.parentElement) {
-                    prevCardArt.parentElement.style.backgroundColor = cardColor;
-                }
-                if (prevNavActive) {
-                    prevNavActive.style.backgroundColor = draft.accent;
-                    prevNavActive.style.color = contrast;
-                }
-                if (prevPlayBtn) {
-                    prevPlayBtn.style.backgroundColor = draft.accent;
-                    prevPlayBtn.style.color = contrast;
-                }
-                if (prevNowPlaying) prevNowPlaying.style.color = draft.accent;
-                if (prevPulseDot)   prevPulseDot.style.backgroundColor = draft.accent;
-                if (prevCardArt)    prevCardArt.style.backgroundColor = draft.accent;
-                const statusBarColor = resolveStatusBarColor(draft, bgVars);
-                if (prevCard) {
-                    prevCard.style.borderTop = `4px solid ${statusBarColor}`;
-                }
-                const lyricMode = draft.lyricMode || 'accent';
-                const lyricHex = (lyricMode === 'custom' && draft.lyricColor) ? draft.lyricColor : (draft.accent || '#30d66b');
-                const lyricRgb = hexToRgb(lyricHex) || { r: 48, g: 214, b: 107 };
-                const lyricSpoken = lightenHex(lyricHex, 0.82);
-                if (prevLyricSpoken) prevLyricSpoken.style.color = lyricSpoken;
-                if (prevLyricActive) {
-                    prevLyricActive.style.textShadow = `0 0 8px rgba(${lyricRgb.r}, ${lyricRgb.g}, ${lyricRgb.b}, 0.65)`;
-                }
-            }
-
-            function syncUI() {
-                // 1. Accent
-                accentPicker.value = draft.accent || '#30d66b';
-                accentHexLabel.textContent = draft.accent || '#30d66b';
-                presetsEl.querySelectorAll('.theme-swatch').forEach(sw => {
-                    sw.classList.toggle('active', sw.dataset.accent.toLowerCase() === draft.accent.toLowerCase());
-                });
-
-                // 2. Sidebar / Navbar
-                const currentSidebarMode = draft.sidebarMode || 'harmonize';
-                sidebarOptionsEl.querySelectorAll('.theme-pill-btn').forEach(btn => {
-                    btn.classList.toggle('active', btn.dataset.sidebarMode === currentSidebarMode);
-                });
-                const isCustomSidebar = currentSidebarMode === 'custom';
-                if (sidebarCustomRow) sidebarCustomRow.style.display = isCustomSidebar ? 'flex' : 'none';
-                if (sidebarPicker && draft.sidebarCustom) sidebarPicker.value = draft.sidebarCustom;
-                if (sidebarHexLabel && draft.sidebarCustom) sidebarHexLabel.textContent = draft.sidebarCustom;
-
-                // 3. Background
-                bgPresetsEl.querySelectorAll('.theme-bg-btn').forEach(btn => {
-                    btn.classList.toggle('active', btn.dataset.bg === (draft.bg || 'dark'));
-                });
-                const isCustomBg = draft.bg === 'custom';
-                if (bgCustomRow) bgCustomRow.style.display = isCustomBg ? 'flex' : 'none';
-                const curBgCustom = draft.bgCustom || '#070908';
-                if (bgPicker) bgPicker.value = curBgCustom;
-                if (bgHexLabel) bgHexLabel.textContent = curBgCustom;
-                if (bgCustomPreview) bgCustomPreview.style.backgroundColor = curBgCustom;
-
-                // 4. Cards & Boxes Style
-                const currentCardMode = draft.cardMode || 'glass';
-                if (cardOptionsEl) {
-                    cardOptionsEl.querySelectorAll('.theme-pill-btn').forEach(btn => {
-                        btn.classList.toggle('active', btn.dataset.cardMode === currentCardMode);
-                    });
-                }
-                const isCustomCard = currentCardMode === 'custom';
-                if (cardCustomRow) cardCustomRow.style.display = isCustomCard ? 'flex' : 'none';
-                if (cardPicker && draft.cardCustom) cardPicker.value = draft.cardCustom;
-                if (cardHexLabel && draft.cardCustom) cardHexLabel.textContent = draft.cardCustom;
-
-                // 5. Text / Font Color
-                const currentText = draft.textColor || '#f5f7f5';
-                if (textPicker) textPicker.value = currentText;
-                if (textHexLabel) textHexLabel.textContent = currentText;
-                if (textPresetsEl) {
-                    textPresetsEl.querySelectorAll('.theme-swatch').forEach(sw => {
-                        sw.classList.toggle('active', sw.dataset.text.toLowerCase() === currentText.toLowerCase());
-                    });
-                }
-
-                // 6. PWA Status Bar / Border
-                const currentStatusBarMode = draft.statusBarMode || 'accent';
-                if (statusbarOptionsEl) {
-                    statusbarOptionsEl.querySelectorAll('.theme-pill-btn').forEach(btn => {
-                        btn.classList.toggle('active', btn.dataset.statusbarMode === currentStatusBarMode);
-                    });
-                }
-                const isCustomStatusBar = currentStatusBarMode === 'custom';
-                if (statusbarCustomRow) statusbarCustomRow.style.display = isCustomStatusBar ? 'flex' : 'none';
-                const curStatusBarCustom = draft.statusBarCustom || draft.accent || '#30d66b';
-                if (statusbarPicker) statusbarPicker.value = curStatusBarCustom;
-                if (statusbarHexLabel) statusbarHexLabel.textContent = curStatusBarCustom;
-
-                // 7. Lyrics Highlight Color
-                const currentLyricMode = draft.lyricMode || 'accent';
-                if (lyricOptionsEl) {
-                    lyricOptionsEl.querySelectorAll('.theme-pill-btn').forEach(btn => {
-                        btn.classList.toggle('active', btn.dataset.lyricMode === currentLyricMode);
-                    });
-                }
-                const isCustomLyric = currentLyricMode === 'custom';
-                if (lyricCustomRow) lyricCustomRow.style.display = isCustomLyric ? 'flex' : 'none';
-                if (lyricPresetsEl) lyricPresetsEl.style.display = isCustomLyric ? 'flex' : 'none';
-                const curLyricColor = draft.lyricColor || draft.accent || '#30d66b';
-                if (lyricPicker) lyricPicker.value = curLyricColor;
-                if (lyricHexLabel) lyricHexLabel.textContent = curLyricColor;
-                if (lyricPresetsEl) {
-                    lyricPresetsEl.querySelectorAll('.theme-swatch').forEach(sw => {
-                        sw.classList.toggle('active', isCustomLyric && sw.dataset.lyric?.toLowerCase() === curLyricColor.toLowerCase());
-                    });
-                }
-
-                // 8. Scale
-                if (scaleRow) {
-                    scaleRow.querySelectorAll('.theme-scale-btn').forEach(btn => {
-                        btn.classList.toggle('active', btn.dataset.scale === (draft.scale || '1.0'));
-                    });
-                }
-
-                // 7. Mini Preview & Live Full-App Preview
-                syncMiniPreview();
-                applyTheme(draft);
-            }
-
-            function openModal() {
-                initialTheme = { ...getCurrentTheme() };
-                draft = { ...initialTheme };
-                syncUI();
-                modalEl.style.display = 'flex';
-                modalEl.setAttribute('aria-hidden', 'false');
-            }
-
-            function closeModal(revert = false) {
-                if (revert) {
-                    applyTheme(initialTheme);
-                }
-                modalEl.style.display = 'none';
-                modalEl.setAttribute('aria-hidden', 'true');
-            }
-
-            if (openBtn)  openBtn.addEventListener('click', openModal);
-            if (quickBtn) quickBtn.addEventListener('click', openModal);
-            if (closeBtn) closeBtn.addEventListener('click', () => closeModal(true));
-            if (cancelBtn) cancelBtn.addEventListener('click', () => closeModal(true));
-
-            modalEl.addEventListener('click', e => {
-                if (e.target === modalEl) closeModal(true);
-            });
-
-            // Accent presets
-            presetsEl.addEventListener('click', e => {
-                const sw = e.target.closest('.theme-swatch');
-                if (!sw) return;
-                draft.accent = sw.dataset.accent;
-                draft.accentHover = sw.dataset.accentHover || lightenHex(sw.dataset.accent, 0.22);
-                syncUI();
-            });
-
-            // Accent custom picker
-            accentPicker.addEventListener('input', () => {
-                draft.accent = accentPicker.value;
-                draft.accentHover = lightenHex(accentPicker.value, 0.22);
-                accentHexLabel.textContent = accentPicker.value;
-                presetsEl.querySelectorAll('.theme-swatch').forEach(sw => sw.classList.remove('active'));
-                syncUI();
-            });
-
-            // Sidebar / Navbar style pills
-            sidebarOptionsEl.addEventListener('click', e => {
-                const btn = e.target.closest('.theme-pill-btn');
-                if (!btn) return;
-                const mode = btn.dataset.sidebarMode;
-                draft.sidebarMode = mode;
-                if (mode === 'custom' && !draft.sidebarCustom) {
-                    draft.sidebarCustom = '#0e110f';
-                }
-                syncUI();
-                if (mode === 'custom' && sidebarPicker) {
-                    sidebarPicker.click();
-                }
-            });
-
-            // Sidebar custom picker
-            if (sidebarPicker) {
-                sidebarPicker.addEventListener('input', () => {
-                    draft.sidebarMode = 'custom';
-                    draft.sidebarCustom = sidebarPicker.value;
-                    if (sidebarHexLabel) sidebarHexLabel.textContent = sidebarPicker.value;
-                    syncUI();
-                });
-            }
-
-            // Main Background presets
-            bgPresetsEl.addEventListener('click', e => {
-                const btn = e.target.closest('.theme-bg-btn');
-                if (!btn) return;
-                draft.bg = btn.dataset.bg;
-                if (draft.bg === 'custom') {
-                    if (!draft.bgCustom) {
-                        draft.bgCustom = BG_CONFIGS['dark']['--bg-main'];
-                    }
-                    syncUI();
-                    if (bgPicker) bgPicker.click();
-                } else {
-                    syncUI();
-                }
-            });
-
-            // Main Background custom picker
-            if (bgPicker) {
-                bgPicker.addEventListener('input', () => {
-                    draft.bg = 'custom';
-                    draft.bgCustom = bgPicker.value;
-                    if (bgHexLabel) bgHexLabel.textContent = bgPicker.value;
-                    if (bgCustomPreview) bgCustomPreview.style.backgroundColor = bgPicker.value;
-                    syncUI();
-                });
-            }
-
-            // Cards & Boxes style pills
-            if (cardOptionsEl) {
-                cardOptionsEl.addEventListener('click', e => {
-                    const btn = e.target.closest('.theme-pill-btn');
-                    if (!btn) return;
-                    const mode = btn.dataset.cardMode;
-                    draft.cardMode = mode;
-                    if (mode === 'custom' && !draft.cardCustom) {
-                        draft.cardCustom = '#16181b';
-                    }
-                    syncUI();
-                    if (mode === 'custom' && cardPicker) {
-                        cardPicker.click();
-                    }
-                });
-            }
-
-            // Cards & Boxes custom picker
-            if (cardPicker) {
-                cardPicker.addEventListener('input', () => {
-                    draft.cardMode = 'custom';
-                    draft.cardCustom = cardPicker.value;
-                    if (cardHexLabel) cardHexLabel.textContent = cardPicker.value;
-                    syncUI();
-                });
-            }
-
-            // Text / Font Color presets
-            if (textPresetsEl) {
-                textPresetsEl.addEventListener('click', e => {
-                    const sw = e.target.closest('.theme-swatch');
-                    if (!sw) return;
-                    draft.textColor = sw.dataset.text;
-                    syncUI();
-                });
-            }
-
-            // Text / Font Color custom picker
-            if (textPicker) {
-                textPicker.addEventListener('input', () => {
-                    draft.textColor = textPicker.value;
-                    if (textHexLabel) textHexLabel.textContent = textPicker.value;
-                    if (textPresetsEl) {
-                        textPresetsEl.querySelectorAll('.theme-swatch').forEach(sw => sw.classList.remove('active'));
-                    }
-                    syncUI();
-                });
-            }
-
-            // PWA Status Bar / Border mode pills
-            if (statusbarOptionsEl) {
-                statusbarOptionsEl.addEventListener('click', e => {
-                    const btn = e.target.closest('.theme-pill-btn');
-                    if (!btn) return;
-                    const mode = btn.dataset.statusbarMode;
-                    draft.statusBarMode = mode;
-                    if (mode === 'custom' && !draft.statusBarCustom) {
-                        draft.statusBarCustom = draft.accent || '#30d66b';
-                    }
-                    syncUI();
-                    if (mode === 'custom' && statusbarPicker) {
-                        statusbarPicker.click();
-                    }
-                });
-            }
-
-            // PWA Status Bar / Border custom picker
-            if (statusbarPicker) {
-                statusbarPicker.addEventListener('input', () => {
-                    draft.statusBarMode = 'custom';
-                    draft.statusBarCustom = statusbarPicker.value;
-                    if (statusbarHexLabel) statusbarHexLabel.textContent = statusbarPicker.value;
-                    syncUI();
-                });
-            }
-
-            // Lyrics mode pills
-            if (lyricOptionsEl) {
-                lyricOptionsEl.addEventListener('click', e => {
-                    const btn = e.target.closest('.theme-pill-btn');
-                    if (!btn) return;
-                    const mode = btn.dataset.lyricMode;
-                    draft.lyricMode = mode;
-                    if (mode === 'custom' && !draft.lyricColor) {
-                        draft.lyricColor = draft.accent || '#30d66b';
-                    }
-                    syncUI();
-                });
-            }
-
-            // Lyrics presets
-            if (lyricPresetsEl) {
-                lyricPresetsEl.addEventListener('click', e => {
-                    const sw = e.target.closest('.theme-swatch');
-                    if (!sw) return;
-                    draft.lyricMode = 'custom';
-                    draft.lyricColor = sw.dataset.lyric;
-                    syncUI();
-                });
-            }
-
-            // Lyrics custom picker
-            if (lyricPicker) {
-                lyricPicker.addEventListener('input', () => {
-                    draft.lyricMode = 'custom';
-                    draft.lyricColor = lyricPicker.value;
-                    if (lyricHexLabel) lyricHexLabel.textContent = lyricPicker.value;
-                    if (lyricPresetsEl) {
-                        lyricPresetsEl.querySelectorAll('.theme-swatch').forEach(sw => sw.classList.remove('active'));
-                    }
-                    syncUI();
-                });
-            }
-
-            // Scale buttons
-            if (scaleRow) {
-                scaleRow.addEventListener('click', e => {
-                    const btn = e.target.closest('.theme-scale-btn');
-                    if (!btn) return;
-                    draft.scale = btn.dataset.scale;
-                    syncUI();
-                });
-            }
-
-            // Save Theme Button
-            applyBtn.addEventListener('click', () => {
-                applyTheme(draft);
-                saveTheme(draft);
-                closeModal(false);
-                if (typeof showToast === 'function') {
-                    showToast('Theme saved successfully!', 'success');
-                }
-            });
-
-            // Reset Default Button
-            resetBtn.addEventListener('click', () => {
-                draft = {
-                    accent: '#30d66b',
-                    accentHover: '#55e584',
-                    bg: 'dark',
-                    bgCustom: '#070908',
-                    sidebarMode: 'harmonize',
-                    sidebarCustom: '#0e110f',
-                    cardMode: 'glass',
-                    cardCustom: '#16181b',
-                    textColor: '#f5f7f5',
-                    statusBarMode: 'accent',
-                    statusBarCustom: '#30d66b',
-                    lyricMode: 'accent',
-                    lyricColor: '#30d66b',
-                    scale: '1.0'
-                };
-                applyTheme(draft);
-                saveTheme(draft);
-                syncUI();
-                if (typeof showToast === 'function') {
-                    showToast('Theme reset to default.', 'info');
-                }
-            });
-        };
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initThemeManager);
-        } else {
-            initThemeManager();
-        }
-    })();
+    // Theme Customization Engine has been modularized into static/theme.js
+    if (typeof window.initThemeManager === 'function') {
+        try { window.initThemeManager(); } catch (e) { console.warn('initThemeManager failed:', e); }
+    }
 
 });
