@@ -12,6 +12,7 @@ services:
       - ./database.db:/app/database.db
       - ./logs:/app/logs
       - ./app.py:/app/app.py
+      - ./routes:/app/routes
       - ./services:/app/services
       - ./scripts:/app/scripts
       - ./tests:/app/tests
