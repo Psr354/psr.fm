@@ -2693,7 +2693,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.shuffleOrder = []; // Force a fresh shuffle order when turned on
         }
         buildQueue();
-        savePlaybackState(true);
+        savePlaybackState(true, true);
     });
 
     document.getElementById('queue-btn')?.addEventListener('click', (e) => {
@@ -2722,7 +2722,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.setAttribute('aria-label', label);
             btn.title = label;
             showToast(label, 'success');
-            savePlaybackState(true);
+            savePlaybackState(true, true);
         }
     });
 
@@ -3438,6 +3438,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let isPrimarySyncLeader = false;
     let isApplyingRemoteSync = false;
     let lastRemoteSyncAppliedAt = 0;
+    let remoteSyncTimeout = null;
+    let isSyncSeeking = false;
+    let followerTrackEndTimer = null;
     let syncPromptActive = false;
 
     function showSyncAutoplayPrompt(targetTime) {
@@ -3452,11 +3455,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (state.shouldBePlaying && el.audio) {
                 try {
                     if (typeof targetTime === 'number' && targetTime > 0) {
+                        isSyncSeeking = true;
                         el.audio.currentTime = targetTime;
                     }
                     if (typeof resumeEqContext === 'function') resumeEqContext();
                     el.audio.play().catch(() => {});
                     updatePlayPauseIcon(true);
+                    updateSyncedLyrics(true);
                 } catch (_) {}
             }
         };
@@ -3466,12 +3471,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function syncPlaybackToServer(payload, immediate = false) {
         if (!payload || !navigator.onLine) return;
+        if (!isPrimarySyncLeader) {
+            if (serverSyncTimer) {
+                clearTimeout(serverSyncTimer);
+                serverSyncTimer = null;
+            }
+            return;
+        }
         const now = Date.now();
         if (!immediate && now - lastServerSyncTime < 3500) {
             if (!serverSyncTimer) {
                 serverSyncTimer = setTimeout(() => {
                     serverSyncTimer = null;
-                    if (cachedPlaybackPayload) {
+                    if (isPrimarySyncLeader && cachedPlaybackPayload) {
                         syncPlaybackToServer(cachedPlaybackPayload, true);
                     }
                 }, 3500);
@@ -3494,7 +3506,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (_) {}
     }
 
-    function savePlaybackState(force = false) {
+    function savePlaybackState(force = false, isUserAction = false) {
         if (!state.currentSongMeta || !state.currentPlayingSongId) return;
         const now = Date.now();
         if (!force && now - lastSavePlaybackTime < 2000) return;
@@ -3544,13 +3556,13 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(cachedPlaybackPayload));
 
             // Do not bounce remote sync events back to server (prevents feedback loops)
-            if (isApplyingRemoteSync || (now - lastRemoteSyncAppliedAt < 1200)) {
+            if (isApplyingRemoteSync || (now - lastRemoteSyncAppliedAt < 2500)) {
                 return;
             }
 
             // Only the active leader sends throttled background progress;
-            // Explicit user actions (force === true) always sync immediately.
-            if (force || isPrimarySyncLeader) {
+            // Explicit user actions (isUserAction === true) always sync immediately.
+            if (isPrimarySyncLeader || isUserAction) {
                 syncPlaybackToServer(cachedPlaybackPayload, force);
             }
         } catch (_) {}
@@ -3559,16 +3571,25 @@ document.addEventListener('DOMContentLoaded', () => {
     function applySavedPlaybackState(saved, startPlaying = false, isRemoteSync = false) {
         if (!saved || !saved.songMeta) return;
 
+        if (followerTrackEndTimer) {
+            clearTimeout(followerTrackEndTimer);
+            followerTrackEndTimer = null;
+        }
+
         if (isRemoteSync) {
             isApplyingRemoteSync = true;
             lastRemoteSyncAppliedAt = Date.now();
             isPrimarySyncLeader = false;
-            setTimeout(() => { isApplyingRemoteSync = false; }, 1200);
+            if (remoteSyncTimeout) clearTimeout(remoteSyncTimeout);
+            remoteSyncTimeout = setTimeout(() => {
+                isApplyingRemoteSync = false;
+                remoteSyncTimeout = null;
+            }, 3000);
         }
 
         const now = Date.now();
         const latencySec = (saved.timestamp && now > saved.timestamp)
-            ? Math.min(8, (now - saved.timestamp) / 1000)
+            ? Math.min(3, Math.max(0, (now - saved.timestamp) / 1000))
             : 0;
 
         const shouldPlay = Boolean(startPlaying !== false && (startPlaying === true || saved.isPlaying));
@@ -3665,15 +3686,19 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isDifferentSrc || !isSameSong) {
                 el.audio.src = audioSrc;
                 const onLoaded = () => {
+                    isSyncSeeking = true;
                     try { el.audio.currentTime = targetTime; } catch (_) {}
+                    updateSyncedLyrics(true);
                     triggerPlayback();
                 };
                 el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
             } else {
                 // Same song: check drift
                 const drift = Math.abs((el.audio.currentTime || 0) - targetTime);
-                if (drift > 0.45) {
+                if (drift > 1.8) {
+                    isSyncSeeking = true;
                     try { el.audio.currentTime = targetTime; } catch (_) {}
+                    updateSyncedLyrics(true);
                 }
                 triggerPlayback();
             }
@@ -3701,7 +3726,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if ((serverState.timestamp || 0) >= localTime) {
                 const now = Date.now();
                 const isActivelyPlaying = Boolean(serverState.isPlaying && (now - (serverState.timestamp || 0) < 20000));
-                applySavedPlaybackState(serverState, isActivelyPlaying, false);
+                applySavedPlaybackState(serverState, isActivelyPlaying, isActivelyPlaying);
                 localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(serverState));
             }
         } catch (e) {
@@ -3734,13 +3759,18 @@ function resumePlaybackAfterBackground() {
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
             flushListenLog();
-            savePlaybackState(true);
+            if (typeof isPrimarySyncLeader !== 'undefined' && isPrimarySyncLeader && !(typeof isApplyingRemoteSync !== 'undefined' && isApplyingRemoteSync)) {
+                savePlaybackState(true);
+            }
         } else {
             cancelPlaybackRecovery();
             cancelTrackTransitionRecovery();
             state.playbackRecoveryInProgress = false;
             highlightPlayingSong();
             resumePlaybackAfterBackground();
+            if (typeof isPrimarySyncLeader !== 'undefined' && !isPrimarySyncLeader) {
+                updateSyncedLyrics(true);
+            }
         }
     });
     window.addEventListener('pageshow', () => {
@@ -3748,13 +3778,20 @@ function resumePlaybackAfterBackground() {
         cancelTrackTransitionRecovery();
         state.playbackRecoveryInProgress = false;
         resumePlaybackAfterBackground();
+        if (typeof isPrimarySyncLeader !== 'undefined' && !isPrimarySyncLeader) {
+            updateSyncedLyrics(true);
+        }
     });
     window.addEventListener('pagehide', () => {
         flushListenLog();
-        savePlaybackState(true);
+        if (typeof isPrimarySyncLeader !== 'undefined' && isPrimarySyncLeader && !(typeof isApplyingRemoteSync !== 'undefined' && isApplyingRemoteSync)) {
+            savePlaybackState(true);
+        }
     });
     window.addEventListener('beforeunload', () => {
-        savePlaybackState(true);
+        if (typeof isPrimarySyncLeader !== 'undefined' && isPrimarySyncLeader && !(typeof isApplyingRemoteSync !== 'undefined' && isApplyingRemoteSync)) {
+            savePlaybackState(true);
+        }
     });
 
     if ('launchQueue' in window && 'setConsumer' in window.launchQueue) {
@@ -3816,7 +3853,9 @@ function resumePlaybackAfterBackground() {
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
         startLyricAnimation();
         updateMediaSessionPosition();
-        savePlaybackState(true);
+        if (typeof isPrimarySyncLeader !== 'undefined' && isPrimarySyncLeader && !(typeof isApplyingRemoteSync !== 'undefined' && isApplyingRemoteSync)) {
+            savePlaybackState(true);
+        }
     });
 
     el.audio.addEventListener('playing', () => {
@@ -3843,7 +3882,9 @@ function resumePlaybackAfterBackground() {
         if (el.nowPlaying) el.nowPlaying.classList.remove('playing');
         stopLyricAnimation();
         flushListenLog();
-        savePlaybackState(true);
+        if (typeof isPrimarySyncLeader !== 'undefined' && isPrimarySyncLeader && !(typeof isApplyingRemoteSync !== 'undefined' && isApplyingRemoteSync)) {
+            savePlaybackState(true);
+        }
         if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
         if (state.shouldBePlaying) {
             schedulePlaybackRecovery();
@@ -3858,15 +3899,42 @@ function resumePlaybackAfterBackground() {
     el.audio.addEventListener('seeked', () => {
         state.lastLoggedTime = el.audio.currentTime;
         updateSyncedLyrics(true);
-        savePlaybackState(true);
+        if (typeof isSyncSeeking !== 'undefined' && isSyncSeeking) {
+            isSyncSeeking = false;
+            return;
+        }
+        if (typeof isPrimarySyncLeader !== 'undefined' && isPrimarySyncLeader && !(typeof isApplyingRemoteSync !== 'undefined' && isApplyingRemoteSync)) {
+            savePlaybackState(true, true);
+        }
     });
 
     el.audio.addEventListener('ended', () => {
         cancelPlaybackRecovery();
         stopLyricAnimation();
         flushListenLog();
-        playNext(true);
-        scheduleTrackTransitionRecovery();
+        const isLeader = typeof isPrimarySyncLeader !== 'undefined' ? isPrimarySyncLeader : true;
+        if (isLeader) {
+            playNext(true);
+            scheduleTrackTransitionRecovery();
+        } else {
+            if (typeof followerTrackEndTimer !== 'undefined' && followerTrackEndTimer) {
+                clearTimeout(followerTrackEndTimer);
+                followerTrackEndTimer = null;
+            }
+            if (typeof followerTrackEndTimer !== 'undefined') {
+                followerTrackEndTimer = setTimeout(() => {
+                    followerTrackEndTimer = null;
+                    if (el.audio && el.audio.ended) {
+                        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
+                        playNext(true);
+                        scheduleTrackTransitionRecovery();
+                    }
+                }, 4000);
+            } else {
+                playNext(true);
+                scheduleTrackTransitionRecovery();
+            }
+        }
     });
 
     el.audio.addEventListener('waiting', schedulePlaybackRecovery);
@@ -3959,20 +4027,31 @@ function resumePlaybackAfterBackground() {
     // Media Session API: keeps background/locked-screen playback alive so tracks
     // auto-advance when the tab is not focused, and wires OS media controls.
     if ('mediaSession' in navigator) {
-        navigator.mediaSession.setActionHandler('previoustrack', () => playPrev());
-        navigator.mediaSession.setActionHandler('nexttrack', () => playNext(false));
+        navigator.mediaSession.setActionHandler('previoustrack', () => {
+            if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
+            playPrev();
+        });
+        navigator.mediaSession.setActionHandler('nexttrack', () => {
+            if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
+            playNext(false);
+        });
         navigator.mediaSession.setActionHandler('play', () => {
+            if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
             state.shouldBePlaying = true;
             resumeCurrentSong();
             updatePlayPauseIcon(true);
         });
         navigator.mediaSession.setActionHandler('pause', () => {
+            if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
             state.shouldBePlaying = false;
             el.audio.pause();
             updatePlayPauseIcon(false);
         });
         navigator.mediaSession.setActionHandler('seekto', ({ seekTime }) => {
-            if (Number.isFinite(seekTime)) seekAudio(seekTime);
+            if (Number.isFinite(seekTime)) {
+                if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
+                seekAudio(seekTime);
+            }
         });
     }
 
@@ -4096,7 +4175,9 @@ function resumePlaybackAfterBackground() {
     state.userMuted = false;
 
     function setAppVolume(vol, isMuted = false, shouldSave = true) {
-        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
+        if (shouldSave && !isApplyingRemoteSync) {
+            if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
+        }
         const normalized = Math.max(0, Math.min(1, Number(vol)));
         if (!isMuted && normalized > 0) {
             state.lastNonZeroVolume = normalized;
@@ -4148,7 +4229,7 @@ function resumePlaybackAfterBackground() {
         });
 
         updateVolumeIcon(effective);
-        if (shouldSave) savePlaybackState(true);
+        if (shouldSave && isPrimarySyncLeader) savePlaybackState(true, true);
     }
 
     el.volumeBar?.addEventListener('input', (e) => {
@@ -5024,6 +5105,7 @@ function resumePlaybackAfterBackground() {
     }
 
     function playLibrarySong(song) {
+        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
         const previewSong = {
             ...song,
             id: Number(song.id),
@@ -5068,7 +5150,7 @@ function resumePlaybackAfterBackground() {
         if (state.isLooping || state.loopStart > 0 || state.loopEnd > 0) {
             resetLoop();
         }
-        savePlaybackState(true);
+        savePlaybackState(true, true);
     }
 
     function playSong(songs, index) {
@@ -5110,7 +5192,7 @@ function resumePlaybackAfterBackground() {
         if (state.isLooping || state.loopStart > 0 || state.loopEnd > 0) {
             resetLoop();
         }
-        savePlaybackState(true);
+        savePlaybackState(true, true);
     }
 
     function togglePlay() {
