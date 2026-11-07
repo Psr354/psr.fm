@@ -38,13 +38,13 @@ class AuthAndDownloadTests(unittest.TestCase):
             cookie.load(header)
         return cookie['csrf_token'].value
 
-    def _create_playlist(self, user_id=1, name='Favorites'):
+    def _create_playlist(self, user_id=1, name='Favorites', cover_art=''):
         conn = sqlite3.connect(self.app_module.DATABASE_PATH)
         try:
             cursor = conn.cursor()
             cursor.execute(
-                'INSERT INTO playlists (name, folder_name, user_id) VALUES (?, ?, ?)',
-                (name, 'favorites', user_id),
+                'INSERT INTO playlists (name, folder_name, user_id, cover_art) VALUES (?, ?, ?, ?)',
+                (name, 'favorites', user_id, cover_art),
             )
             conn.commit()
             return cursor.lastrowid
@@ -974,6 +974,151 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(lyrics['lyrics'], '')
         self.assertEqual(lyrics['synced_lyrics'], '')
         self.assertEqual(lyrics['lyrics_status'], 'none')
+
+    def test_download_song_file_preserves_audio_format_and_mimetype(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        self.assertEqual(setup_response.status_code, 200)
+
+        library_dir = self.app_module.LIBRARY_DIR
+        os.makedirs(library_dir, exist_ok=True)
+        flac_path = os.path.join(library_dir, 'custom-track.flac')
+        with open(flac_path, 'wb') as f:
+            f.write(b'fLaCdummycontent')
+
+        song_id = self._create_song(
+            user_id=1,
+            title='Flac Song',
+            artist='Audiophile',
+            filename='custom-track.flac',
+        )
+
+        response = client.get(f'/api/songs/{song_id}/download')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, 'audio/flac')
+        content_disposition = response.headers.get('Content-Disposition', '')
+        self.assertIn('Flac_Song_-_Audiophile.flac', content_disposition)
+
+    def test_delete_playlist_cleans_up_cover_art_file(self):
+        from services.common import _file_cleanup_queue
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+
+        album_art_dir = self.app_module.ALBUM_ART_DIR
+        os.makedirs(album_art_dir, exist_ok=True)
+        cover_filename = 'pl_cover_999.jpg'
+        cover_path = os.path.join(album_art_dir, cover_filename)
+        with open(cover_path, 'wb') as f:
+            f.write(b'dummy-cover-bytes')
+
+        playlist_id = self._create_playlist(user_id=1, name='Cover Playlist', cover_art=cover_filename)
+
+        delete_response = client.delete(
+            f'/api/playlists/{playlist_id}',
+            headers={'X-CSRF-Token': csrf_token},
+        )
+        self.assertEqual(delete_response.status_code, 200)
+
+        _file_cleanup_queue.join()
+        self.assertFalse(os.path.exists(cover_path))
+
+    def test_delete_user_cleans_up_playlist_cover_art_file(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_response)
+
+        user2_res = client.post(
+            '/api/users',
+            headers={'X-CSRF-Token': csrf_token},
+            json={'username': 'user2', 'password': 'password123'},
+        )
+        self.assertEqual(user2_res.status_code, 201)
+        user2_id = user2_res.get_json()['user_id']
+
+        album_art_dir = self.app_module.ALBUM_ART_DIR
+        os.makedirs(album_art_dir, exist_ok=True)
+        cover_filename = 'pl_cover_user2.jpg'
+        cover_path = os.path.join(album_art_dir, cover_filename)
+        with open(cover_path, 'wb') as f:
+            f.write(b'dummy-cover-bytes-user2')
+
+        self._create_playlist(user_id=user2_id, name='User2 Playlist', cover_art=cover_filename)
+
+        del_user_res = client.delete(
+            f'/api/admin/users/{user2_id}',
+            headers={'X-CSRF-Token': csrf_token},
+        )
+        self.assertEqual(del_user_res.status_code, 200)
+        self.assertFalse(os.path.exists(cover_path))
+
+    def test_init_db_skips_reordering_if_position_column_exists(self):
+        from services.database import init_db, get_db_connection
+        executed_queries = []
+        real_conn = get_db_connection(self.app_module.DATABASE_PATH)
+
+        class LoggingCursor:
+            def __init__(self, cursor):
+                self._cursor = cursor
+            def execute(self, sql, params=()):
+                executed_queries.append(sql)
+                return self._cursor.execute(sql, params)
+            def executemany(self, sql, params=()):
+                executed_queries.append(sql)
+                return self._cursor.executemany(sql, params)
+            def fetchall(self):
+                return self._cursor.fetchall()
+            def fetchone(self):
+                return self._cursor.fetchone()
+            @property
+            def lastrowid(self):
+                return self._cursor.lastrowid
+
+        class LoggingConn:
+            def __init__(self, conn):
+                self._conn = conn
+            def cursor(self):
+                return LoggingCursor(self._conn.cursor())
+            def commit(self):
+                return self._conn.commit()
+            def close(self):
+                return self._conn.close()
+
+        with patch('services.database.get_db_connection', return_value=LoggingConn(real_conn)):
+            init_db(self.app_module.DATABASE_PATH)
+
+        self.assertFalse(any('SELECT DISTINCT playlist_id FROM playlist_songs' in q for q in executed_queries))
+
+    def test_csrf_rejects_missing_token_globally(self):
+        client = self.app_module.app.test_client()
+        # Non-exempt POST without CSRF token should return 403
+        response = client.post('/api/playlists', json={'name': 'No CSRF'})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.get_json()['error'], 'CSRF token missing')
+
+    def test_dashboard_storage_caching(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        self.assertEqual(setup_response.status_code, 200)
+
+        # Call dashboard multiple times
+        res1 = client.get('/api/dashboard')
+        res2 = client.get('/api/dashboard')
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(res1.get_json()['storage_used'], res2.get_json()['storage_used'])
 
 
 if __name__ == '__main__':

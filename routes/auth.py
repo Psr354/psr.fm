@@ -167,26 +167,45 @@ def delete_user(user_id):
     conn = get_db_connection(db_path)
     for file_info in user_files:
         try:
-            filename_count = conn.execute(
-                'SELECT COUNT(*) AS count FROM songs WHERE filename = ?',
-                (file_info['filename'],)
-            ).fetchone()['count']
-            if filename_count == 0 and library_dir:
-                mp3_path = os.path.join(library_dir, file_info['filename'])
-                if os.path.exists(mp3_path):
-                    os.remove(mp3_path)
+            if file_info.get('filename') and library_dir:
+                filename_count = conn.execute(
+                    'SELECT COUNT(*) AS count FROM songs WHERE filename = ?',
+                    (file_info['filename'],)
+                ).fetchone()['count']
+                if filename_count == 0:
+                    mp3_path = os.path.join(library_dir, file_info['filename'])
+                    if os.path.exists(mp3_path):
+                        os.remove(mp3_path)
 
             if file_info.get('album_art') and album_art_dir:
                 album_art_count = conn.execute(
                     'SELECT COUNT(*) AS count FROM songs WHERE album_art = ?',
                     (file_info['album_art'],)
                 ).fetchone()['count']
-                if album_art_count == 0:
+                playlist_art_count = conn.execute(
+                    'SELECT COUNT(*) AS count FROM playlists WHERE cover_art = ?',
+                    (file_info['album_art'],)
+                ).fetchone()['count']
+                if album_art_count == 0 and playlist_art_count == 0:
                     art_path = os.path.join(album_art_dir, file_info['album_art'])
                     if os.path.exists(art_path):
                         os.remove(art_path)
+
+            if file_info.get('cover_art') and album_art_dir:
+                cover_art_count = conn.execute(
+                    'SELECT COUNT(*) AS count FROM playlists WHERE cover_art = ?',
+                    (file_info['cover_art'],)
+                ).fetchone()['count']
+                song_art_count = conn.execute(
+                    'SELECT COUNT(*) AS count FROM songs WHERE album_art = ?',
+                    (file_info['cover_art'],)
+                ).fetchone()['count']
+                if cover_art_count == 0 and song_art_count == 0:
+                    cover_path = os.path.join(album_art_dir, file_info['cover_art'])
+                    if os.path.exists(cover_path):
+                        os.remove(cover_path)
         except Exception as e:
-            target = file_info.get('filename') or file_info.get('album_art') or 'unknown file'
+            target = file_info.get('filename') or file_info.get('album_art') or file_info.get('cover_art') or 'unknown file'
             print(f"[WARN] Failed to delete {target}: {e}")
     conn.close()
 

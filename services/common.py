@@ -20,8 +20,6 @@ AUDIO_MIME_TYPES = {
     '.aac': 'audio/aac'
 }
 
-ADMIN_USERNAMES = ['psr354']
-
 LYRICS_RATE_LIMIT_WINDOW_SECONDS = 60
 LYRICS_RATE_LIMIT_MAX_REQUESTS = 10
 _lyrics_rate_limit_lock = Lock()

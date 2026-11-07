@@ -21,4 +21,5 @@ services:
       - .env
     environment:
       - FLASK_ENV=production
+      - FLASK_DEBUG=0
       - PSR_FM_DATABASE_PATH=/app/database.db/psr_fm.sqlite3

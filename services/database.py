@@ -250,22 +250,22 @@ def init_db(db_path):
     if 'position' not in playlist_song_cols:
         cursor.execute("ALTER TABLE playlist_songs ADD COLUMN position INTEGER DEFAULT 0")
 
-    cursor.execute("SELECT DISTINCT playlist_id FROM playlist_songs")
-    playlist_ids = [row['playlist_id'] for row in cursor.fetchall()]
-    for playlist_id in playlist_ids:
-        cursor.execute(
-            '''
-            SELECT song_id FROM playlist_songs
-            WHERE playlist_id = ?
-            ORDER BY position ASC, added_at ASC, song_id ASC
-            ''',
-            (playlist_id,)
-        )
-        for index, row in enumerate(cursor.fetchall()):
+        cursor.execute("SELECT DISTINCT playlist_id FROM playlist_songs")
+        playlist_ids = [row['playlist_id'] for row in cursor.fetchall()]
+        for playlist_id in playlist_ids:
             cursor.execute(
-                'UPDATE playlist_songs SET position = ? WHERE playlist_id = ? AND song_id = ?',
-                (index, playlist_id, row['song_id'])
+                '''
+                SELECT song_id FROM playlist_songs
+                WHERE playlist_id = ?
+                ORDER BY position ASC, added_at ASC, song_id ASC
+                ''',
+                (playlist_id,)
             )
+            for index, row in enumerate(cursor.fetchall()):
+                cursor.execute(
+                    'UPDATE playlist_songs SET position = ? WHERE playlist_id = ? AND song_id = ?',
+                    (index, playlist_id, row['song_id'])
+                )
 
     # ==========================================
     # LISTENING LOGS TABLE
@@ -276,7 +276,9 @@ def init_db(db_path):
             song_id INTEGER,
             user_id INTEGER,
             seconds_listened REAL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )
     ''')
 
@@ -471,12 +473,17 @@ def get_all_users(database_path):
 
 
 def get_user_files(database_path, user_id):
-    """Get all files (MP3 & album art) owned by a user"""
+    """Get all files (audio, album art, playlist cover art) owned by a user"""
     conn = get_db_connection(database_path)
     try:
         cursor = conn.cursor()
         cursor.execute('SELECT filename, album_art FROM songs WHERE user_id = ?', (user_id,))
-        return [dict(row) for row in cursor.fetchall()]
+        files = [{'filename': row['filename'], 'album_art': row['album_art'], 'cover_art': None} for row in cursor.fetchall()]
+        cursor.execute("SELECT cover_art FROM playlists WHERE user_id = ? AND cover_art IS NOT NULL AND cover_art != ''", (user_id,))
+        for row in cursor.fetchall():
+            if row['cover_art']:
+                files.append({'filename': None, 'album_art': None, 'cover_art': row['cover_art']})
+        return files
     finally:
         conn.close()
 

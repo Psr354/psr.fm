@@ -138,12 +138,16 @@ def download_worker(db_path, download_dir, album_art_dir, sio):
     os.makedirs(os.path.join(download_dir, 'library'), exist_ok=True)
     while True:
         task = download_queue.get()
-        if task is None: break
-        try: process_download(task, db_path, download_dir, album_art_dir)
+        if task is None:
+            break
+        try:
+            process_download(task, db_path, download_dir, album_art_dir)
         except Exception as e:
             print(f"Error: {e}")
-            if socketio_instance: socketio_instance.emit('download_error', {'url': task['url'], 'error': str(e)}, room=f"user_{task['user_id']}")
-        finally: download_queue.task_done()
+            if socketio_instance:
+                socketio_instance.emit('download_error', {'url': task['url'], 'error': str(e)}, room=f"user_{task['user_id']}")
+        finally:
+            download_queue.task_done()
 
 
 def add_song_to_playlists(cursor, song_id, playlist_ids):
@@ -193,8 +197,10 @@ def process_download(task, db_path, download_dir, album_art_dir):
         if socketio_instance:
             if d['status'] == 'downloading':
                 percent_str = d.get('_percent_str', '0%').strip().replace('%', '').replace(' ', '')
-                try: percent = float(percent_str)
-                except: percent = 0
+                try:
+                    percent = float(percent_str)
+                except (ValueError, TypeError):
+                    percent = 0.0
                 socketio_instance.emit('download_progress', {'url': url, 'percent': percent}, room=f'user_{user_id}')
             elif d['status'] == 'finished':
                 socketio_instance.emit('download_progress', {'url': url, 'percent': 100}, room=f'user_{user_id}')
@@ -256,18 +262,22 @@ def process_download(task, db_path, download_dir, album_art_dir):
         'progress_hooks': [progress_hook],
     })
     
-    with yt_dlp.YoutubeDL(ydl_opts_download) as ydl: ydl.download([download_url])
-        
+    with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
+        ydl.download([download_url])
+
     expected_file = f"{file_uuid}.mp3"
-    if not os.path.exists(os.path.join(library_dir, expected_file)): raise Exception("Audio missing")
-        
+    if not os.path.exists(os.path.join(library_dir, expected_file)):
+        raise Exception("Audio missing")
+
     duration_seconds = extract_duration(os.path.join(library_dir, expected_file))
-    if duration_seconds == 0 and duration > 0: duration_seconds = int(duration)
-        
+    if duration_seconds == 0 and duration > 0:
+        duration_seconds = int(duration)
+
     album_art_filename = ""
     if thumbnail_url:
         art_ext = os.path.splitext(thumbnail_url)[-1].split('?')[0]
-        if art_ext not in ['.jpg', '.jpeg', '.png', '.webp']: art_ext = '.jpg'
+        if art_ext not in ['.jpg', '.jpeg', '.png', '.webp']:
+            art_ext = '.jpg'
         album_art_filename = f"{file_uuid}{art_ext}"
         try:
             r = requests.get(
@@ -276,8 +286,10 @@ def process_download(task, db_path, download_dir, album_art_dir):
                 headers=YOUTUBE_HTTP_HEADERS,
             )
             if r.status_code == 200:
-                with open(os.path.join(album_art_dir, album_art_filename), 'wb') as f: f.write(r.content)
-        except: pass
+                with open(os.path.join(album_art_dir, album_art_filename), 'wb') as f:
+                    f.write(r.content)
+        except Exception as e:
+            print(f"[WARN] Failed to download thumbnail: {e}")
             
     conn = get_db_connection(db_path)
     try:

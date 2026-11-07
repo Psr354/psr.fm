@@ -658,7 +658,7 @@ button { touch-action: manipulation; }
 .lyrics-animation-menu-wrap { position: relative; }
 .lyrics-animation-menu {
     position: absolute;
-    right: 0;
+    left: 0;
     bottom: calc(100% + 8px);
     z-index: 5;
     display: none;

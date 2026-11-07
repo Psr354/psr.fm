@@ -24,7 +24,7 @@ from services.common import (
     playback_timestamp, valid_playback_id, queue_file_deletion,
     check_login_rate_limit, record_failed_login, clear_login_rate_limit,
     check_lyrics_rate_limit, get_user_status_bar_color, reset_rate_limits,
-    LOGIN_RATE_LIMIT_MAX_ATTEMPTS, ADMIN_USERNAMES
+    LOGIN_RATE_LIMIT_MAX_ATTEMPTS
 )
 
 from routes.auth import auth_bp
@@ -39,7 +39,7 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 
 app = Flask(__name__)
 secret_key = os.environ.get('SECRET_KEY')
-if not secret_key and os.environ.get('FLASK_ENV', '').lower() == 'production':
+if not secret_key and (os.environ.get('FLASK_ENV', '').lower() == 'production' or os.environ.get('PSR_FM_ENV', '').lower() == 'production'):
     raise RuntimeError('SECRET_KEY must be configured in production')
 app.secret_key = secret_key or os.urandom(32).hex()
 
@@ -107,19 +107,21 @@ def set_csrf_cookie(response):
     return response
 
 
+CSRF_EXEMPT_ROUTES = {'/api/login', '/api/setup'}
+
+
 @app.before_request
-def csrf_protect_api():
-    if request.method in ['POST', 'PUT', 'DELETE']:
-        if request.path.startswith('/api/'):
-            if request.path in ['/api/login', '/api/setup']:
-                return
-            token = request.headers.get('X-CSRF-Token')
-            if not token:
-                return jsonify({'error': 'CSRF token missing'}), 403
-            try:
-                validate_csrf(token)
-            except Exception:
-                return jsonify({'error': 'Invalid CSRF token'}), 403
+def csrf_protect():
+    if request.method in ['POST', 'PUT', 'DELETE', 'PATCH']:
+        if request.path in CSRF_EXEMPT_ROUTES:
+            return
+        token = request.headers.get('X-CSRF-Token') or request.form.get('csrf_token')
+        if not token:
+            return jsonify({'error': 'CSRF token missing'}), 403
+        try:
+            validate_csrf(token)
+        except Exception:
+            return jsonify({'error': 'Invalid CSRF token'}), 403
 
 
 @login_manager.user_loader

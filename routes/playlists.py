@@ -112,8 +112,11 @@ def upload_cover(playlist_id):
 @login_required
 def delete_playlist(playlist_id):
     db = get_db()
-    if not get_owned_playlist(db, playlist_id):
+    playlist = get_owned_playlist(db, playlist_id)
+    if not playlist:
         return jsonify({'error': 'Playlist not found'}), 404
+
+    cover_art = playlist['cover_art'] if 'cover_art' in playlist.keys() else None
 
     playlist_songs = db.execute(
         '''
@@ -161,6 +164,20 @@ def delete_playlist(playlist_id):
             ).fetchone()
             if not album_art_in_use:
                 art = os.path.join(album_art_dir, song['album_art'])
+                queue_file_deletion(art)
+
+    if cover_art and album_art_dir:
+        cover_art_in_use = db.execute(
+            'SELECT 1 FROM playlists WHERE cover_art = ? LIMIT 1',
+            (cover_art,)
+        ).fetchone()
+        if not cover_art_in_use:
+            song_art_in_use = db.execute(
+                'SELECT 1 FROM songs WHERE album_art = ? LIMIT 1',
+                (cover_art,)
+            ).fetchone()
+            if not song_art_in_use:
+                art = os.path.join(album_art_dir, cover_art)
                 queue_file_deletion(art)
 
     return jsonify({

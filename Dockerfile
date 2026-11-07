@@ -18,5 +18,5 @@ RUN mkdir -p downloads static/album_art logs
 # Expose port 5000
 EXPOSE 5000
 
-# Run the application
-CMD ["python", "app.py"]
+# Run the application with production WSGI server
+CMD ["gunicorn", "--worker-class", "gthread", "--threads", "100", "--workers", "1", "--bind", "0.0.0.0:5000", "app:app"]

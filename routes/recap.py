@@ -2,6 +2,7 @@ import calendar
 import math
 import os
 import shutil
+import time
 import uuid
 from datetime import datetime, timezone, timedelta
 from flask import Blueprint, request, jsonify, current_app
@@ -126,6 +127,26 @@ def log_play(song_id):
     return jsonify({'status': 'ok', 'playback_session_id': session_id})
 
 
+_storage_cache = {'timestamp': 0, 'size': 0, 'key': None}
+
+
+def _get_storage_used(download_dir, album_art_dir, ttl_seconds=30):
+    global _storage_cache
+    now = time.time()
+    cache_key = (download_dir, album_art_dir)
+    if _storage_cache['key'] == cache_key and (now - _storage_cache['timestamp']) < ttl_seconds:
+        return _storage_cache['size']
+
+    total_size = 0
+    if download_dir and os.path.exists(download_dir):
+        total_size += sum(os.path.getsize(os.path.join(dp, f)) for dp, dn, filenames in os.walk(download_dir) for f in filenames if os.path.isfile(os.path.join(dp, f)))
+    if album_art_dir and os.path.exists(album_art_dir):
+        total_size += sum(os.path.getsize(os.path.join(album_art_dir, f)) for f in os.listdir(album_art_dir) if os.path.isfile(os.path.join(album_art_dir, f)))
+
+    _storage_cache = {'timestamp': now, 'size': total_size, 'key': cache_key}
+    return total_size
+
+
 @recap_bp.route('/api/dashboard')
 @login_required
 def dashboard():
@@ -141,11 +162,7 @@ def dashboard():
     download_dir = current_app.config.get('DOWNLOAD_DIR', '')
     album_art_dir = current_app.config.get('ALBUM_ART_DIR', '')
 
-    total_size = 0
-    if download_dir and os.path.exists(download_dir):
-        total_size += sum(os.path.getsize(os.path.join(dp, f)) for dp, dn, filenames in os.walk(download_dir) for f in filenames if os.path.isfile(os.path.join(dp, f)))
-    if album_art_dir and os.path.exists(album_art_dir):
-        total_size += sum(os.path.getsize(os.path.join(album_art_dir, f)) for f in os.listdir(album_art_dir) if os.path.isfile(os.path.join(album_art_dir, f)))
+    total_size = _get_storage_used(download_dir, album_art_dir)
 
     storage_usage = shutil.disk_usage(download_dir) if download_dir and os.path.exists(download_dir) else (0, 0, 0)
     free_space = storage_usage.free if hasattr(storage_usage, 'free') else 0

@@ -596,15 +596,20 @@ def download_song_file(song_id):
     if not song:
         return jsonify({'error': 'Not found'}), 404
 
-    safe_filename = secure_filename(song['filename'])
-    download_name = f"{song['title']} - {song['artist'] or 'Unknown'}.mp3"
-    download_name = secure_filename(download_name) or 'song.mp3'
-
     library_dir = current_app.config.get('LIBRARY_DIR', '')
+    safe_filename = secure_filename(song['filename'])
+    full_path = os.path.join(library_dir, safe_filename)
+    if not os.path.exists(full_path):
+        return jsonify({'error': 'Audio file not found'}), 404
+
+    ext = os.path.splitext(safe_filename)[1] or '.mp3'
+    download_name = f"{song['title']} - {song['artist'] or 'Unknown'}{ext}"
+    download_name = secure_filename(download_name) or f"song{ext}"
+
     return send_from_directory(
         library_dir,
         safe_filename,
-        mimetype='audio/mpeg',
+        mimetype=audio_mimetype(safe_filename),
         as_attachment=True,
         download_name=download_name
     )
