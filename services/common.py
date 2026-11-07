@@ -56,9 +56,10 @@ def queue_file_deletion(file_path):
 
 
 class User(UserMixin):
-    def __init__(self, id, username):
+    def __init__(self, id, username, role='user'):
         self.id = id
         self.username = username
+        self.role = role
 
 
 def audio_mimetype(filename):
@@ -181,6 +182,8 @@ def is_admin():
     """Check if current user is admin."""
     if not current_user.is_authenticated:
         return False
+    if hasattr(current_user, 'role') and current_user.role is not None:
+        return current_user.role == 'admin'
     conn = get_db_connection(get_database_path())
     cursor = conn.cursor()
     cursor.execute('SELECT role FROM users WHERE id = ?', (current_user.id,))

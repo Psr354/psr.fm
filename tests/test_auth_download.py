@@ -1120,6 +1120,92 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(res2.status_code, 200)
         self.assertEqual(res1.get_json()['storage_used'], res2.get_json()['storage_used'])
 
+    def test_user_role_loaded_and_is_admin_evaluates_in_memory(self):
+        client = self.app_module.app.test_client()
+        client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        from services.common import is_admin
+        with self.app_module.app.test_request_context():
+            user = self.app_module.load_user(1)
+            self.assertEqual(user.role, 'admin')
+            with patch('services.common.get_db_connection') as mock_conn:
+                with patch('flask_login.utils._get_user', return_value=user):
+                    self.assertTrue(is_admin())
+                    mock_conn.assert_not_called()
+
+    def test_change_password_flow(self):
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_res)
+
+        bad_pw_res = client.post(
+            '/api/user/change-password',
+            headers={'X-CSRF-Token': csrf_token},
+            json={'current_password': 'wrongpassword', 'new_password': 'newsecret123'},
+        )
+        self.assertEqual(bad_pw_res.status_code, 400)
+        self.assertEqual(bad_pw_res.get_json()['error'], 'Current password is incorrect')
+
+        short_pw_res = client.post(
+            '/api/user/change-password',
+            headers={'X-CSRF-Token': csrf_token},
+            json={'current_password': 'secret123', 'new_password': '123'},
+        )
+        self.assertEqual(short_pw_res.status_code, 400)
+        self.assertIn('at least 6 characters', short_pw_res.get_json()['error'])
+
+        change_res = client.post(
+            '/api/user/change-password',
+            headers={'X-CSRF-Token': csrf_token},
+            json={'current_password': 'secret123', 'new_password': 'newsecret123'},
+        )
+        self.assertEqual(change_res.status_code, 200)
+
+        login_old_res = client.post('/api/login', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        self.assertEqual(login_old_res.status_code, 401)
+
+        login_new_res = client.post('/api/login', json={
+            'username': 'admin',
+            'password': 'newsecret123',
+        })
+        self.assertEqual(login_new_res.status_code, 200)
+
+    def test_upload_playlist_cover_reencodes_image(self):
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf_token = self._csrf_token_from_response(setup_res)
+        playlist_id = self._create_playlist()
+
+        from PIL import Image
+        img_io = io.BytesIO()
+        test_img = Image.new('RGB', (100, 100), color='blue')
+        test_img.save(img_io, format='JPEG')
+        img_io.seek(0)
+
+        upload_res = client.post(
+            f'/api/playlists/{playlist_id}/cover',
+            headers={'X-CSRF-Token': csrf_token},
+            data={'cover': (img_io, 'test_cover.jpg')},
+            content_type='multipart/form-data',
+        )
+        self.assertEqual(upload_res.status_code, 200)
+        cover_filename = upload_res.get_json()['cover_art']
+        saved_cover_path = os.path.join(self.app_module.ALBUM_ART_DIR, cover_filename)
+        self.assertTrue(os.path.exists(saved_cover_path))
+        saved_img = Image.open(saved_cover_path)
+        self.assertEqual(saved_img.format, 'JPEG')
+
 
 if __name__ == '__main__':
     unittest.main()

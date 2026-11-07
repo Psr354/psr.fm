@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'psr354-shell-v43';
+const SHELL_CACHE = 'psr354-shell-v44';
 const MEDIA_CACHE = 'psr354-media-v3';
 const RUNTIME_CACHE = 'psr354-runtime-v1';
 const APP_SHELL_KEY = '/?offline-app-shell=1';

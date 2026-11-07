@@ -20,7 +20,7 @@ from services.downloader import download_queue, start_worker, validate_song_url
 from services.lyrics import search_lyrics, parse_lrc
 from services.common import (
     User, get_db, get_owned_playlist, get_owned_song, get_global_song,
-    add_global_song_to_playlists, is_admin, get_json_object, audio_mimetype,
+    add_global_song_to_playlists, get_json_object, audio_mimetype,
     playback_timestamp, valid_playback_id, queue_file_deletion,
     check_login_rate_limit, record_failed_login, clear_login_rate_limit,
     check_lyrics_rate_limit, get_user_status_bar_color, reset_rate_limits,
@@ -128,11 +128,11 @@ def csrf_protect():
 def load_user(user_id):
     conn = get_db_connection(app.config.get('DATABASE_PATH') or DATABASE_PATH)
     cursor = conn.cursor()
-    cursor.execute('SELECT id, username FROM users WHERE id = ?', (user_id,))
+    cursor.execute('SELECT id, username, role FROM users WHERE id = ?', (user_id,))
     row = cursor.fetchone()
     conn.close()
     if row:
-        return User(id=row['id'], username=row['username'])
+        return User(id=row['id'], username=row['username'], role=row['role'])
     return None
 
 

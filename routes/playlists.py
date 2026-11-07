@@ -101,8 +101,10 @@ def upload_cover(playlist_id):
         if os.path.exists(old_path):
             os.remove(old_path)
 
-    file.seek(0)
-    file.save(save_path)
+    save_format = img.format
+    if save_format == 'JPEG' and img.mode in ('RGBA', 'P'):
+        img = img.convert('RGB')
+    img.save(save_path, format=save_format)
     db.execute('UPDATE playlists SET cover_art = ? WHERE id = ? AND user_id = ?', (filename, playlist_id, current_user.id))
     db.commit()
     return jsonify({'status': 'success', 'cover_art': filename})

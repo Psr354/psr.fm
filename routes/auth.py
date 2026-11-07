@@ -51,7 +51,7 @@ def setup_account():
     if not user_id:
         return jsonify({'error': 'Username already taken'}), 400
 
-    user = User(id=user_id, username=username)
+    user = User(id=user_id, username=username, role='admin')
     login_user(user, remember=True)
     return jsonify({'status': 'success', 'message': 'Account created successfully'})
 
@@ -80,7 +80,7 @@ def login():
         return jsonify({'error': 'Invalid username or password'}), 401
 
     clear_login_rate_limit(username)
-    user = User(id=user_row['id'], username=user_row['username'])
+    user = User(id=user_row['id'], username=user_row['username'], role=user_row['role'])
     login_user(user, remember=True)
     return jsonify({'status': 'success', 'username': user.username})
 
@@ -210,6 +210,39 @@ def delete_user(user_id):
     conn.close()
 
     return jsonify({'status': 'success', 'message': 'User and all data deleted'})
+
+
+@auth_bp.route('/api/user/change-password', methods=['POST'])
+@login_required
+def change_password():
+    """Change current user's password."""
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
+
+    current_password = data.get('current_password', '')
+    new_password = data.get('new_password', '')
+
+    if not current_password or not new_password:
+        return jsonify({'error': 'Current password and new password are required'}), 400
+
+    if len(new_password) < 6:
+        return jsonify({'error': 'Password must be at least 6 characters'}), 400
+
+    db_path = get_database_path()
+    conn = get_db_connection(db_path)
+    try:
+        user = conn.execute('SELECT password_hash FROM users WHERE id = ?', (current_user.id,)).fetchone()
+        if not user or not check_password_hash(user['password_hash'], current_password):
+            return jsonify({'error': 'Current password is incorrect'}), 400
+    finally:
+        conn.close()
+
+    success = update_user_password(db_path, current_user.id, new_password)
+    if not success:
+        return jsonify({'error': 'Failed to update password'}), 500
+
+    return jsonify({'status': 'success', 'message': 'Password changed successfully'})
 
 
 @auth_bp.route('/api/admin/users/<int:user_id>/reset-password', methods=['POST'])
