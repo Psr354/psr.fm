@@ -44,10 +44,16 @@ def extract_song_source_id(url):
 
 
 def get_db_connection(db_path):
-    """Create a database connection with row factory and foreign keys enabled"""
-    conn = sqlite3.connect(db_path)
+    """Create a database connection with row factory, WAL mode, and foreign keys enabled"""
+    conn = sqlite3.connect(db_path, timeout=5.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+    except sqlite3.OperationalError:
+        pass
     return conn
 
 
@@ -369,6 +375,24 @@ def init_db(db_path):
             FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )
     ''')
+
+    # ==========================================
+    # DOWNLOAD JOBS QUEUE (PERSISTENCE)
+    # ==========================================
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS download_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            url TEXT NOT NULL,
+            playlist_ids TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued', 'processing', 'completed', 'failed')),
+            error TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_download_jobs_status ON download_jobs (status)')
 
     # Enforce one row per YouTube source for each user when legacy data is clean
     # enough to support it. Older installations may already contain duplicates;

@@ -568,6 +568,14 @@ def stream_audio(filename):
     if not song:
         return jsonify({'error': 'Not found'}), 404
     library_dir = current_app.config.get('LIBRARY_DIR', '')
+
+    accel_prefix = os.environ.get('PSR_FM_ACCEL_REDIRECT_PREFIX')
+    if accel_prefix:
+        response = current_app.response_class()
+        response.headers['X-Accel-Redirect'] = f"{accel_prefix.rstrip('/')}/{safe_filename}"
+        response.headers['Content-Type'] = audio_mimetype(safe_filename)
+        return response
+
     return send_from_directory(library_dir, safe_filename, mimetype=audio_mimetype(safe_filename))
 
 

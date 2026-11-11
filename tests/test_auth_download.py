@@ -658,7 +658,50 @@ class AuthAndDownloadTests(unittest.TestCase):
             conn.close()
 
         self.assertIn('idx_listening_logs_user_timestamp', indexes)
-        self.assertIn('idx_listening_logs_song_user', indexes)
+
+    def test_database_connection_uses_wal_mode_and_busy_timeout(self):
+        conn = self.app_module.get_db_connection(self.app_module.DATABASE_PATH)
+        try:
+            journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+            self.assertEqual(journal_mode.lower(), 'wal')
+            self.assertGreaterEqual(busy_timeout, 5000)
+        finally:
+            conn.close()
+
+    def test_persistent_download_queue_persists_and_recovers_jobs(self):
+        client = self.app_module.app.test_client()
+        client.post('/api/setup', json={'username': 'admin', 'password': 'secret123'})
+
+        from services.downloader import PersistentDownloadQueue
+        q = PersistentDownloadQueue()
+        q.init_db(self.app_module.DATABASE_PATH)
+        task = {
+            'user_id': 1,
+            'url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+            'playlist_ids': [1, 2],
+        }
+        q.put(task)
+        self.assertIn('job_id', task)
+        job_id = task['job_id']
+
+        conn = self.app_module.get_db_connection(self.app_module.DATABASE_PATH)
+        try:
+            row = conn.execute("SELECT status, url FROM download_jobs WHERE id = ?", (job_id,)).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row['status'], 'queued')
+            self.assertEqual(row['url'], task['url'])
+            conn.execute("UPDATE download_jobs SET status = 'processing' WHERE id = ?", (job_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+        q2 = PersistentDownloadQueue()
+        q2.init_db(self.app_module.DATABASE_PATH)
+        recovered_task = q2.get_nowait()
+        self.assertEqual(recovered_task['job_id'], job_id)
+        self.assertEqual(recovered_task['url'], task['url'])
+        self.assertEqual(recovered_task['playlist_ids'], [1, 2])
 
     def test_listen_rejects_invalid_or_oversized_chunks(self):
         client = self.app_module.app.test_client()

@@ -13,7 +13,64 @@ from services.metadata import extract_duration
 from services.database import extract_song_source_id, get_db_connection, update_song_lyrics
 from services.lyrics import search_lyrics
 
-download_queue = queue.Queue()
+
+class PersistentDownloadQueue(queue.Queue):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.db_path = None
+
+    def init_db(self, db_path):
+        self.db_path = db_path
+        self._recover_unprocessed()
+
+    def _recover_unprocessed(self):
+        if not self.db_path or not os.path.exists(self.db_path):
+            return
+        try:
+            conn = get_db_connection(self.db_path)
+            conn.execute(
+                "UPDATE download_jobs SET status = 'queued', updated_at = CURRENT_TIMESTAMP WHERE status = 'processing'"
+            )
+            conn.commit()
+            rows = conn.execute(
+                "SELECT id, user_id, url, playlist_ids FROM download_jobs WHERE status = 'queued' ORDER BY id ASC"
+            ).fetchall()
+            for row in rows:
+                try:
+                    pids = json.loads(row['playlist_ids'])
+                except Exception:
+                    pids = []
+                super().put({
+                    'job_id': row['id'],
+                    'url': row['url'],
+                    'playlist_ids': pids,
+                    'user_id': row['user_id'],
+                })
+            conn.close()
+        except Exception as e:
+            print(f"[WARN] Failed to recover download queue: {e}")
+
+    def put(self, item, block=True, timeout=None):
+        if isinstance(item, dict) and 'job_id' not in item and self.db_path and os.path.exists(self.db_path):
+            try:
+                conn = get_db_connection(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute(
+                    '''
+                    INSERT INTO download_jobs (user_id, url, playlist_ids, status)
+                    VALUES (?, ?, ?, 'queued')
+                    ''',
+                    (item.get('user_id'), item.get('url'), json.dumps(item.get('playlist_ids', [])))
+                )
+                conn.commit()
+                item['job_id'] = cursor.lastrowid
+                conn.close()
+            except Exception as e:
+                print(f"[WARN] Failed to persist download job: {e}")
+        super().put(item, block=block, timeout=timeout)
+
+
+download_queue = PersistentDownloadQueue()
 socketio_instance = None
 MAX_DOWNLOAD_DURATION_SECONDS = 600
 YOUTUBE_HTTP_HEADERS = {
@@ -140,10 +197,35 @@ def download_worker(db_path, download_dir, album_art_dir, sio):
         task = download_queue.get()
         if task is None:
             break
+        job_id = task.get('job_id')
+        if job_id and db_path and os.path.exists(db_path):
+            try:
+                conn = get_db_connection(db_path)
+                conn.execute("UPDATE download_jobs SET status = 'processing', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (job_id,))
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
         try:
             process_download(task, db_path, download_dir, album_art_dir)
+            if job_id and db_path and os.path.exists(db_path):
+                try:
+                    conn = get_db_connection(db_path)
+                    conn.execute("UPDATE download_jobs SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (job_id,))
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass
         except Exception as e:
             print(f"Error: {e}")
+            if job_id and db_path and os.path.exists(db_path):
+                try:
+                    conn = get_db_connection(db_path)
+                    conn.execute("UPDATE download_jobs SET status = 'failed', error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (str(e)[:500], job_id))
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass
             if socketio_instance:
                 socketio_instance.emit('download_error', {'url': task['url'], 'error': str(e)}, room=f"user_{task['user_id']}")
         finally:
@@ -362,4 +444,5 @@ def process_download(task, db_path, download_dir, album_art_dir):
     }, playlist_ids)
 
 def start_worker(db_path, download_dir, album_art_dir, sio):
+    download_queue.init_db(db_path)
     threading.Thread(target=download_worker, args=(db_path, download_dir, album_art_dir, sio), daemon=True).start()
