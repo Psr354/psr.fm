@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const wrapCanvasLines = window.wrapCanvasLines;
     const debounce = window.debounce || ((fn, delay) => { let timer; return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), delay); }; });
     function formatCapsuleTime(seconds) {
-        if (!seconds) return "0h 0m";
+        if (!seconds || seconds <= 0) return "0m";
         const h = Math.floor(seconds / 3600);
         const m = Math.floor((seconds % 3600) / 60);
         if (h === 0) return `${m}m`;
@@ -473,7 +473,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.textAlign = 'left';
 
             // 1. Kicker Badge (Pill)
-            const kickerText = '#1 TOP ROTATION';
+            const kickerText = '#1 MOST LISTENED';
             ctx.font = '700 17px Space Grotesk, Manrope, sans-serif';
             const kickerW = ctx.measureText(kickerText).width + 24;
             const kickerY = heroCardY + 34;
@@ -608,7 +608,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
             ctx.font = '500 16px Manrope, sans-serif';
-            ctx.fillText(`${data.stats.total_plays || 0} total plays recorded`, pad + contentW - 24, ribbonY + 63);
+            ctx.fillText(`${formatCapsuleTime(data.stats.total_seconds || 0)} total listened`, pad + contentW - 24, ribbonY + 63);
             ctx.restore();
 
             // ==================== TRIO STATS CARDS ====================
@@ -655,11 +655,11 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.textBaseline = 'alphabetic';
             ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
             ctx.font = '700 20px Space Grotesk, Manrope, sans-serif';
-            ctx.fillText('TOP TRACKS LEADERBOARD', pad, listY + 22);
+            ctx.fillText('TOP TRACKS • MOST LISTENED', pad, listY + 22);
             ctx.restore();
 
-            const tracksToDisplay = topPlayed.slice(0, 5);
-            const maxPlays = Math.max(1, tracksToDisplay[0]?.play_count || 1);
+            const tracksToDisplay = (topListened.length ? topListened : topPlayed).slice(0, 5);
+            const maxListened = Math.max(1, tracksToDisplay[0]?.total_listened || 1);
             let rowY = listY + 38;
             const rankColors = ['#fbbf24', '#e2e8f0', '#f97316', 'rgba(255,255,255,0.7)', 'rgba(255,255,255,0.7)'];
 
@@ -673,7 +673,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.fill();
 
                 // Proportional volume bar in background
-                const rowVolW = Math.max(12, (contentW * (song.play_count || 0)) / maxPlays);
+                const rowVolW = Math.max(12, (contentW * (song.total_listened || 0)) / maxListened);
                 ctx.fillStyle = idx === 0 ? 'rgba(251, 191, 36, 0.08)' : 'rgba(255, 255, 255, 0.05)';
                 drawRoundRect(ctx, pad, rowY, rowVolW, rowH, 16);
                 ctx.fill();
@@ -716,15 +716,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.font = '500 19px Manrope, sans-serif';
                 ctx.fillText(fitCanvasText(ctx, song.artist || 'Unknown', textMaxW), textX, rowY + 72);
 
-                // Plays & Time on Right
+                // Time & Plays on Right
                 ctx.textAlign = 'right';
                 ctx.fillStyle = '#ffffff';
                 ctx.font = '700 23px Space Grotesk, Manrope, sans-serif';
-                ctx.fillText(`${song.play_count || 0} plays`, pad + contentW - 26, rowY + 40);
+                ctx.fillText(formatCapsuleTime(song.total_listened || 0), pad + contentW - 26, rowY + 40);
 
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
                 ctx.font = '500 17px Manrope, sans-serif';
-                ctx.fillText(formatCapsuleTime(song.total_listened || 0), pad + contentW - 26, rowY + 72);
+                ctx.fillText(`${song.play_count || 0} plays`, pad + contentW - 26, rowY + 72);
 
                 ctx.restore();
                 rowY += rowH + 14;
@@ -817,7 +817,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.textBaseline = 'alphabetic';
 
             // Kicker Pill
-            const sKickerText = '#1 TOP ROTATION';
+            const sKickerText = '#1 MOST LISTENED';
             ctx.font = '700 16px Space Grotesk, Manrope, sans-serif';
             const sKickerW = ctx.measureText(sKickerText).width + 22;
             const sKickerY = artY + artSize + 16;
@@ -993,11 +993,11 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.textBaseline = 'alphabetic';
             ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
             ctx.font = '700 17px Space Grotesk, Manrope, sans-serif';
-            ctx.fillText('TOP TRACKS LEADERBOARD', rightX, rightListY + 16);
+            ctx.fillText('TOP TRACKS • MOST LISTENED', rightX, rightListY + 16);
             ctx.restore();
 
-            const tracksSquare = topPlayed.slice(0, 5);
-            const sMaxPlays = Math.max(1, tracksSquare[0]?.play_count || 1);
+            const tracksSquare = (topListened.length ? topListened : topPlayed).slice(0, 5);
+            const sMaxListened = Math.max(1, tracksSquare[0]?.total_listened || 1);
             let sRowY = rightListY + 26;
             const rankColorsSquare = ['#fbbf24', '#e2e8f0', '#f97316', 'rgba(255,255,255,0.7)', 'rgba(255,255,255,0.7)'];
 
@@ -1011,7 +1011,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.fill();
 
                 // Proportional volume bar in background
-                const rowVolW = Math.max(10, (rightW * (song.play_count || 0)) / sMaxPlays);
+                const rowVolW = Math.max(10, (rightW * (song.total_listened || 0)) / sMaxListened);
                 ctx.fillStyle = idx === 0 ? 'rgba(251, 191, 36, 0.08)' : 'rgba(255, 255, 255, 0.05)';
                 drawRoundRect(ctx, rightX, sRowY, rowVolW, rH, 16);
                 ctx.fill();
@@ -1054,15 +1054,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.font = '500 16px Manrope, sans-serif';
                 ctx.fillText(fitCanvasText(ctx, song.artist || 'Unknown', sTextW), sTextX, sRowY + 62);
 
-                // Plays
+                // Time & Plays on Right
                 ctx.textAlign = 'right';
                 ctx.fillStyle = '#ffffff';
                 ctx.font = '700 19px Space Grotesk, Manrope, sans-serif';
-                ctx.fillText(`${song.play_count || 0} plays`, rightX + rightW - 18, sRowY + 36);
+                ctx.fillText(formatCapsuleTime(song.total_listened || 0), rightX + rightW - 18, sRowY + 36);
 
                 ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
                 ctx.font = '500 15px Manrope, sans-serif';
-                ctx.fillText(formatCapsuleTime(song.total_listened || 0), rightX + rightW - 18, sRowY + 62);
+                ctx.fillText(`${song.play_count || 0} plays`, rightX + rightW - 18, sRowY + 62);
 
                 ctx.restore();
                 sRowY += rH + 10;
