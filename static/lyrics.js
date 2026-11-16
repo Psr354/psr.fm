@@ -283,7 +283,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!el.playerLyric) return;
         el.playerLyric.replaceChildren();
         el.playerLyric.hidden = true;
-        el.playerLyric.classList.remove('is-overflowing');
+        el.playerLyric.classList.remove('is-overflowing', 'lyric-line-display', 'active');
         el.playerLyric.style.removeProperty('--player-lyric-distance');
         el.playerLyric.style.removeProperty('--player-lyric-duration');
     }
@@ -405,95 +405,124 @@ document.addEventListener('DOMContentLoaded', () => {
         const nextTimestamp = activeIndex >= 0 && activeIndex + 1 < state.syncedLyrics.length
             ? state.syncedLyrics[activeIndex + 1].timestamp
             : (el.audio.duration || currentTime + 4);
-        const lineDuration = Math.max(0.6, nextTimestamp - (activeLine?.timestamp || currentTime));
+        const lineDuration = Math.max(0.5, nextTimestamp - (activeLine?.timestamp || currentTime));
         const lyricProgress = activeLine ? Math.max(0, Math.min(1, (currentTime - activeLine.timestamp) / lineDuration)) : 0;
+        const progressPercent = Math.min(100, Math.max(0, lyricProgress * 100));
+
+        const isDetailMode = state.lyricsAnimationMode !== 'line';
+        const focusCenter = activeIndex === -1 ? 0 : activeIndex;
 
         lineButtons.forEach((btn, index) => {
             const isActive = index === activeIndex;
             const wasActive = btn.classList.contains('active');
+            btn.classList.toggle('focus-nearby', !state.lyricsFocusMode || Math.abs(index - focusCenter) <= 1);
             btn.classList.toggle('active', isActive);
             btn.classList.toggle('past', index < activeIndex);
 
             if (isActive) {
+                btn.style.setProperty('--lyric-progress', `${progressPercent}%`);
                 const words = btn.querySelectorAll('.lyric-word');
-                if (activeTimedWords.length && words.length === activeTimedWords.length) {
-                    words.forEach((wordEl, wordIndex) => {
-                        const word = activeTimedWords[wordIndex];
-                        const wordStart = word.start;
-                        const wordEnd = word.end;
-                        const isPastWord = currentTime >= wordEnd;
-                        const isCurrentWord = currentTime >= wordStart && currentTime < wordEnd;
-                        wordEl.classList.toggle('active', isCurrentWord);
-                        wordEl.classList.toggle('past', isPastWord);
-                        const chars = wordEl.querySelectorAll('.lyric-char');
-                        const charCount = chars.length;
-                        if (!charCount) return;
-                        if (isPastWord) {
-                            chars.forEach((charEl) => {
-                                charEl.classList.add('past');
-                                charEl.classList.remove('active');
-                            });
-                        } else if (isCurrentWord) {
-                            const wordDuration = Math.max(0.12, wordEnd - wordStart);
-                            const wordProgress = Math.max(0, Math.min(1, (currentTime - wordStart) / wordDuration));
-                            const activeCharCount = Math.floor(wordProgress * charCount);
+
+                if (isDetailMode) {
+                    if (activeTimedWords.length && words.length === activeTimedWords.length) {
+                        words.forEach((wordEl, wordIndex) => {
+                            const word = activeTimedWords[wordIndex];
+                            const wordStart = word.start;
+                            const wordEnd = word.end;
+                            const wordDuration = Math.max(0.001, wordEnd - wordStart);
+                            const wordProgress = Math.min(1, Math.max(0, (currentTime - wordStart) / wordDuration));
+
+                            const isSpoken = currentTime >= wordEnd;
+                            const isActiveWord = currentTime >= wordStart && currentTime < wordEnd;
+
+                            wordEl.classList.toggle('spoken', isSpoken);
+                            wordEl.classList.toggle('active-word', isActiveWord);
+                            if (isActiveWord) {
+                                wordEl.style.setProperty('--word-progress', `${wordProgress * 100}%`);
+                            } else {
+                                wordEl.style.removeProperty('--word-progress');
+                            }
+
+                            const chars = wordEl.querySelectorAll('.lyric-char');
+                            const charCount = chars.length;
                             chars.forEach((charEl, charIndex) => {
-                                charEl.classList.toggle('past', charIndex < activeCharCount);
-                                charEl.classList.toggle('active', charIndex === activeCharCount);
+                                const charProgress = Math.min(1, Math.max(0, (wordProgress * charCount) - charIndex));
+                                charEl.classList.toggle('spoken-char', charProgress >= 1);
+                                charEl.classList.toggle('active-char', charProgress > 0 && charProgress < 1);
                             });
-                        } else {
-                            chars.forEach((charEl) => {
-                                charEl.classList.remove('past', 'active');
-                            });
-                        }
-                    });
-                } else if (words.length) {
-                    const activeWordCount = Math.floor(lyricProgress * words.length);
-                    words.forEach((wordEl, wordIndex) => {
-                        const isPastWord = wordIndex < activeWordCount;
-                        const isCurrentWord = wordIndex === activeWordCount;
-                        wordEl.classList.toggle('past', isPastWord);
-                        wordEl.classList.toggle('active', isCurrentWord);
-                        const chars = wordEl.querySelectorAll('.lyric-char');
-                        const charCount = chars.length;
-                        if (!charCount) return;
-                        if (isPastWord) {
-                            chars.forEach((charEl) => {
-                                charEl.classList.add('past');
-                                charEl.classList.remove('active');
-                            });
-                        } else if (isCurrentWord) {
-                            const wordSpan = 1 / Math.max(1, words.length);
-                            const wordProgress = Math.max(0, Math.min(1, (lyricProgress - (wordIndex * wordSpan)) / wordSpan));
-                            const activeCharCount = Math.floor(wordProgress * charCount);
+                        });
+                    } else if (words.length) {
+                        const wordWeights = [...words].map((word) => {
+                            const text = word.textContent.trim();
+                            const baseWeight = Math.max(text.length, 1);
+                            if (/[.!?…]$/.test(text)) return baseWeight * 1.45;
+                            if (/[,;:]$/.test(text)) return baseWeight * 1.2;
+                            return baseWeight;
+                        });
+                        const totalWeight = wordWeights.reduce((sum, weight) => sum + weight, 0);
+                        let elapsedWeight = 0;
+
+                        words.forEach((wordEl, wordIndex) => {
+                            const wordWeight = wordWeights[wordIndex];
+                            const wordStartFrac = totalWeight ? elapsedWeight / totalWeight : 0;
+                            elapsedWeight += wordWeight;
+                            const wordEndFrac = totalWeight ? elapsedWeight / totalWeight : 1;
+                            const wordSpan = Math.max(wordEndFrac - wordStartFrac, 0.001);
+                            const wordProgress = Math.min(1, Math.max(0, (lyricProgress - wordStartFrac) / wordSpan));
+
+                            const isSpoken = wordProgress >= 1;
+                            const isActiveWord = wordProgress > 0 && wordProgress < 1;
+
+                            wordEl.classList.toggle('spoken', isSpoken);
+                            wordEl.classList.toggle('active-word', isActiveWord);
+                            if (isActiveWord) {
+                                wordEl.style.setProperty('--word-progress', `${wordProgress * 100}%`);
+                            } else {
+                                wordEl.style.removeProperty('--word-progress');
+                            }
+
+                            const chars = wordEl.querySelectorAll('.lyric-char');
+                            const charCount = chars.length;
                             chars.forEach((charEl, charIndex) => {
-                                charEl.classList.toggle('past', charIndex < activeCharCount);
-                                charEl.classList.toggle('active', charIndex === activeCharCount);
+                                const charProgress = Math.min(1, Math.max(0, (wordProgress * charCount) - charIndex));
+                                charEl.classList.toggle('spoken-char', charProgress >= 1);
+                                charEl.classList.toggle('active-char', charProgress > 0 && charProgress < 1);
                             });
-                        } else {
-                            chars.forEach((charEl) => {
-                                charEl.classList.remove('past', 'active');
-                            });
-                        }
+                        });
+                    }
+                } else {
+                    words.forEach((wordEl) => {
+                        wordEl.classList.remove('spoken', 'active-word');
+                        wordEl.style.removeProperty('--word-progress');
+                        wordEl.querySelectorAll('.lyric-char').forEach((charEl) => {
+                            charEl.classList.remove('spoken-char', 'active-char');
+                        });
                     });
                 }
-            } else if (wasActive) {
+            } else if (wasActive || lyricIndexChanged || forceScroll) {
+                btn.style.removeProperty('--lyric-progress');
+                const isPastLine = index < activeIndex;
                 btn.querySelectorAll('.lyric-word').forEach((wordEl) => {
-                    wordEl.classList.remove('active');
-                    wordEl.classList.toggle('past', index < activeIndex);
+                    wordEl.classList.remove('active-word');
+                    wordEl.classList.toggle('spoken', isPastLine && isDetailMode);
+                    wordEl.style.removeProperty('--word-progress');
                 });
                 btn.querySelectorAll('.lyric-char').forEach((charEl) => {
-                    charEl.classList.remove('active');
-                    charEl.classList.toggle('past', index < activeIndex);
+                    charEl.classList.remove('active-char');
+                    charEl.classList.toggle('spoken-char', isPastLine && isDetailMode);
                 });
             }
         });
 
         if (activeIndex >= 0) {
             const currentLine = state.syncedLyrics[activeIndex];
-            const activeTimedWords = state.wordSyncedLyrics[activeIndex]?.words || [];
             const currentLyricText = currentLine.text || '';
-            const currentLyricMarkup = renderLyricWords(currentLyricText, activeTimedWords);
+            const activeBtn = lineButtons[activeIndex];
+            const currentLyricMarkup = activeBtn ? activeBtn.innerHTML : renderLyricWords(currentLyricText, activeTimedWords);
+            if (el.playerLyric) {
+                el.playerLyric.classList.toggle('lyric-line-display', isDetailMode);
+                el.playerLyric.classList.toggle('active', Boolean(activeBtn));
+            }
             updatePlayerLyric(currentLyricMarkup, currentLyricText, lyricProgress);
         } else {
             resetPlayerLyric();
@@ -1004,6 +1033,21 @@ document.addEventListener('DOMContentLoaded', () => {
         updateSyncedLyrics(true);
     });
     el.lyricsShareBtn?.addEventListener('click', openShareLyricsModal);
+    try {
+        const savedAnimationMode = localStorage.getItem('psr_lyrics_animation_mode');
+        if (savedAnimationMode === 'line' || savedAnimationMode === 'detail') {
+            state.lyricsAnimationMode = savedAnimationMode;
+        }
+    } catch (_) {}
+    if (!state.lyricsAnimationMode) {
+        state.lyricsAnimationMode = 'detail';
+    }
+    el.lyricsAnimationMenu?.querySelectorAll('[data-lyrics-animation]').forEach((item) => {
+        const selected = item.dataset.lyricsAnimation === state.lyricsAnimationMode;
+        item.classList.toggle('active', selected);
+        item.setAttribute('aria-checked', String(selected));
+    });
+
     el.lyricsAnimationBtn?.addEventListener('click', () => {
         const isOpen = el.lyricsAnimationMenu?.classList.contains('active');
         el.lyricsAnimationMenu?.classList.toggle('active', !isOpen);
@@ -1013,6 +1057,9 @@ document.addEventListener('DOMContentLoaded', () => {
     el.lyricsAnimationMenu?.querySelectorAll('[data-lyrics-animation]').forEach((button) => {
         button.addEventListener('click', () => {
             state.lyricsAnimationMode = button.dataset.lyricsAnimation === 'line' ? 'line' : 'detail';
+            try {
+                localStorage.setItem('psr_lyrics_animation_mode', state.lyricsAnimationMode);
+            } catch (_) {}
             el.lyricsAnimationMenu.querySelectorAll('[data-lyrics-animation]').forEach((item) => {
                 const selected = item === button;
                 item.classList.toggle('active', selected);
