@@ -241,6 +241,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (lyricChanged) {
             content.innerHTML = markup;
             content.dataset.lyricText = text;
+            el.playerLyric.hidden = false;
+            const distance = Math.max(0, content.scrollWidth - el.playerLyric.clientWidth);
+            if (distance > 4) {
+                el.playerLyric.style.setProperty('--player-lyric-distance', `${distance}px`);
+                el.playerLyric.style.setProperty('--player-lyric-duration', `${Math.max(7, distance / 18)}s`);
+                content.style.animation = 'none';
+                content.offsetWidth;
+                content.style.animation = '';
+                el.playerLyric.classList.add('is-overflowing');
+            } else {
+                el.playerLyric.classList.remove('is-overflowing');
+                el.playerLyric.style.removeProperty('--player-lyric-distance');
+                el.playerLyric.style.removeProperty('--player-lyric-duration');
+            }
         } else {
             const incoming = document.createElement('template');
             incoming.innerHTML = markup;
@@ -260,22 +274,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 });
             }
-        }
-        el.playerLyric.hidden = false;
-        const distance = Math.max(0, content.scrollWidth - el.playerLyric.clientWidth);
-        if (distance > 4) {
-            el.playerLyric.style.setProperty('--player-lyric-distance', `${distance}px`);
-            el.playerLyric.style.setProperty('--player-lyric-duration', `${Math.max(7, distance / 18)}s`);
-            if (lyricChanged) {
-                content.style.animation = 'none';
-                content.offsetWidth;
-                content.style.animation = '';
-            }
-            el.playerLyric.classList.add('is-overflowing');
-        } else {
-            el.playerLyric.classList.remove('is-overflowing');
-            el.playerLyric.style.removeProperty('--player-lyric-distance');
-            el.playerLyric.style.removeProperty('--player-lyric-duration');
+            el.playerLyric.hidden = false;
         }
     }
 
@@ -367,7 +366,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function animateSyncedLyrics() {
         updateSyncedLyrics();
-        if (!el.audio.paused && !el.audio.ended) {
+        if (el.audio && !el.audio.paused && !el.audio.ended) {
             lyricAnimationFrameId = requestAnimationFrame(animateSyncedLyrics);
         } else {
             lyricAnimationFrameId = null;
@@ -427,8 +426,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (activeTimedWords.length && words.length === activeTimedWords.length) {
                         words.forEach((wordEl, wordIndex) => {
                             const word = activeTimedWords[wordIndex];
-                            const wordStart = word.start;
-                            const wordEnd = word.end;
+                            const wordStart = Number(word?.start) || 0;
+                            const wordEnd = Number(word?.end) || (wordStart + 0.5);
                             const wordDuration = Math.max(0.001, wordEnd - wordStart);
                             const wordProgress = Math.min(1, Math.max(0, (currentTime - wordStart) / wordDuration));
 
@@ -528,9 +527,9 @@ document.addEventListener('DOMContentLoaded', () => {
             resetPlayerLyric();
         }
 
-        if (activeIndex >= 0 && (lyricIndexChanged || forceScroll)) {
+        if (activeIndex >= 0 && (forceScroll || (lyricIndexChanged && state.lyricsPanelOpen))) {
             const activeBtn = lineButtons[activeIndex];
-            if (activeBtn) {
+            if (activeBtn && state.lyricsPanelOpen) {
                 activeBtn.scrollIntoView({
                     behavior: forceScroll ? 'auto' : 'smooth',
                     block: 'center'
@@ -1174,6 +1173,22 @@ document.addEventListener('DOMContentLoaded', () => {
         image.onerror = () => showToast('Unable to use that image', 'error');
         image.src = state.shareLyricsDecorationImageUrl;
     });
+    window.addEventListener('resize', () => {
+        if (!el.playerLyric || el.playerLyric.hidden) return;
+        const content = el.playerLyric.querySelector('.player-lyric-content');
+        if (!content) return;
+        const distance = Math.max(0, content.scrollWidth - el.playerLyric.clientWidth);
+        if (distance > 4) {
+            el.playerLyric.style.setProperty('--player-lyric-distance', `${distance}px`);
+            el.playerLyric.style.setProperty('--player-lyric-duration', `${Math.max(7, distance / 18)}s`);
+            el.playerLyric.classList.add('is-overflowing');
+        } else {
+            el.playerLyric.classList.remove('is-overflowing');
+            el.playerLyric.style.removeProperty('--player-lyric-distance');
+            el.playerLyric.style.removeProperty('--player-lyric-duration');
+        }
+    });
+
     initShareDrawingCanvas();
 });
 })();

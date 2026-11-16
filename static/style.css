@@ -687,6 +687,7 @@ button { touch-action: manipulation; }
 .lyrics-panel.is-editing #lyrics-animation-btn { display: none; }
 .lyrics-panel.is-editing .lyrics-animation-menu-wrap { display: none; }
 .lyrics-line-animation .lyric-line:not(.active) { color: var(--text-secondary); opacity: 1; }
+.lyrics-line-animation .lyric-word::before { display: none !important; }
 .lyrics-line-animation .lyric-line.active .lyric-word,
 .lyrics-line-animation .lyric-line.past .lyric-word,
 .lyrics-line-animation .lyric-line.active .lyric-char,
