@@ -18,9 +18,11 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
-          pip install -r requirements.txt
-      - name: Check Python syntax
-        run: python -m py_compile app.py routes/*.py services/*.py scripts/backfill_song_sources.py scripts/fetch_lyrics_batch.py tests/backend/*.py
+          pip install -r requirements.txt ruff
+      - name: Check Python syntax and lint
+        run: |
+          python -m py_compile app.py routes/*.py services/*.py scripts/backfill_song_sources.py scripts/fetch_lyrics_batch.py tests/backend/*.py
+          ruff check --select E9,F63,F7,F82,F401 app.py routes services scripts/backfill_song_sources.py scripts/fetch_lyrics_batch.py tests/backend
       - name: Run backend unit tests
         run: python -m unittest -v
 
@@ -35,3 +37,23 @@ jobs:
         run: for f in static/js/*.js static/service-worker.js; do node --check "$f"; done
       - name: Run frontend unit tests
         run: node --test tests/frontend/listening.test.mjs tests/frontend/listening-sync.test.mjs tests/frontend/player-queue.test.mjs
+
+  browser-smoke:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Python and Playwright dependencies
+        run: |
+          pip install -r requirements.txt
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Run browser smoke test
+        run: PSR_TEST_PYTHON=python node tests/frontend/browser-smoke.mjs

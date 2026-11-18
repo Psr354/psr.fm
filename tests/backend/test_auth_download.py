@@ -663,7 +663,8 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertIn('idx_listening_logs_user_timestamp', indexes)
 
     def test_database_connection_uses_wal_mode_and_busy_timeout(self):
-        conn = self.app_module.get_db_connection(self.app_module.DATABASE_PATH)
+        from services.database import get_db_connection
+        conn = get_db_connection(self.app_module.DATABASE_PATH)
         try:
             journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
             busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
@@ -688,7 +689,8 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertIn('job_id', task)
         job_id = task['job_id']
 
-        conn = self.app_module.get_db_connection(self.app_module.DATABASE_PATH)
+        from services.database import get_db_connection
+        conn = get_db_connection(self.app_module.DATABASE_PATH)
         try:
             row = conn.execute("SELECT status, url FROM download_jobs WHERE id = ?", (job_id,)).fetchone()
             self.assertIsNotNone(row)

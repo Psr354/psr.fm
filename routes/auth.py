@@ -1,5 +1,5 @@
 import os
-from flask import Blueprint, request, jsonify, render_template, redirect, url_for, current_app
+from flask import Blueprint, jsonify, render_template, redirect, url_for, current_app
 from flask_login import login_user, login_required, logout_user, current_user
 from werkzeug.security import check_password_hash
 

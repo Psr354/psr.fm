@@ -7,12 +7,12 @@ from flask_wtf.csrf import CSRFProtect, generate_csrf, validate_csrf
 from flask_compress import Compress
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from services.database import init_db, get_db_connection
-from services.downloader import download_queue, start_worker
-from services.lyrics import search_lyrics
+from services.database import init_db
+from services.downloader import download_queue, start_worker  # noqa: F401
+from services.lyrics import search_lyrics  # noqa: F401
 from services.common import (
     User, get_db, get_user_status_bar_color, reset_rate_limits,
-    LOGIN_RATE_LIMIT_MAX_ATTEMPTS
+    LOGIN_RATE_LIMIT_MAX_ATTEMPTS  # noqa: F401
 )
 
 from routes.auth import auth_bp

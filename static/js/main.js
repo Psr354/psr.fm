@@ -290,6 +290,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (document.querySelector('script[data-realtime-client]')) return;
         const script = document.createElement('script');
         script.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js';
+        script.integrity = 'sha384-ijk2QwnixVP19l5ENflXHY2/BMo9ANUiTqH6MiVk6i7wp68I6wjNQFOcyayHgClg';
+        script.crossOrigin = 'anonymous';
         script.async = true;
         script.dataset.realtimeClient = 'true';
         script.onload = attach;
@@ -1408,6 +1410,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const unlockAudio = () => {
             syncPromptActive = false;
+            if (!isRemote) {
+                isPrimarySyncLeader = true;
+            }
             if (state.shouldBePlaying && el.audio) {
                 try {
                     if (typeof targetTime === 'number' && targetTime > 0) {
@@ -1692,6 +1697,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const now = Date.now();
                 const isSameDevice = Boolean(serverState.deviceId && serverState.deviceId === CLIENT_DEVICE_ID);
                 const isActivelyPlaying = Boolean(serverState.isPlaying && (now - (serverState.timestamp || 0) < 20000));
+                if (isSameDevice && isActivelyPlaying) {
+                    isPrimarySyncLeader = true;
+                }
                 applySavedPlaybackState(serverState, isActivelyPlaying, isActivelyPlaying && !isSameDevice);
                 localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(serverState));
             }

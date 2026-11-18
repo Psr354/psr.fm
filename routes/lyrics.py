@@ -1,5 +1,5 @@
 import sys
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, jsonify
 from flask_login import login_required, current_user
 
 from services.common import (

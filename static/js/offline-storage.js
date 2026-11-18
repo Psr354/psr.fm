@@ -193,8 +193,9 @@
                 .concat(savedRecord));
 
             if (existingPlaylist) {
-                const futurePlaylists = savedPlaylists
-                    .filter((item) => String(item.id) !== String(playlist.id))
+                const allSavedPlaylists = await getAllOfflinePlaylistsRaw();
+                const futurePlaylists = allSavedPlaylists
+                    .filter((item) => !(String(item.id) === String(playlist.id) && belongsToCurrentUser(item)))
                     .concat(savedRecord);
                 const referencedAssets = new Set(
                     futurePlaylists.flatMap((item) => [...offlinePlaylistAssets(item)])
@@ -216,15 +217,22 @@
         }
     }
 
-    async function getOfflinePlaylists() {
+    async function getAllOfflinePlaylistsRaw() {
+        const db = await offlineDb();
         try {
-            const db = await offlineDb();
-            const allPlaylists = await new Promise((resolve, reject) => {
+            return await new Promise((resolve, reject) => {
                 const request = db.transaction(OFFLINE_STORE, 'readonly').objectStore(OFFLINE_STORE).getAll();
                 request.onsuccess = () => resolve(request.result || []);
                 request.onerror = () => reject(request.error);
             });
+        } finally {
             db.close();
+        }
+    }
+
+    async function getOfflinePlaylists() {
+        try {
+            const allPlaylists = await getAllOfflinePlaylistsRaw();
             const playlists = allPlaylists.filter(belongsToCurrentUser);
             if (playlists.length) writeOfflinePlaylistBackup(playlists);
             return playlists.length ? playlists : readOfflinePlaylistBackup();

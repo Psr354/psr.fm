@@ -8,7 +8,6 @@ import re
 from urllib.parse import urlparse
 import yt_dlp
 import requests
-from werkzeug.utils import secure_filename
 from services.metadata import extract_duration
 from services.database import extract_song_source_id, get_db_connection, update_song_lyrics
 from services.lyrics import search_lyrics
