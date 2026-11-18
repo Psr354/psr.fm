@@ -1393,11 +1393,17 @@ document.addEventListener('DOMContentLoaded', () => {
     let followerTrackEndTimer = null;
     let syncPromptActive = false;
 
-    function showSyncAutoplayPrompt(targetTime) {
+    function showSyncAutoplayPrompt(targetTime, isRemote = true) {
         if (syncPromptActive) return;
         syncPromptActive = true;
         if (typeof showToast === 'function') {
-            showToast('Sedang diputar di perangkat lain. Ketuk layar untuk ikut mendengarkan barengan.', 'info', 7000);
+            showToast(
+                isRemote
+                    ? 'Sedang diputar di perangkat lain. Ketuk layar untuk ikut mendengarkan barengan.'
+                    : 'Ketuk layar untuk melanjutkan pemutaran.',
+                'info',
+                7000
+            );
         }
 
         const unlockAudio = () => {
@@ -1630,7 +1636,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (p !== undefined) {
                     p.catch((err) => {
                         if (err?.name === 'NotAllowedError') {
-                            showSyncAutoplayPrompt(targetTime);
+                            showSyncAutoplayPrompt(targetTime, isRemoteSync);
                         }
                     });
                 }
@@ -1684,8 +1690,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if ((serverState.timestamp || 0) >= localTime) {
                 const now = Date.now();
+                const isSameDevice = Boolean(serverState.deviceId && serverState.deviceId === CLIENT_DEVICE_ID);
                 const isActivelyPlaying = Boolean(serverState.isPlaying && (now - (serverState.timestamp || 0) < 20000));
-                applySavedPlaybackState(serverState, isActivelyPlaying, isActivelyPlaying);
+                applySavedPlaybackState(serverState, isActivelyPlaying, isActivelyPlaying && !isSameDevice);
                 localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(serverState));
             }
         } catch (e) {
@@ -2061,8 +2068,9 @@ function resumePlaybackAfterBackground() {
             state.playbackSessionId = null;
             const songId = state.currentPlayingSongId;
             const playbackRequestId = state.playbackRequestId;
+            const startedAt = new Date(Date.now() - initialSeconds * 1000).toISOString();
             state.playbackSessionPromise = state.playbackStatisticsSongId
-                ? logPlay(state.playbackStatisticsSongId) : Promise.resolve(null);
+                ? logPlay(state.playbackStatisticsSongId, startedAt) : Promise.resolve(null);
             state.playbackSessionPromise.then((sessionId) => {
                 if (
                     String(state.currentPlayingSongId) === String(songId)
@@ -2102,8 +2110,8 @@ function resumePlaybackAfterBackground() {
 
     function seekAudio(position) {
         if (!Number.isFinite(position)) return;
-        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
         flushListenLog();
+        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
         el.audio.currentTime = position;
         // Reset immediately: pause/timeupdate may arrive before seeked.
         state.lastLoggedTime = el.audio.currentTime;
@@ -2930,10 +2938,10 @@ function resumePlaybackAfterBackground() {
         });
     }
 
-    async function logPlay(songId) {
+    async function logPlay(songId, occurredAt = undefined) {
         if (!songId) return null;
         try {
-            return await listeningSync.play(songId);
+            return await listeningSync.play(songId, occurredAt);
         } catch (error) {
             console.error(error);
             return null;
@@ -2976,7 +2984,6 @@ function resumePlaybackAfterBackground() {
     }
 
     function playLibrarySong(song) {
-        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
         const previewSong = {
             ...song,
             id: Number(song.id),
@@ -2988,6 +2995,7 @@ function resumePlaybackAfterBackground() {
         };
 
         flushListenLog();
+        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
         state.currentPlaylistSongs = [previewSong];
         state.currentSongIndex = 0;
         state.currentSongMeta = previewSong;
@@ -3026,8 +3034,8 @@ function resumePlaybackAfterBackground() {
     }
 
     function playSong(songs, index) {
-        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
         flushListenLog();
+        if (typeof isPrimarySyncLeader !== 'undefined') isPrimarySyncLeader = true;
         state.currentPlaylistSongs = songs;
         state.currentSongIndex = index;
         const song = songs[index];

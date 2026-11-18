@@ -48,11 +48,11 @@ window.PsrListeningSync = class PsrListeningSync {
         return save;
     }
 
-    async play(songId) {
+    async play(songId, occurredAt = new Date().toISOString()) {
         const id = this.eventId();
         await this.enqueue({
             id, type: 'play', userId: this.userId, status: 'pending',
-            payload: { user_id: this.userId, song_id: songId, playback_session_id: id, occurred_at: new Date().toISOString() },
+            payload: { user_id: this.userId, song_id: songId, playback_session_id: id, occurred_at: occurredAt || new Date().toISOString() },
         });
         return id;
     }

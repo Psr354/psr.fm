@@ -473,21 +473,21 @@ def get_songs():
 @songs_bp.route('/api/songs/<int:song_id>', methods=['DELETE'])
 @login_required
 def delete_song(song_id):
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute('SELECT filename, album_art FROM songs WHERE id = ? AND user_id = ?', (song_id, current_user.id))
-    song = cursor.fetchone()
-    if not song:
-        return jsonify({'error': 'Not found'}), 404
-
     playlist_id = None
     if 'playlist_id' in request.args:
         playlist_id = request.args.get('playlist_id', type=int)
         if playlist_id is None:
             return jsonify({'error': 'Invalid playlist id'}), 400
 
+    db = get_db()
+    cursor = db.cursor()
     try:
         db.execute('BEGIN IMMEDIATE')
+        cursor.execute('SELECT filename, album_art FROM songs WHERE id = ? AND user_id = ?', (song_id, current_user.id))
+        song = cursor.fetchone()
+        if not song:
+            db.rollback()
+            return jsonify({'error': 'Not found'}), 404
         if playlist_id is not None:
             if not get_owned_playlist(db, playlist_id):
                 db.rollback()

@@ -61,7 +61,15 @@ document.addEventListener('DOMContentLoaded', () => {
     async function openDownloadModal(librarySong = null) {
         state.pendingLibrarySong = librarySong;
         state.matchedLibrarySong = librarySong;
-        const playlists = await (await fetch('/api/playlists')).json();
+        let playlists;
+        try {
+            const response = await fetch('/api/playlists');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            playlists = await response.json();
+        } catch (_) {
+            showToast('Could not load playlists. Check your connection.', 'error');
+            return;
+        }
         const list = document.getElementById('playlist-checkboxes');
         if (!list) return;
         list.innerHTML = '';
@@ -242,7 +250,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function openUploadModal() {
         resetUploadModal();
-        const playlists = await (await fetch('/api/playlists')).json();
+        let playlists;
+        try {
+            const response = await fetch('/api/playlists');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            playlists = await response.json();
+        } catch (_) {
+            showToast('Could not load playlists. Check your connection.', 'error');
+            return;
+        }
         if (!uploadPlaylistCheckboxes) return;
         uploadPlaylistCheckboxes.innerHTML = '';
         if (playlists.length === 0) {

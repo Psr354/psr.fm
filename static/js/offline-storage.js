@@ -11,6 +11,16 @@
     const getState = () => window.state || {};
     const getToast = (msg, type) => (typeof window.showToast === 'function' ? window.showToast(msg, type) : console.log(msg));
     const getMediaUrlName = (name) => (typeof window.mediaUrlName === 'function' ? window.mediaUrlName(name) : (name || ''));
+    const getCurrentUserId = () => String(document.body?.dataset?.userId || '').trim();
+    const getBackupKey = () => {
+        const uid = getCurrentUserId();
+        return uid ? `${OFFLINE_PLAYLIST_BACKUP}-${uid}` : OFFLINE_PLAYLIST_BACKUP;
+    };
+    const belongsToCurrentUser = (record) => {
+        const uid = getCurrentUserId();
+        if (!uid) return true;
+        return String(record?.user_id ?? '') === uid;
+    };
 
     function offlineDb() {
         return new Promise((resolve, reject) => {
@@ -59,14 +69,14 @@
 
     function writeOfflinePlaylistBackup(playlists) {
         try {
-            localStorage.setItem(OFFLINE_PLAYLIST_BACKUP, JSON.stringify(playlists));
+            localStorage.setItem(getBackupKey(), JSON.stringify(playlists));
         } catch (_) {}
     }
 
     function readOfflinePlaylistBackup() {
         try {
-            const value = JSON.parse(localStorage.getItem(OFFLINE_PLAYLIST_BACKUP) || '[]');
-            return Array.isArray(value) ? value : [];
+            const value = JSON.parse(localStorage.getItem(getBackupKey()) || '[]');
+            return Array.isArray(value) ? value.filter(belongsToCurrentUser) : [];
         } catch (_) {
             return [];
         }
@@ -169,7 +179,7 @@
             Object.keys(lyrics).forEach((songId) => {
                 if (!currentSongIds.has(String(songId))) delete lyrics[songId];
             });
-            const savedRecord = { ...playlist, songs, lyrics, saved_at: new Date().toISOString() };
+            const savedRecord = { ...playlist, user_id: getCurrentUserId(), songs, lyrics, saved_at: new Date().toISOString() };
             const db = await offlineDb();
             await new Promise((resolve, reject) => {
                 const tx = db.transaction(OFFLINE_STORE, 'readwrite');
@@ -209,12 +219,13 @@
     async function getOfflinePlaylists() {
         try {
             const db = await offlineDb();
-            const playlists = await new Promise((resolve, reject) => {
+            const allPlaylists = await new Promise((resolve, reject) => {
                 const request = db.transaction(OFFLINE_STORE, 'readonly').objectStore(OFFLINE_STORE).getAll();
                 request.onsuccess = () => resolve(request.result || []);
                 request.onerror = () => reject(request.error);
             });
             db.close();
+            const playlists = allPlaylists.filter(belongsToCurrentUser);
             if (playlists.length) writeOfflinePlaylistBackup(playlists);
             return playlists.length ? playlists : readOfflinePlaylistBackup();
         } catch (error) {

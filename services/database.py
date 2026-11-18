@@ -445,11 +445,12 @@ def get_user_by_id(db_path, user_id):
 def get_user_by_username(db_path, username):
     """Get user by username"""
     conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
-    user = cursor.fetchone()
-    conn.close()
-    return user
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+        return cursor.fetchone()
+    finally:
+        conn.close()
 
 
 def create_user(db_path, username, password, role='user'):
@@ -519,11 +520,12 @@ def create_initial_admin(db_path, username, password):
 def has_any_user(db_path):
     """Check if there are any users in the database"""
     conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-    cursor.execute('SELECT COUNT(*) as count FROM users')
-    count = cursor.fetchone()['count']
-    conn.close()
-    return count > 0
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) as count FROM users')
+        return cursor.fetchone()['count'] > 0
+    finally:
+        conn.close()
 
 
 def get_all_users(database_path):

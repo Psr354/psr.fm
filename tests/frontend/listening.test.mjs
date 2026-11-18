@@ -44,8 +44,10 @@ const context = vm.createContext({
         return { ok: true };
     },
 });
+const playTimestamps = [];
 context.listeningSync = {
-    async play(songId) {
+    async play(songId, occurredAt) {
+        playTimestamps.push(occurredAt);
         return (await (await context.fetch(`/api/songs/${songId}/play`, {})).json()).playback_session_id;
     },
     async listen(songId, sessionId, seconds) {
@@ -182,6 +184,24 @@ audio.currentTime = 305;
 listeners.timeupdate();
 await settle();
 assert.equal(sessions.get(seekSession), 18, 'Dragging the progress bar must not add skipped seconds');
+
+// Background/throttled initial playback (>10s before first timeupdate) must backdate play occurredAt
+// so the server's elapsed-time window accepts the full initial listening chunk.
+state.playEventLogged = false;
+state.pendingPlaySeconds = 0;
+state.playbackRequestId++;
+audio.currentTime = 0;
+audio.paused = false;
+listeners.play();
+listeners.playing();
+const beforeBackgroundPlay = Date.now();
+audio.currentTime = 25;
+listeners.timeupdate();
+await settle();
+const backdatedMs = Date.parse(playTimestamps.at(-1));
+assert.ok(Number.isFinite(backdatedMs), 'play must receive an ISO occurredAt timestamp');
+assert.ok(beforeBackgroundPlay - backdatedMs >= 24000 && beforeBackgroundPlay - backdatedMs <= 26500,
+    'play occurredAt must be backdated by the initial heard seconds');
 
 // Preview of another user's library item must not create rejected stats events.
 const beforePreview = nextSession;
