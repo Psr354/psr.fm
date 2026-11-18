@@ -20,8 +20,11 @@ def create_playlist():
     if data is None:
         return jsonify({'error': 'JSON object required'}), 400
     name = data.get('name')
-    if not name:
+    if not isinstance(name, str) or not name.strip():
         return jsonify({'error': 'Name is required'}), 400
+    name = name.strip()
+    if len(name) > 200:
+        return jsonify({'error': 'Name is too long'}), 400
     folder_name = secure_filename(name) or str(uuid.uuid4())
     db = get_db()
     cursor = db.cursor()
@@ -46,8 +49,11 @@ def rename_playlist(playlist_id):
     if data is None:
         return jsonify({'error': 'JSON object required'}), 400
     name = data.get('name')
-    if not name:
+    if not isinstance(name, str) or not name.strip():
         return jsonify({'error': 'Name required'}), 400
+    name = name.strip()
+    if len(name) > 200:
+        return jsonify({'error': 'Name is too long'}), 400
     db = get_db()
     cursor = db.execute('UPDATE playlists SET name = ? WHERE id = ? AND user_id = ?', (name, playlist_id, current_user.id))
     db.commit()
@@ -91,7 +97,7 @@ def upload_cover(playlist_id):
     except Exception:
         return jsonify({'error': 'Invalid or corrupted image file'}), 400
 
-    filename = f"pl_cover_{playlist_id}{ext}"
+    filename = f"pl_cover_{playlist_id}_{uuid.uuid4().hex[:8]}{ext}"
     save_path = os.path.join(album_art_dir, filename)
     cursor = db.cursor()
     cursor.execute('SELECT cover_art FROM playlists WHERE id = ? AND user_id = ?', (playlist_id, current_user.id))

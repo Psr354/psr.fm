@@ -1,0 +1,12 @@
+# Local development override: bind-mounts source code into the container.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+services:
+  psr_fm:
+    volumes:
+      - ./app.py:/app/app.py
+      - ./routes:/app/routes
+      - ./services:/app/services
+      - ./static:/app/static
+      - ./templates:/app/templates
+      - ./scripts:/app/scripts
+      - ./tests:/app/tests

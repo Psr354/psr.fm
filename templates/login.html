@@ -10,6 +10,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32.png') }}">
     <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
     <link rel="manifest" href="{{ url_for('static', filename='site.webmanifest') }}">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta name="theme-color" content="#1db954">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -419,9 +420,15 @@
                 const password = document.getElementById('password').value;
                 
                 try {
+                    const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+                    const csrfMatch = document.cookie.match(/csrf_token=([^;]+)/);
+                    const csrfToken = (csrfMatch ? decodeURIComponent(csrfMatch[1]) : '') || (csrfMeta && csrfMeta.content) || '';
                     const res = await fetch('/api/login', {
                         method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-Token': csrfToken
+                        },
                         body: JSON.stringify({username, password})
                     });
                     
@@ -437,6 +444,7 @@
                         errorText.textContent = data.error || 'Login failed';
                         errorMsg.style.display = 'flex';
                         submitBtn.disabled = false;
+                        btnSpinner.style.display = 'none';
                         btnText.innerText = 'Sign In';
                         btnArrow.style.display = 'inline-block';
                     }
@@ -444,6 +452,7 @@
                     errorText.textContent = 'Connection error. Please try again.';
                     errorMsg.style.display = 'flex';
                     submitBtn.disabled = false;
+                    btnSpinner.style.display = 'none';
                     btnText.innerText = 'Sign In';
                     btnArrow.style.display = 'inline-block';
                 }

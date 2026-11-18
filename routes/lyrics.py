@@ -3,7 +3,7 @@ from flask import Blueprint, request, jsonify
 from flask_login import login_required, current_user
 
 from services.common import (
-    get_db, get_owned_song, check_lyrics_rate_limit
+    get_db, get_owned_song, check_lyrics_rate_limit, get_json_object
 )
 import services.lyrics as lyrics_service
 
@@ -114,7 +114,9 @@ def save_song_lyrics(song_id):
     if not song:
         return jsonify({'error': 'Not found'}), 404
 
-    data = request.get_json() or {}
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
     lyrics = str(data.get('lyrics') or '').strip()
     synced_lyrics = str(data.get('synced_lyrics') or '').strip()
     status = 'manual' if lyrics or synced_lyrics else 'none'

@@ -39,6 +39,8 @@ def main():
                     song['id'],
                     lyrics_data.get('lyrics', ''),
                     lyrics_data.get('synced_lyrics', ''),
+                    word_synced_lyrics=lyrics_data.get('word_synced_lyrics', ''),
+                    status='found',
                 ):
                     success += 1
                 else:

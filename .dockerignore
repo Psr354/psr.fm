@@ -1,0 +1,36 @@
+.git
+.gitignore
+.gitattributes
+.github
+.env
+.vscode
+.idea
+.pytest_cache
+.codex_pycache
+
+# Runtime data & logs (mounted via volumes)
+data/
+database.db/
+downloads/
+static/album_art/
+logs/
+
+# Local docs, archives, backups
+docs/
+server-import/
+skill-backups/
+*.tar.gz
+*.zip
+*.old
+*backup*
+
+# Local environments & caches
+venv/
+.venv/
+env/
+node_modules/
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+Thumbs.db

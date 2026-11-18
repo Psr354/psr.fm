@@ -180,7 +180,7 @@ Data tersebut disimpan di folder proyek melalui bind mount (`./data:/app/data`) 
 | User Management tidak terlihat | Pastikan akun yang digunakan adalah admin. |
 | Lirik tidak ditemukan | Tambahkan lirik melalui **Edit** di panel Lyrics. |
 
-Untuk akses melalui internet, gunakan HTTPS dan reverse proxy. Konfigurasi Docker bawaan ditujukan untuk penggunaan lokal atau pribadi dan perlu disesuaikan sebelum deployment publik.
+Untuk akses melalui internet, gunakan HTTPS, reverse proxy, dan atur `PSR_FM_COOKIE_SECURE=1` pada `.env`. Untuk pengembangan lokal dengan bind-mount source code, jalankan `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`.
 
 ## Struktur Folder
 
@@ -196,7 +196,10 @@ psr.fm/
 ├── data/                   # Database SQLite, audio, dan album art (dibuat saat runtime)
 ├── Dockerfile
 ├── docker-compose.yml
+├── docker-compose.dev.yml
+├── .dockerignore
 ├── requirements.txt
+├── LICENSE
 └── .env.example
 ```
 

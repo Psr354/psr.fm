@@ -1,5 +1,6 @@
 import os
 import queue
+import re
 import threading
 import time
 import mimetypes
@@ -56,10 +57,14 @@ def queue_file_deletion(file_path):
 
 
 class User(UserMixin):
-    def __init__(self, id, username, role='user'):
+    def __init__(self, id, username, role='user', session_token=''):
         self.id = id
         self.username = username
         self.role = role
+        self.session_token = session_token or ''
+
+    def get_id(self):
+        return f'{self.id}:{self.session_token}' if self.session_token else str(self.id)
 
 
 def audio_mimetype(filename):
@@ -205,42 +210,60 @@ def check_lyrics_rate_limit(user_id):
         return True, None
 
 
+LOGIN_IP_RATE_LIMIT_MAX_ATTEMPTS = 25
+
+
+def _client_ip():
+    return (request.remote_addr or 'unknown').strip().lower()
+
+
 def _login_rate_limit_key(username):
-    client_ip = (request.remote_addr or 'unknown').strip().lower()
-    return f"{client_ip}:{username.strip().lower()}"
+    return f"{_client_ip()}:{username.strip().lower()}"
+
+
+def _login_ip_rate_limit_key():
+    return f"ip:{_client_ip()}"
+
+
+def _prune_expired_login_limits(now):
+    expired_keys = [
+        k for k, v in _login_rate_limit_state.items()
+        if all(now - ts >= LOGIN_RATE_LIMIT_WINDOW_SECONDS for ts in v)
+    ]
+    for k in expired_keys:
+        _login_rate_limit_state.pop(k, None)
 
 
 def check_login_rate_limit(username):
     now = time.monotonic()
     key = _login_rate_limit_key(username)
+    ip_key = _login_ip_rate_limit_key()
     with _login_rate_limit_lock:
-        timestamps = _login_rate_limit_state.get(key, [])
-        timestamps = [ts for ts in timestamps if now - ts < LOGIN_RATE_LIMIT_WINDOW_SECONDS]
-        if len(timestamps) >= LOGIN_RATE_LIMIT_MAX_ATTEMPTS:
-            _login_rate_limit_state[key] = timestamps
-            return False, int(LOGIN_RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0]))
+        for bucket_key, limit in ((key, LOGIN_RATE_LIMIT_MAX_ATTEMPTS), (ip_key, LOGIN_IP_RATE_LIMIT_MAX_ATTEMPTS)):
+            timestamps = [ts for ts in _login_rate_limit_state.get(bucket_key, []) if now - ts < LOGIN_RATE_LIMIT_WINDOW_SECONDS]
+            if len(timestamps) >= limit:
+                _login_rate_limit_state[bucket_key] = timestamps
+                return False, int(LOGIN_RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0]))
         return True, None
 
 
 def record_failed_login(username):
     now = time.monotonic()
     key = _login_rate_limit_key(username)
+    ip_key = _login_ip_rate_limit_key()
     with _login_rate_limit_lock:
-        timestamps = _login_rate_limit_state.get(key, [])
-        timestamps = [ts for ts in timestamps if now - ts < LOGIN_RATE_LIMIT_WINDOW_SECONDS]
-        timestamps.append(now)
-        _login_rate_limit_state[key] = timestamps
+        _prune_expired_login_limits(now)
+        for bucket_key in (key, ip_key):
+            timestamps = [ts for ts in _login_rate_limit_state.get(bucket_key, []) if now - ts < LOGIN_RATE_LIMIT_WINDOW_SECONDS]
+            timestamps.append(now)
+            _login_rate_limit_state[bucket_key] = timestamps
 
 
 def clear_login_rate_limit(username):
     key = _login_rate_limit_key(username)
     with _login_rate_limit_lock:
         _login_rate_limit_state.pop(key, None)
-        now = time.monotonic()
-        expired_keys = [k for k, v in _login_rate_limit_state.items() 
-                       if all(now - ts >= LOGIN_RATE_LIMIT_WINDOW_SECONDS for ts in v)]
-        for k in expired_keys:
-            _login_rate_limit_state.pop(k, None)
+        _prune_expired_login_limits(time.monotonic())
 
 
 def reset_rate_limits():
@@ -270,15 +293,44 @@ def valid_playback_id(value):
     )
 
 
+HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
+THEME_BG_MAIN_COLORS = {
+    'dark': '#070908',
+    'amoled': '#000000',
+    'midnight': '#0b0f19',
+    'charcoal': '#131518',
+    'warm': '#140f0c',
+    'forest': '#09120c',
+}
+
+
+def is_valid_hex_color(value):
+    return isinstance(value, str) and bool(HEX_COLOR_RE.match(value.strip()))
+
+
+def _safe_hex_color(value, default):
+    if is_valid_hex_color(value):
+        return value.strip()
+    return default
+
+
 def get_user_status_bar_color(user_id):
     theme_data = get_user_theme(get_database_path(), user_id)
-    if not theme_data:
+    if not isinstance(theme_data, dict) or not theme_data:
         return '#070908'
+    accent = _safe_hex_color(theme_data.get('accent'), '#30d66b')
     mode = theme_data.get('statusBarMode', 'accent')
     if mode == 'accent':
-        return theme_data.get('accent', '#30d66b')
-    if mode == 'match':
-        return theme_data.get('card', '#161d19')
+        return accent
+    if mode == 'background':
+        bg = theme_data.get('bg', 'dark')
+        if bg == 'custom':
+            return _safe_hex_color(theme_data.get('bgCustom'), '#070908')
+        return THEME_BG_MAIN_COLORS.get(bg, '#070908')
     if mode == 'black':
         return '#000000'
-    return '#070908'
+    if mode == 'custom':
+        return _safe_hex_color(theme_data.get('statusBarCustom'), accent)
+    if mode == 'match':
+        return _safe_hex_color(theme_data.get('card') or theme_data.get('cardCustom'), '#161d19')
+    return accent

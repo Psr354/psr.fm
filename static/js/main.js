@@ -3,13 +3,20 @@
 // ==========================================
 const _originalFetch = window.fetch;
 window.fetch = async function(url, options = {}) {
-    // CSRF Token injection untuk POST/PUT/DELETE
+    // CSRF Token injection untuk same-origin POST/PUT/DELETE/PATCH
     const csrfMatch = document.cookie.match(/csrf_token=([^;]+)/);
     const csrfToken = csrfMatch ? decodeURIComponent(csrfMatch[1]) : null;
 
     const requestMethod = options.method || (url instanceof Request ? url.method : 'GET');
     const headers = new Headers(options.headers || (url instanceof Request ? url.headers : undefined));
-    if (csrfToken && ['POST', 'PUT', 'DELETE'].includes(requestMethod.toUpperCase())) {
+    let isSameOrigin = false;
+    try {
+        const resolvedUrl = new URL(url instanceof Request ? url.url : url, window.location.href);
+        isSameOrigin = resolvedUrl.origin === window.location.origin;
+    } catch (_) {
+        isSameOrigin = false;
+    }
+    if (isSameOrigin && csrfToken && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(requestMethod.toUpperCase())) {
         headers.set('X-CSRF-Token', csrfToken);
     }
     const requestOptions = {...options, headers};
@@ -2823,6 +2830,14 @@ function resumePlaybackAfterBackground() {
                     showToast('Song deleted permanently');
                     loadDashboard();
                 }
+            });
+        });
+
+        container.querySelectorAll('.download-song').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const songId = e.currentTarget.getAttribute('data-id');
+                triggerDownload(songId);
             });
         });
         if (activeView && activeView.contains(container)) highlightPlayingSong();

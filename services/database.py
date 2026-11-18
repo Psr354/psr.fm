@@ -1,3 +1,4 @@
+import secrets
 import sqlite3
 from urllib.parse import parse_qs, urlparse
 from werkzeug.security import generate_password_hash
@@ -71,6 +72,7 @@ def init_db(db_path):
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('user', 'admin')),
+            session_token TEXT NOT NULL DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -82,6 +84,18 @@ def init_db(db_path):
         cursor.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
         # Set first user as admin (backward compatibility)
         cursor.execute("UPDATE users SET role = 'admin' WHERE id = 1")
+
+    if 'session_token' not in user_cols:
+        cursor.execute("ALTER TABLE users ADD COLUMN session_token TEXT DEFAULT ''")
+
+    missing_tokens = cursor.execute(
+        "SELECT id FROM users WHERE session_token IS NULL OR session_token = ''"
+    ).fetchall()
+    for row in missing_tokens:
+        cursor.execute(
+            'UPDATE users SET session_token = ? WHERE id = ?',
+            (secrets.token_hex(16), row['id'])
+        )
 
     # ==========================================
     # PLAYLISTS TABLE
@@ -419,6 +433,15 @@ def init_db(db_path):
 # ==========================================
 # USER OPERATIONS
 # ==========================================
+def get_user_by_id(db_path, user_id):
+    """Get user by id"""
+    conn = get_db_connection(db_path)
+    try:
+        return conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
+    finally:
+        conn.close()
+
+
 def get_user_by_username(db_path, username):
     """Get user by username"""
     conn = get_db_connection(db_path)
@@ -450,17 +473,45 @@ def create_user(db_path, username, password, role='user'):
     
     # Hash password dengan PBKDF2-SHA256
     password_hash = generate_password_hash(password, method='pbkdf2:sha256', salt_length=16)
+    session_token = secrets.token_hex(16)
     
     try:
         cursor.execute(
-            'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
-            (username, password_hash, role)
+            'INSERT INTO users (username, password_hash, role, session_token) VALUES (?, ?, ?, ?)',
+            (username, password_hash, role, session_token)
         )
         conn.commit()
         user_id = cursor.lastrowid
         return user_id
     except sqlite3.IntegrityError:
         return None
+    finally:
+        conn.close()
+
+
+def create_initial_admin(db_path, username, password):
+    """Atomically create the first admin user only if no users exist (prevents TOCTOU)."""
+    conn = get_db_connection(db_path)
+    password_hash = generate_password_hash(password, method='pbkdf2:sha256', salt_length=16)
+    session_token = secrets.token_hex(16)
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        count = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
+        if count > 0:
+            conn.rollback()
+            return None, 'exists'
+        cursor = conn.execute(
+            'INSERT INTO users (username, password_hash, role, session_token) VALUES (?, ?, ?, ?)',
+            (username, password_hash, 'admin', session_token)
+        )
+        conn.commit()
+        return cursor.lastrowid, None
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        return None, 'taken'
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -551,10 +602,11 @@ def update_user_password(database_path, user_id, new_password):
     conn = get_db_connection(database_path)
     try:
         new_hash = generate_password_hash(new_password, method='pbkdf2:sha256', salt_length=16)
+        new_session_token = secrets.token_hex(16)
         cursor = conn.cursor()
         cursor.execute(
-            'UPDATE users SET password_hash = ? WHERE id = ?',
-            (new_hash, user_id)
+            'UPDATE users SET password_hash = ?, session_token = ? WHERE id = ?',
+            (new_hash, new_session_token, user_id)
         )
         conn.commit()
         return cursor.rowcount > 0

@@ -50,7 +50,7 @@ services/old.py
 *backup*
 scripts/import_server_archive.py
 server-import/archive/source/app.py.before-null-fix
-.github/
+.github/copilot-instructions.md
 
 # ==========================================
 # LOCAL NOTES / DOCUMENTATION

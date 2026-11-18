@@ -1,6 +1,4 @@
 import os
-import shutil
-from datetime import datetime, timezone
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, send_from_directory, render_template, redirect, url_for
 from flask_login import LoginManager, login_required, current_user
@@ -9,21 +7,11 @@ from flask_wtf.csrf import CSRFProtect, generate_csrf, validate_csrf
 from flask_compress import Compress
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from services.database import (
-    init_db, get_db_connection, has_any_user,
-    get_user_by_username, create_user, get_all_users,
-    get_user_files, delete_user_cascade, update_user_password,
-    get_user_playback_state, save_user_playback_state,
-    get_user_theme, save_user_theme, extract_song_source_id
-)
-from services.downloader import download_queue, start_worker, validate_song_url
-from services.lyrics import search_lyrics, parse_lrc
+from services.database import init_db, get_db_connection
+from services.downloader import download_queue, start_worker
+from services.lyrics import search_lyrics
 from services.common import (
-    User, get_db, get_owned_playlist, get_owned_song, get_global_song,
-    add_global_song_to_playlists, get_json_object, audio_mimetype,
-    playback_timestamp, valid_playback_id, queue_file_deletion,
-    check_login_rate_limit, record_failed_login, clear_login_rate_limit,
-    check_lyrics_rate_limit, get_user_status_bar_color, reset_rate_limits,
+    User, get_user_status_bar_color, reset_rate_limits,
     LOGIN_RATE_LIMIT_MAX_ATTEMPTS
 )
 
@@ -45,12 +33,24 @@ app.secret_key = secret_key or os.urandom(32).hex()
 
 trusted_proxy_count = int(os.environ.get('PSR_FM_TRUSTED_PROXY_COUNT', '0'))
 if trusted_proxy_count:
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=trusted_proxy_count)
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=trusted_proxy_count,
+        x_proto=trusted_proxy_count,
+        x_host=trusted_proxy_count,
+    )
 
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get(
     'PSR_FM_MAX_CONTENT_LENGTH', 55 * 1024 * 1024
 ))
+COOKIE_SECURE = os.environ.get('PSR_FM_COOKIE_SECURE', '').strip().lower() in ('1', 'true', 'yes')
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = COOKIE_SECURE
+app.config['REMEMBER_COOKIE_HTTPONLY'] = True
+app.config['REMEMBER_COOKIE_SAMESITE'] = 'Lax'
+app.config['REMEMBER_COOKIE_SECURE'] = COOKIE_SECURE
 
 Compress(app)
 
@@ -101,21 +101,22 @@ def maintenance_check():
 @app.after_request
 def set_csrf_cookie(response):
     token = generate_csrf()
-    response.set_cookie('csrf_token', token, httponly=False, samesite='Lax')
+    response.set_cookie(
+        'csrf_token',
+        token,
+        httponly=False,
+        samesite='Lax',
+        secure=COOKIE_SECURE,
+    )
     if request.path.startswith('/static/album_art/') or request.path.endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg')):
         response.cache_control.max_age = 31536000
         response.cache_control.public = True
     return response
 
 
-CSRF_EXEMPT_ROUTES = {'/api/login', '/api/setup'}
-
-
 @app.before_request
 def csrf_protect():
     if request.method in ['POST', 'PUT', 'DELETE', 'PATCH']:
-        if request.path in CSRF_EXEMPT_ROUTES:
-            return
         token = request.headers.get('X-CSRF-Token') or request.form.get('csrf_token')
         if not token:
             return jsonify({'error': 'CSRF token missing'}), 403
@@ -127,13 +128,27 @@ def csrf_protect():
 
 @login_manager.user_loader
 def load_user(user_id):
+    raw = str(user_id or '')
+    if ':' not in raw:
+        return None
+    uid_part, token = raw.split(':', 1)
+    if not uid_part.isdigit() or not token:
+        return None
     conn = get_db_connection(app.config.get('DATABASE_PATH') or DATABASE_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, username, role FROM users WHERE id = ?', (user_id,))
-    row = cursor.fetchone()
-    conn.close()
+    try:
+        row = conn.execute(
+            'SELECT id, username, role, session_token FROM users WHERE id = ? AND session_token = ?',
+            (int(uid_part), token),
+        ).fetchone()
+    finally:
+        conn.close()
     if row:
-        return User(id=row['id'], username=row['username'], role=row['role'])
+        return User(
+            id=row['id'],
+            username=row['username'],
+            role=row['role'],
+            session_token=row['session_token'],
+        )
     return None
 
 
@@ -213,6 +228,7 @@ def site_webmanifest():
 
 
 @app.route('/static/album_art/<path:filename>')
+@login_required
 def serve_album_art(filename):
     """Serve runtime album and playlist artwork from ALBUM_ART_DIR."""
     return send_from_directory(app.config.get('ALBUM_ART_DIR') or ALBUM_ART_DIR, filename)

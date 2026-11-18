@@ -360,16 +360,17 @@ def process_download(task, db_path, download_dir, album_art_dir):
         art_ext = os.path.splitext(thumbnail_url)[-1].split('?')[0]
         if art_ext not in ['.jpg', '.jpeg', '.png', '.webp']:
             art_ext = '.jpg'
-        album_art_filename = f"{file_uuid}{art_ext}"
+        candidate_art = f"{file_uuid}{art_ext}"
         try:
             r = requests.get(
                 thumbnail_url,
                 timeout=10,
                 headers=YOUTUBE_HTTP_HEADERS,
             )
-            if r.status_code == 200:
-                with open(os.path.join(album_art_dir, album_art_filename), 'wb') as f:
+            if r.status_code == 200 and r.content:
+                with open(os.path.join(album_art_dir, candidate_art), 'wb') as f:
                     f.write(r.content)
+                album_art_filename = candidate_art
         except Exception as e:
             print(f"[WARN] Failed to download thumbnail: {e}")
             
@@ -402,6 +403,19 @@ def process_download(task, db_path, download_dir, album_art_dir):
         conn.commit()
     except Exception:
         conn.rollback()
+        audio_path = os.path.join(library_dir, expected_file)
+        if os.path.exists(audio_path):
+            try:
+                os.remove(audio_path)
+            except OSError:
+                pass
+        if album_art_filename:
+            album_art_path = os.path.join(album_art_dir, album_art_filename)
+            if os.path.exists(album_art_path):
+                try:
+                    os.remove(album_art_path)
+                except OSError:
+                    pass
         raise
     finally:
         conn.close()
@@ -423,10 +437,18 @@ def process_download(task, db_path, download_dir, album_art_dir):
                 song_id,
                 lyrics_data.get('lyrics', ''),
                 lyrics_data.get('synced_lyrics', ''),
-                'found',
+                word_synced_lyrics=lyrics_data.get('word_synced_lyrics', ''),
+                status='found',
             )
         else:
-            update_song_lyrics(db_path, song_id, '', '', 'not_found')
+            update_song_lyrics(
+                db_path,
+                song_id,
+                '',
+                '',
+                word_synced_lyrics='',
+                status='not_found',
+            )
     except Exception as exc:
         print(f"[WARN] lyrics lookup failed for {song_id}: {exc}")
 

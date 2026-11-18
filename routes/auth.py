@@ -4,7 +4,8 @@ from flask_login import login_user, login_required, logout_user, current_user
 from werkzeug.security import check_password_hash
 
 from services.database import (
-    get_db_connection, get_user_by_username, create_user, has_any_user,
+    get_db_connection, get_user_by_id, get_user_by_username, create_user,
+    create_initial_admin, has_any_user,
     get_all_users, get_user_files, delete_user_cascade, update_user_password
 )
 from services.common import (
@@ -19,6 +20,8 @@ auth_bp = Blueprint('auth', __name__)
 def login_page():
     if current_user.is_authenticated:
         return redirect(url_for('index'))
+    if not has_any_user(get_database_path()):
+        return redirect(url_for('auth.setup_page'))
     return render_template('login.html')
 
 
@@ -38,8 +41,11 @@ def setup_account():
     data = get_json_object()
     if data is None:
         return jsonify({'error': 'JSON object required'}), 400
-    username = data.get('username', '').strip()
+    raw_username = data.get('username', '')
     password = data.get('password', '')
+    if not isinstance(raw_username, str) or not isinstance(password, str):
+        return jsonify({'error': 'Username and password must be strings'}), 400
+    username = raw_username.strip()
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
     if len(password) < 6:
@@ -47,11 +53,19 @@ def setup_account():
     if len(username) < 3:
         return jsonify({'error': 'Username must be at least 3 characters'}), 400
 
-    user_id = create_user(db_path, username, password, role='admin')
+    user_id, err = create_initial_admin(db_path, username, password)
+    if err == 'exists':
+        return jsonify({'error': 'Account already exists'}), 403
     if not user_id:
         return jsonify({'error': 'Username already taken'}), 400
 
-    user = User(id=user_id, username=username, role='admin')
+    user_row = get_user_by_id(db_path, user_id)
+    user = User(
+        id=user_id,
+        username=username,
+        role='admin',
+        session_token=user_row['session_token'] if user_row else '',
+    )
     login_user(user, remember=True)
     return jsonify({'status': 'success', 'message': 'Account created successfully'})
 
@@ -61,8 +75,11 @@ def login():
     data = get_json_object()
     if data is None:
         return jsonify({'error': 'JSON object required'}), 400
-    username = data.get('username', '').strip()
+    raw_username = data.get('username', '')
     password = data.get('password', '')
+    if not isinstance(raw_username, str) or not isinstance(password, str):
+        return jsonify({'error': 'Username and password must be strings'}), 400
+    username = raw_username.strip()
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
 
@@ -80,7 +97,12 @@ def login():
         return jsonify({'error': 'Invalid username or password'}), 401
 
     clear_login_rate_limit(username)
-    user = User(id=user_row['id'], username=user_row['username'], role=user_row['role'])
+    user = User(
+        id=user_row['id'],
+        username=user_row['username'],
+        role=user_row['role'],
+        session_token=user_row['session_token'],
+    )
     login_user(user, remember=True)
     return jsonify({'status': 'success', 'username': user.username})
 
@@ -112,8 +134,11 @@ def create_new_user():
     data = get_json_object()
     if data is None:
         return jsonify({'error': 'JSON object required'}), 400
-    username = data.get('username', '').strip()
+    raw_username = data.get('username', '')
     password = data.get('password', '')
+    if not isinstance(raw_username, str) or not isinstance(password, str):
+        return jsonify({'error': 'Username and password must be strings'}), 400
+    username = raw_username.strip()
 
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
@@ -223,7 +248,7 @@ def change_password():
     current_password = data.get('current_password', '')
     new_password = data.get('new_password', '')
 
-    if not current_password or not new_password:
+    if not isinstance(current_password, str) or not isinstance(new_password, str) or not current_password or not new_password:
         return jsonify({'error': 'Current password and new password are required'}), 400
 
     if len(new_password) < 6:
@@ -242,6 +267,18 @@ def change_password():
     if not success:
         return jsonify({'error': 'Failed to update password'}), 500
 
+    updated_row = get_user_by_id(db_path, current_user.id)
+    if updated_row:
+        login_user(
+            User(
+                id=updated_row['id'],
+                username=updated_row['username'],
+                role=updated_row['role'],
+                session_token=updated_row['session_token'],
+            ),
+            remember=True,
+        )
+
     return jsonify({'status': 'success', 'message': 'Password changed successfully'})
 
 
@@ -257,7 +294,7 @@ def reset_user_password(user_id):
         return jsonify({'error': 'JSON object required'}), 400
     new_password = data.get('password', '')
 
-    if not new_password:
+    if not isinstance(new_password, str) or not new_password:
         return jsonify({'error': 'New password required'}), 400
 
     if len(new_password) < 6:

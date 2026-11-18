@@ -7,3 +7,4 @@ services/database.py text eol=lf
 tests/backend/test_auth_download.py text eol=lf
 static/js/listening-sync.js text eol=lf
 tests/frontend/*.mjs text eol=lf
+requirements.txt text eol=lf

@@ -38,6 +38,9 @@ class AuthAndDownloadTests(unittest.TestCase):
             cookie.load(header)
         return cookie['csrf_token'].value
 
+    def _csrf_token(self, client):
+        return self._csrf_token_from_response(client.get('/login'))
+
     def _create_playlist(self, user_id=1, name='Favorites', cover_art=''):
         conn = sqlite3.connect(self.app_module.DATABASE_PATH)
         try:
@@ -100,7 +103,7 @@ class AuthAndDownloadTests(unittest.TestCase):
     def test_setup_and_login_flow(self):
         client = self.app_module.app.test_client()
 
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -114,7 +117,7 @@ class AuthAndDownloadTests(unittest.TestCase):
         logout_response = client.post('/api/logout', headers={'X-CSRF-Token': csrf_token})
         self.assertEqual(logout_response.status_code, 200)
 
-        login_response = client.post('/api/login', json={
+        login_response = client.post('/api/login', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -123,19 +126,19 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_login_rate_limit_blocks_repeated_failures(self):
         client = self.app_module.app.test_client()
-        client.post('/api/setup', json={
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
 
         for _ in range(self.app_module.LOGIN_RATE_LIMIT_MAX_ATTEMPTS):
-            response = client.post('/api/login', json={
+            response = client.post('/api/login', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
                 'username': 'admin',
                 'password': 'wrong-password',
             })
             self.assertEqual(response.status_code, 401)
 
-        limited_response = client.post('/api/login', json={
+        limited_response = client.post('/api/login', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'wrong-password',
         })
@@ -145,7 +148,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_download_rejects_unsupported_urls(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -162,7 +165,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_download_enqueues_valid_youtube_url(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -189,7 +192,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_download_enqueues_valid_youtube_music_url(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -210,7 +213,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_download_enqueues_valid_spotify_track_url(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -231,7 +234,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_download_rejects_spotify_playlist_url(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -252,7 +255,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_download_existing_library_song_adds_without_queueing(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -289,7 +292,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_library_song_can_be_added_to_current_user_playlist(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -322,7 +325,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_shared_library_exposes_current_users_song_copy(self):
         client = self.app_module.app.test_client()
-        client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={'username': 'psr354', 'password': 'secret123'})
         source_id = self._create_song(user_id=2, filename='psr354-shared.wav')
         owned_id = self._create_song(user_id=1, filename='psr354-shared.wav')
         external_id = self._create_song(user_id=2, filename='psr354-preview.wav')
@@ -335,7 +338,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_library_song_can_be_previewed_without_adding_to_playlist(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -362,7 +365,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_library_pagination_rejects_invalid_values(self):
         client = self.app_module.app.test_client()
-        client.post('/api/setup', json={'username': 'admin', 'password': 'secret123'})
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={'username': 'admin', 'password': 'secret123'})
 
         for query in ('limit=abc', 'offset=abc', 'limit=0', 'limit=501', 'offset=-1'):
             response = client.get(f'/api/library-songs?{query}')
@@ -370,7 +373,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_upload_rejects_invalid_audio_and_removes_file(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={'username': 'admin', 'password': 'secret123'})
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={'username': 'admin', 'password': 'secret123'})
         csrf_token = self._csrf_token_from_response(setup_response)
         playlist_id = self._create_playlist()
 
@@ -399,7 +402,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_offline_audio_returns_complete_file_with_its_real_mimetype(self):
         client = self.app_module.app.test_client()
-        client.post('/api/setup', json={
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -418,7 +421,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_owned_song_can_be_added_to_another_playlist(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -443,7 +446,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_delete_playlist_removes_only_orphaned_songs(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -471,7 +474,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_delete_song_from_playlist_keeps_song_used_by_another_playlist(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -496,7 +499,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_delete_song_from_its_last_playlist_deletes_song(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -517,7 +520,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_playlist_song_order_can_be_reordered(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -546,7 +549,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_recap_uses_play_events_not_listen_chunks(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -594,7 +597,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_recap_respects_user_timezone_at_month_boundary(self):
         client = self.app_module.app.test_client()
-        client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={'username': 'psr354', 'password': 'secret123'})
         song_id = self._create_song()
         with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
             conn.execute('INSERT INTO play_events (song_id, user_id, timestamp) VALUES (?, 1, ?)',
@@ -615,7 +618,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_recap_keeps_play_and_listening_rankings_separate(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -671,7 +674,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_persistent_download_queue_persists_and_recovers_jobs(self):
         client = self.app_module.app.test_client()
-        client.post('/api/setup', json={'username': 'admin', 'password': 'secret123'})
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={'username': 'admin', 'password': 'secret123'})
 
         from services.downloader import PersistentDownloadQueue
         q = PersistentDownloadQueue()
@@ -705,7 +708,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_listen_rejects_invalid_or_oversized_chunks(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -753,7 +756,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_queued_play_and_listen_retries_count_once(self):
         client = self.app_module.app.test_client()
-        setup = client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
+        setup = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={'username': 'psr354', 'password': 'secret123'})
         headers = {'X-CSRF-Token': self._csrf_token_from_response(setup)}
         song_id = self._create_song(duration_seconds=338)
         started = datetime.now(timezone.utc) - timedelta(minutes=10)
@@ -777,7 +780,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_concurrent_play_and_listen_retries_count_once(self):
         client = self.app_module.app.test_client()
-        setup = client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
+        setup = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={'username': 'psr354', 'password': 'secret123'})
         token = self._csrf_token_from_response(setup)
         with client.session_transaction() as session:
             original_session = dict(session)
@@ -802,7 +805,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_offline_full_repeats_keep_original_period(self):
         client = self.app_module.app.test_client()
-        setup = client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
+        setup = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={'username': 'psr354', 'password': 'secret123'})
         headers = {'X-CSRF-Token': self._csrf_token_from_response(setup)}
         song_id = self._create_song(duration_seconds=338)
         started = datetime(2020, 1, 31, 23, 50, tzinfo=timezone.utc)
@@ -826,7 +829,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_replayed_sections_can_exceed_song_duration_but_not_elapsed_time(self):
         client = self.app_module.app.test_client()
-        setup = client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
+        setup = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={'username': 'psr354', 'password': 'secret123'})
         headers = {'X-CSRF-Token': self._csrf_token_from_response(setup)}
         song_id = self._create_song(duration_seconds=10)
         session_id = 'psr354-seek-replay'
@@ -851,7 +854,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_queued_events_reject_bad_timestamp_and_session(self):
         client = self.app_module.app.test_client()
-        setup = client.post('/api/setup', json={'username': 'psr354', 'password': 'secret123'})
+        setup = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={'username': 'psr354', 'password': 'secret123'})
         headers = {'X-CSRF-Token': self._csrf_token_from_response(setup)}
         song_id = self._create_song()
         for timestamp in ['invalid', 123, (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()]:
@@ -879,7 +882,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_lyrics_endpoints(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -927,7 +930,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_lyrics_manual_refresh_rate_limit(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -951,7 +954,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_manual_lyrics_survive_try_again_refresh(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -986,7 +989,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_added_library_song_does_not_inherit_other_users_lyrics(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -1020,7 +1023,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_download_song_file_preserves_audio_format_and_mimetype(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -1048,7 +1051,7 @@ class AuthAndDownloadTests(unittest.TestCase):
     def test_delete_playlist_cleans_up_cover_art_file(self):
         from services.common import _file_cleanup_queue
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -1074,7 +1077,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_delete_user_cleans_up_playlist_cover_art_file(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -1143,14 +1146,18 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_csrf_rejects_missing_token_globally(self):
         client = self.app_module.app.test_client()
-        # Non-exempt POST without CSRF token should return 403
-        response = client.post('/api/playlists', json={'name': 'No CSRF'})
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.get_json()['error'], 'CSRF token missing')
+        for path, payload in (
+            ('/api/playlists', {'name': 'No CSRF'}),
+            ('/api/login', {'username': 'admin', 'password': 'secret123'}),
+            ('/api/setup', {'username': 'admin', 'password': 'secret123'}),
+        ):
+            response = client.post(path, json=payload)
+            self.assertEqual(response.status_code, 403, f'{path} did not reject missing CSRF')
+            self.assertEqual(response.get_json()['error'], 'CSRF token missing')
 
     def test_dashboard_storage_caching(self):
         client = self.app_module.app.test_client()
-        setup_response = client.post('/api/setup', json={
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -1165,13 +1172,16 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_user_role_loaded_and_is_admin_evaluates_in_memory(self):
         client = self.app_module.app.test_client()
-        client.post('/api/setup', json={
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
         from services.common import is_admin
+        from services.database import get_user_by_id
+        user_row = get_user_by_id(self.app_module.DATABASE_PATH, 1)
         with self.app_module.app.test_request_context():
-            user = self.app_module.load_user(1)
+            user = self.app_module.load_user(f"1:{user_row['session_token']}")
+            self.assertIsNotNone(user)
             self.assertEqual(user.role, 'admin')
             with patch('services.common.get_db_connection') as mock_conn:
                 with patch('flask_login.utils._get_user', return_value=user):
@@ -1180,7 +1190,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_change_password_flow(self):
         client = self.app_module.app.test_client()
-        setup_res = client.post('/api/setup', json={
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -1209,13 +1219,13 @@ class AuthAndDownloadTests(unittest.TestCase):
         )
         self.assertEqual(change_res.status_code, 200)
 
-        login_old_res = client.post('/api/login', json={
+        login_old_res = client.post('/api/login', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
         self.assertEqual(login_old_res.status_code, 401)
 
-        login_new_res = client.post('/api/login', json={
+        login_new_res = client.post('/api/login', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'newsecret123',
         })
@@ -1223,7 +1233,7 @@ class AuthAndDownloadTests(unittest.TestCase):
 
     def test_upload_playlist_cover_reencodes_image(self):
         client = self.app_module.app.test_client()
-        setup_res = client.post('/api/setup', json={
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin',
             'password': 'secret123',
         })
@@ -1257,6 +1267,14 @@ class AuthAndDownloadTests(unittest.TestCase):
         with open(art_path, 'wb') as handle:
             handle.write(b'\x89PNG\r\n\x1a\nfake-png-bytes')
 
+        # Unauthenticated request must be redirected to login
+        unauth_res = client.get(f'/static/album_art/{art_name}')
+        self.assertEqual(unauth_res.status_code, 302)
+
+        # Authenticated request serves the file from ALBUM_ART_DIR
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
         res = client.get(f'/static/album_art/{art_name}')
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data, b'\x89PNG\r\n\x1a\nfake-png-bytes')
@@ -1297,7 +1315,7 @@ class AuthAndDownloadTests(unittest.TestCase):
         self.assertEqual(setup_page.status_code, 200)
         pages_to_check.append(('setup', setup_page.get_data(as_text=True)))
 
-        client.post('/api/setup', json={'username': 'admin', 'password': 'secret123'})
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={'username': 'admin', 'password': 'secret123'})
         index_page = client.get('/')
         self.assertEqual(index_page.status_code, 200)
         pages_to_check.append(('index', index_page.get_data(as_text=True)))
@@ -1319,6 +1337,293 @@ class AuthAndDownloadTests(unittest.TestCase):
                 resp = client.get(asset_url)
                 self.assertEqual(resp.status_code, 200, f'Broken static URL on {name}: {asset_url}')
                 resp.close()
+
+    def test_process_download_saves_word_synced_lyrics_and_not_found_status(self):
+        from services import downloader
+        client = self.app_module.app.test_client()
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        playlist_id = self._create_playlist()
+
+        class FakeYDL:
+            def __init__(self, opts):
+                self.opts = opts
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def extract_info(self, url, download=False):
+                return {'title': 'Song A', 'uploader': 'Artist A', 'duration': 120, 'thumbnail': '', 'webpage_url': url}
+            def download(self, urls):
+                target = f"{self.opts['outtmpl']}.mp3"
+                with open(target, 'wb') as handle:
+                    handle.write(b'ID3fake-audio')
+
+        word_json = json.dumps([{'text': 'hello', 'start': 0.0, 'end': 1.0, 'words': [{'text': 'hello', 'start': 0.0, 'end': 1.0}]}])
+        with patch.object(downloader.yt_dlp, 'YoutubeDL', FakeYDL), \
+             patch.object(downloader, 'extract_duration', return_value=120), \
+             patch.object(downloader, 'search_lyrics', return_value={'lyrics': 'hello', 'synced_lyrics': '[00:00.00] hello', 'word_synced_lyrics': word_json}):
+            downloader.process_download(
+                {'url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'playlist_ids': [playlist_id], 'user_id': 1},
+                self.app_module.DATABASE_PATH,
+                self.app_module.DOWNLOAD_DIR,
+                self.app_module.ALBUM_ART_DIR,
+            )
+
+        with patch.object(downloader.yt_dlp, 'YoutubeDL', FakeYDL), \
+             patch.object(downloader, 'extract_duration', return_value=120), \
+             patch.object(downloader, 'search_lyrics', return_value=None):
+            downloader.process_download(
+                {'url': 'https://www.youtube.com/watch?v=abcdefghijk', 'playlist_ids': [playlist_id], 'user_id': 1},
+                self.app_module.DATABASE_PATH,
+                self.app_module.DOWNLOAD_DIR,
+                self.app_module.ALBUM_ART_DIR,
+            )
+
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute('SELECT lyrics_status, word_synced_lyrics FROM songs ORDER BY id').fetchall()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]['lyrics_status'], 'found')
+        self.assertEqual(rows[0]['word_synced_lyrics'], word_json)
+        self.assertEqual(rows[1]['lyrics_status'], 'not_found')
+        self.assertEqual(rows[1]['word_synced_lyrics'], '')
+
+    def test_status_bar_color_matches_frontend_modes(self):
+        from services.common import get_user_status_bar_color
+        from services.database import save_user_theme
+        client = self.app_module.app.test_client()
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        cases = [
+            ({'statusBarMode': 'accent', 'accent': '#112233'}, '#112233'),
+            ({'statusBarMode': 'background', 'bg': 'midnight'}, '#0b0f19'),
+            ({'statusBarMode': 'background', 'bg': 'custom', 'bgCustom': '#123456'}, '#123456'),
+            ({'statusBarMode': 'black'}, '#000000'),
+            ({'statusBarMode': 'custom', 'statusBarCustom': '#abcdef'}, '#abcdef'),
+            ({'statusBarMode': 'match', 'card': '#223344'}, '#223344'),
+        ]
+        with self.app_module.app.app_context():
+            for theme_payload, expected in cases:
+                save_user_theme(self.app_module.DATABASE_PATH, 1, theme_payload)
+                self.assertEqual(get_user_status_bar_color(1), expected)
+
+    def test_non_object_json_and_null_duration_edge_cases(self):
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+        song_id = self._create_song(title='No Duration', duration_seconds=None)
+
+        for method, path in (
+            ('POST', f'/api/library-songs/{song_id}/add'),
+            ('POST', f'/api/songs/{song_id}/playlists'),
+            ('PUT', f'/api/songs/{song_id}/lyrics'),
+            ('POST', '/api/listen'),
+            ('POST', f'/api/songs/{song_id}/play'),
+        ):
+            res = client.open(path, method=method, headers={'X-CSRF-Token': csrf}, json=['not', 'an', 'object'])
+            self.assertEqual(res.status_code, 400, f'Expected 400 for non-object JSON on {method} {path}')
+
+        # Null duration_seconds on offline reconciliation must not fail due to NULL arithmetic
+        play_res = client.post(
+            f'/api/songs/{song_id}/play',
+            headers={'X-CSRF-Token': csrf},
+            json={'playback_session_id': 'null-dur-sess-1'},
+        )
+        self.assertEqual(play_res.status_code, 200)
+        past_ts = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        listen_res = client.post(
+            '/api/listen',
+            headers={'X-CSRF-Token': csrf},
+            json={
+                'song_id': song_id,
+                'playback_session_id': 'null-dur-sess-1',
+                'seconds': 5,
+                'occurred_at': past_ts,
+            },
+        )
+        self.assertEqual(listen_res.status_code, 200)
+
+    def test_playlist_validation_unique_cover_and_limit_validation(self):
+        from PIL import Image
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+
+        for bad_name in ('   ', 123, ['list']):
+            res = client.post('/api/playlists', headers={'X-CSRF-Token': csrf}, json={'name': bad_name})
+            self.assertEqual(res.status_code, 400)
+
+        create_res = client.post('/api/playlists', headers={'X-CSRF-Token': csrf}, json={'name': '  Road Trip  '})
+        self.assertEqual(create_res.status_code, 200)
+        playlist_id = create_res.get_json()['id']
+
+        def upload_jpg(color):
+            buf = io.BytesIO()
+            Image.new('RGB', (32, 32), color=color).save(buf, format='JPEG')
+            buf.seek(0)
+            return client.post(
+                f'/api/playlists/{playlist_id}/cover',
+                headers={'X-CSRF-Token': csrf},
+                data={'cover': (buf, 'cover.jpg')},
+                content_type='multipart/form-data',
+            )
+
+        res1 = upload_jpg('red')
+        res2 = upload_jpg('green')
+        self.assertEqual(res1.status_code, 200)
+        self.assertEqual(res2.status_code, 200)
+        cover1 = res1.get_json()['cover_art']
+        cover2 = res2.get_json()['cover_art']
+        self.assertNotEqual(cover1, cover2)
+        self.assertFalse(os.path.exists(os.path.join(self.app_module.ALBUM_ART_DIR, cover1)))
+        self.assertTrue(os.path.exists(os.path.join(self.app_module.ALBUM_ART_DIR, cover2)))
+
+        for bad_limit in ('0', '-5', '501', 'abc'):
+            res = client.get(f'/api/songs?limit={bad_limit}')
+            self.assertEqual(res.status_code, 400)
+
+    def test_user_settings_validation(self):
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+
+        self.assertEqual(client.post(
+            '/api/user-settings/theme',
+            headers={'X-CSRF-Token': csrf},
+            json={'accent': 'not-a-hex'},
+        ).status_code, 400)
+        self.assertEqual(client.post(
+            '/api/user-settings/theme',
+            headers={'X-CSRF-Token': csrf},
+            json={'unknownKey': 'bad'},
+        ).status_code, 400)
+        self.assertEqual(client.post(
+            '/api/user-settings/theme',
+            headers={'X-CSRF-Token': csrf},
+            json={'accent': '#30d66b', 'statusBarMode': 'custom', 'statusBarCustom': '#112233', 'scale': '1.0'},
+        ).status_code, 200)
+
+        self.assertEqual(client.post(
+            '/api/playback-state',
+            headers={'X-CSRF-Token': csrf},
+            json={'unknownKey': 'x' * 100},
+        ).status_code, 400)
+        self.assertEqual(client.post(
+            '/api/playback-state',
+            headers={'X-CSRF-Token': csrf},
+            json={'songId': 1, 'currentTime': 12.5, 'repeatMode': 'one', 'isPlaying': True},
+        ).status_code, 200)
+
+    def test_password_change_invalidates_other_sessions_and_reencodes_apic(self):
+        from routes.songs import _save_reencoded_album_art
+        from PIL import Image
+
+        client_a = self.app_module.app.test_client()
+        client_b = self.app_module.app.test_client()
+        setup_res = client_a.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client_a)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf_a = self._csrf_token_from_response(setup_res)
+
+        login_b = client_b.post('/api/login', headers={'X-CSRF-Token': self._csrf_token(client_b)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        self.assertEqual(login_b.status_code, 200)
+        self.assertEqual(client_b.get('/api/me').status_code, 200)
+
+        change_res = client_a.post(
+            '/api/user/change-password',
+            headers={'X-CSRF-Token': csrf_a},
+            json={'current_password': 'secret123', 'new_password': 'newsecret123'},
+        )
+        self.assertEqual(change_res.status_code, 200)
+        # Current session stays authenticated, other session is immediately invalidated
+        self.assertEqual(client_a.get('/api/me').status_code, 200)
+        self.assertEqual(client_b.get('/api/me').status_code, 401)
+
+        # Embedded APIC validation rejects non-image payload and re-encodes valid PNG
+        with self.assertRaises(Exception):
+            _save_reencoded_album_art(b'<script>alert(1)</script>', self.app_module.ALBUM_ART_DIR)
+        buf = io.BytesIO()
+        Image.new('RGB', (16, 16), color='purple').save(buf, format='PNG')
+        fname, fpath = _save_reencoded_album_art(buf.getvalue(), self.app_module.ALBUM_ART_DIR)
+        self.assertTrue(fname.endswith('.png') and os.path.exists(fpath))
+
+    def test_lyrics_malformed_word_sync_and_invalid_json_do_not_crash(self):
+        from services import lyrics as lyrics_service
+        lines = lyrics_service._parse_word_synced_lyrics(json.dumps({
+            'lines': [
+                {'text': 'ok', 'start_ms': 'bad', 'end_ms': None, 'words': [{'text': 'ok', 'start_ms': 0, 'end_ms': 500}]}
+            ]
+        }))
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0]['start'], 0.0)
+
+        class BadJsonResponse:
+            ok = True
+            def json(self):
+                raise ValueError('bad json')
+
+        with patch.object(lyrics_service, '_throttled_request', return_value=BadJsonResponse()):
+            self.assertIsNone(lyrics_service._search_lyrics_variant('Song', 'Artist', 120))
+
+    def test_first_run_login_redirects_to_setup_and_failed_thumbnail_leaves_empty_art(self):
+        from services import downloader
+        client = self.app_module.app.test_client()
+
+        # Before any user exists, /login must redirect to /setup
+        first_login = client.get('/login')
+        self.assertEqual(first_login.status_code, 302)
+        self.assertTrue(first_login.headers['Location'].endswith('/setup'))
+
+        # Setup admin
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        self.assertEqual(setup_res.status_code, 200)
+        playlist_id = self._create_playlist()
+
+        class FakeYDLWithThumb:
+            def __init__(self, opts):
+                self.opts = opts
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def extract_info(self, url, download=False):
+                return {'title': 'No Thumb', 'uploader': 'Artist', 'duration': 60, 'thumbnail': 'https://example.com/thumb.jpg', 'webpage_url': url}
+            def download(self, urls):
+                with open(f"{self.opts['outtmpl']}.mp3", 'wb') as handle:
+                    handle.write(b'ID3fake-audio')
+
+        class FailedThumbResp:
+            status_code = 404
+            content = b''
+
+        with patch.object(downloader.yt_dlp, 'YoutubeDL', FakeYDLWithThumb), \
+             patch.object(downloader, 'extract_duration', return_value=60), \
+             patch.object(downloader, 'search_lyrics', return_value=None), \
+             patch.object(downloader.requests, 'get', return_value=FailedThumbResp()):
+            downloader.process_download(
+                {'url': 'https://www.youtube.com/watch?v=zzzzzzzzzzz', 'playlist_ids': [playlist_id], 'user_id': 1},
+                self.app_module.DATABASE_PATH,
+                self.app_module.DOWNLOAD_DIR,
+                self.app_module.ALBUM_ART_DIR,
+            )
+
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute('SELECT album_art FROM songs ORDER BY id DESC LIMIT 1').fetchone()
+        self.assertEqual(row['album_art'], '')
 
 
 if __name__ == '__main__':

@@ -9,7 +9,7 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
 
 from services.common import (
-    get_db, get_owned_song, playback_timestamp, valid_playback_id
+    get_db, get_owned_song, get_json_object, playback_timestamp, valid_playback_id
 )
 
 recap_bp = Blueprint('recap', __name__)
@@ -18,7 +18,9 @@ recap_bp = Blueprint('recap', __name__)
 @recap_bp.route('/api/listen', methods=['POST'])
 @login_required
 def log_listen():
-    data = request.get_json(silent=True) or {}
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
     song_id = data.get('song_id')
     session_id = data.get('playback_session_id')
     event_id = data.get('event_id')
@@ -66,7 +68,7 @@ def log_listen():
         SET seconds_listened = seconds_listened + ?
         WHERE id = ? AND song_id = ? AND user_id = ?
           AND seconds_listened + ? <=
-              CASE WHEN ? THEN duration_seconds + 10
+              CASE WHEN ? THEN COALESCE(duration_seconds, 0) + 10
                    ELSE ((julianday('now') - julianday(started_at)) * 86400) + 10
               END
         ''',
@@ -92,7 +94,10 @@ def log_listen():
 @recap_bp.route('/api/songs/<int:song_id>/play', methods=['POST'])
 @login_required
 def log_play(song_id):
-    data = request.get_json(silent=True) or {}
+    raw = request.get_json(silent=True)
+    if raw is not None and not isinstance(raw, dict):
+        return jsonify({'error': 'JSON object required'}), 400
+    data = raw or {}
     if 'user_id' in data and str(data['user_id']) != str(current_user.id):
         return jsonify({'error': 'Account changed', 'code': 'account_changed'}), 403
     session_id = data.get('playback_session_id')

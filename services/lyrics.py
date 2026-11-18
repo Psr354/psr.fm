@@ -172,10 +172,16 @@ def _parse_word_synced_lyrics(lyricsfile):
             except (TypeError, ValueError):
                 continue
         if isinstance(line, dict):
+            try:
+                line_start = float(line.get('start_ms', 0) or 0) / 1000
+                line_end = float(line.get('end_ms', 0) or 0) / 1000
+            except (TypeError, ValueError):
+                line_start = 0.0
+                line_end = 0.0
             normalized_lines.append({
                 'text': str(line.get('text') or ''),
-                'start': float(line.get('start_ms', 0)) / 1000,
-                'end': float(line.get('end_ms', 0)) / 1000,
+                'start': line_start,
+                'end': line_end,
                 'words': words,
             })
     return normalized_lines if any(line['words'] for line in normalized_lines) else []
@@ -204,7 +210,11 @@ def _search_lyrics_variant(clean_title, clean_artist, duration):
         f"{LRCLIB_BASE_URL}/get-cached?{urlencode(params)}",
     )
     if response.ok:
-        record = _normalize_lyrics_record(response.json())
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        record = _normalize_lyrics_record(payload)
         if record:
             return record
 

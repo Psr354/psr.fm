@@ -1,8 +1,10 @@
+import io
 import json
 import os
 import uuid
 from flask import Blueprint, request, jsonify, send_from_directory, current_app
 from flask_login import login_required, current_user
+from PIL import Image
 from werkzeug.utils import secure_filename
 
 from services.common import (
@@ -13,6 +15,51 @@ from services.downloader import download_queue, validate_song_url
 from services.database import extract_song_source_id
 
 songs_bp = Blueprint('songs', __name__)
+
+MAX_EMBEDDED_ART_BYTES = 5 * 1024 * 1024
+ALLOWED_ART_FORMATS = {'JPEG': '.jpg', 'PNG': '.png', 'WEBP': '.webp'}
+
+
+def _extract_embedded_artwork(file_path):
+    """Extract raw embedded artwork bytes from MP3 (APIC), FLAC, or MP4/M4A files."""
+    from mutagen import File as MutagenFile
+    audio_file = MutagenFile(file_path)
+    if not audio_file:
+        return None
+    if getattr(audio_file, 'pictures', None):
+        return bytes(audio_file.pictures[0].data)
+    tags = getattr(audio_file, 'tags', None)
+    if not tags:
+        return None
+    if hasattr(tags, 'getall'):
+        apics = tags.getall('APIC')
+        if apics:
+            return bytes(apics[0].data)
+    if 'covr' in tags and tags['covr']:
+        return bytes(tags['covr'][0])
+    return None
+
+
+def _save_reencoded_album_art(raw_bytes, album_art_dir):
+    """Validate and re-encode embedded cover bytes via Pillow before saving to disk."""
+    if not album_art_dir or not raw_bytes or len(raw_bytes) > MAX_EMBEDDED_ART_BYTES:
+        return None, None
+    img = Image.open(io.BytesIO(raw_bytes))
+    img.verify()
+    img = Image.open(io.BytesIO(raw_bytes))
+    if img.format not in ALLOWED_ART_FORMATS:
+        return None, None
+    width, height = img.size
+    if width * height > 25_000_000 or width > 8000 or height > 8000:
+        return None, None
+    save_format = img.format
+    ext = ALLOWED_ART_FORMATS[save_format]
+    if save_format == 'JPEG' and img.mode in ('RGBA', 'P'):
+        img = img.convert('RGB')
+    filename = f"upload_art_{uuid.uuid4().hex[:12]}{ext}"
+    save_path = os.path.join(album_art_dir, filename)
+    img.save(save_path, format=save_format)
+    return filename, save_path
 
 
 @songs_bp.route('/api/download', methods=['POST'])
@@ -138,15 +185,9 @@ def upload_song():
     album_art_filename = None
     album_art_path = None
     try:
-        from mutagen.mp3 import MP3 as MutagenMP3
-        audio_file = MutagenMP3(save_path)
-        if audio_file.tags and audio_file.tags.getall('APIC'):
-            apic = audio_file.tags.getall('APIC')[0]
-            art_ext = {'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp'}.get(apic.mime, '.jpg')
-            album_art_filename = f"upload_art_{uuid.uuid4().hex[:12]}{art_ext}"
-            album_art_path = os.path.join(album_art_dir, album_art_filename)
-            with open(album_art_path, 'wb') as art_file:
-                art_file.write(apic.data)
+        raw_art = _extract_embedded_artwork(save_path)
+        if raw_art:
+            album_art_filename, album_art_path = _save_reencoded_album_art(raw_art, album_art_dir)
     except Exception:
         if album_art_path and os.path.exists(album_art_path):
             os.remove(album_art_path)
@@ -310,7 +351,7 @@ def download_library_song(song_id):
 
     ext = os.path.splitext(safe_filename)[1] or '.mp3'
     download_name = f"{song['title']} - {song['artist'] or 'Unknown'}{ext}"
-    download_name = secure_filename(download_name) or f"song{safe_filename}"
+    download_name = secure_filename(download_name) or f"song{ext}"
 
     return send_from_directory(
         library_dir,
@@ -353,7 +394,9 @@ def check_library_song_url():
 @songs_bp.route('/api/library-songs/<int:song_id>/add', methods=['POST'])
 @login_required
 def add_library_song(song_id):
-    data = request.get_json() or {}
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
     playlist_ids = data.get('playlist_ids', [])
     if not playlist_ids:
         return jsonify({'error': 'Select at least one playlist'}), 400
@@ -398,7 +441,15 @@ def add_library_song(song_id):
 @login_required
 def get_songs():
     playlist_id = request.args.get('playlist_id')
-    limit = request.args.get('limit', type=int)
+    raw_limit = request.args.get('limit')
+    limit = None
+    if raw_limit is not None:
+        try:
+            limit = int(raw_limit)
+        except ValueError:
+            return jsonify({'error': 'Invalid limit'}), 400
+        if limit < 1 or limit > 500:
+            return jsonify({'error': 'Limit must be between 1 and 500'}), 400
     db = get_db()
     cursor = db.cursor()
     if playlist_id:
@@ -499,7 +550,9 @@ def delete_song(song_id):
 @songs_bp.route('/api/songs/<int:song_id>/playlists', methods=['POST'])
 @login_required
 def add_owned_song_to_playlists(song_id):
-    data = request.get_json() or {}
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
     playlist_ids = data.get('playlist_ids', [])
     if not playlist_ids:
         return jsonify({'error': 'Select at least one playlist'}), 400

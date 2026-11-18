@@ -6,14 +6,7 @@ services:
       - "5000:5000"
     volumes:
       - ./data:/app/data
-      - ./static:/app/static
-      - ./templates:/app/templates
       - ./logs:/app/logs
-      - ./app.py:/app/app.py
-      - ./routes:/app/routes
-      - ./services:/app/services
-      - ./scripts:/app/scripts
-      - ./tests:/app/tests
     restart: unless-stopped
     env_file:
       - .env
