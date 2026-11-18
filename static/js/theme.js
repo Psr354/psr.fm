@@ -270,7 +270,6 @@
             if (themeManagerInitialized) return;
             themeManagerInitialized = true;
             const modalEl           = document.getElementById('theme-settings-modal');
-            const openBtn           = document.getElementById('theme-settings-btn');
             const quickBtn          = document.getElementById('theme-quick-btn');
             const closeBtn          = document.getElementById('theme-modal-close-btn');
             const cancelBtn         = document.getElementById('theme-cancel-btn');
@@ -485,7 +484,6 @@
                 modalEl.setAttribute('aria-hidden', 'true');
             }
 
-            if (openBtn)  openBtn.addEventListener('click', openModal);
             if (quickBtn) quickBtn.addEventListener('click', openModal);
             if (closeBtn) closeBtn.addEventListener('click', () => closeModal(true));
             if (cancelBtn) cancelBtn.addEventListener('click', () => closeModal(true));
