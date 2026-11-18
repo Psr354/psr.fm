@@ -305,6 +305,7 @@ def _init_listening_tables(cursor):
         has_artist = 'song_artist' in log_cols
         title_expr = "COALESCE(NULLIF(l.song_title, ''), s.title, '')" if has_title else "COALESCE(s.title, '')"
         artist_expr = "COALESCE(NULLIF(l.song_artist, ''), s.artist, '')" if has_artist else "COALESCE(s.artist, '')"
+        cursor.execute('DROP TABLE IF EXISTS listening_logs_new')
         cursor.execute('''
             CREATE TABLE listening_logs_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -320,9 +321,10 @@ def _init_listening_tables(cursor):
         ''')
         cursor.execute(f'''
             INSERT INTO listening_logs_new (id, song_id, user_id, seconds_listened, timestamp, song_title, song_artist)
-            SELECT l.id, l.song_id, l.user_id, l.seconds_listened, l.timestamp, {title_expr}, {artist_expr}
+            SELECT l.id, s.id, u.id, l.seconds_listened, l.timestamp, {title_expr}, {artist_expr}
             FROM listening_logs l
             LEFT JOIN songs s ON l.song_id = s.id
+            INNER JOIN users u ON l.user_id = u.id
         ''')
         cursor.execute('DROP TABLE listening_logs')
         cursor.execute('ALTER TABLE listening_logs_new RENAME TO listening_logs')
@@ -356,6 +358,7 @@ def _init_listening_tables(cursor):
         has_artist = 'song_artist' in pe_cols
         title_expr = "COALESCE(NULLIF(pe.song_title, ''), s.title, '')" if has_title else "COALESCE(s.title, '')"
         artist_expr = "COALESCE(NULLIF(pe.song_artist, ''), s.artist, '')" if has_artist else "COALESCE(s.artist, '')"
+        cursor.execute('DROP TABLE IF EXISTS play_events_new')
         cursor.execute('''
             CREATE TABLE play_events_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -370,9 +373,10 @@ def _init_listening_tables(cursor):
         ''')
         cursor.execute(f'''
             INSERT INTO play_events_new (id, song_id, user_id, timestamp, song_title, song_artist)
-            SELECT pe.id, pe.song_id, pe.user_id, pe.timestamp, {title_expr}, {artist_expr}
+            SELECT pe.id, s.id, u.id, pe.timestamp, {title_expr}, {artist_expr}
             FROM play_events pe
             LEFT JOIN songs s ON pe.song_id = s.id
+            INNER JOIN users u ON pe.user_id = u.id
         ''')
         cursor.execute('DROP TABLE play_events')
         cursor.execute('ALTER TABLE play_events_new RENAME TO play_events')

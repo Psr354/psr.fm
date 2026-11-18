@@ -303,6 +303,8 @@ class PlaylistTests(PsrFmTestCase):
         cover1 = res1.get_json()['cover_art']
         cover2 = res2.get_json()['cover_art']
         self.assertNotEqual(cover1, cover2)
+        from services.common import _file_cleanup_queue
+        _file_cleanup_queue.join()
         self.assertFalse(os.path.exists(os.path.join(self.app_module.ALBUM_ART_DIR, cover1)))
         self.assertTrue(os.path.exists(os.path.join(self.app_module.ALBUM_ART_DIR, cover2)))
 

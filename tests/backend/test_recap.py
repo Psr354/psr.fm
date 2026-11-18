@@ -636,8 +636,23 @@ class RecapAndSettingsTests(PsrFmTestCase):
                 'INSERT INTO listening_logs (song_id, user_id, seconds_listened) VALUES (?, 1, 42)',
                 (song_id,),
             )
+            # Legacy DBs created before strict FK enforcement can contain dangling song_id / user_id rows.
+            conn.execute(
+                'INSERT INTO listening_logs (song_id, user_id, seconds_listened) VALUES (999999, 1, 18)'
+            )
+            conn.execute(
+                'INSERT INTO listening_logs (song_id, user_id, seconds_listened) VALUES (?, 999999, 99)',
+                (song_id,),
+            )
             conn.execute(
                 'INSERT INTO play_events (song_id, user_id) VALUES (?, 1)',
+                (song_id,),
+            )
+            conn.execute(
+                'INSERT INTO play_events (song_id, user_id) VALUES (999999, 1)'
+            )
+            conn.execute(
+                'INSERT INTO play_events (song_id, user_id) VALUES (?, 999999)',
                 (song_id,),
             )
             conn.commit()
@@ -655,15 +670,21 @@ class RecapAndSettingsTests(PsrFmTestCase):
             # Deleting the song must now SET NULL instead of cascading deletion.
             conn.execute('DELETE FROM songs WHERE id = ?', (song_id,))
             conn.commit()
-            log_row = conn.execute(
-                'SELECT song_id, seconds_listened, song_title, song_artist FROM listening_logs'
-            ).fetchone()
-            play_row = conn.execute(
-                'SELECT song_id, song_title, song_artist FROM play_events'
-            ).fetchone()
+            log_rows = conn.execute(
+                'SELECT song_id, seconds_listened, song_title, song_artist FROM listening_logs ORDER BY id'
+            ).fetchall()
+            play_rows = conn.execute(
+                'SELECT song_id, song_title, song_artist FROM play_events ORDER BY id'
+            ).fetchall()
 
-        self.assertEqual(log_row, (None, 42.0, 'Legacy Track', 'Legacy Artist'))
-        self.assertEqual(play_row, (None, 'Legacy Track', 'Legacy Artist'))
+        self.assertEqual(log_rows, [
+            (None, 42.0, 'Legacy Track', 'Legacy Artist'),
+            (None, 18.0, '', ''),
+        ])
+        self.assertEqual(play_rows, [
+            (None, 'Legacy Track', 'Legacy Artist'),
+            (None, '', ''),
+        ])
 
 
 if __name__ == '__main__':
