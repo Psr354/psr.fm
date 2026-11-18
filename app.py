@@ -54,11 +54,12 @@ app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get(
 
 Compress(app)
 
-DOWNLOAD_DIR = os.environ.get('PSR_FM_DOWNLOAD_DIR', os.path.join(BASE_DIR, 'downloads'))
+DATA_DIR = os.path.join(BASE_DIR, 'data')
+DOWNLOAD_DIR = os.environ.get('PSR_FM_DOWNLOAD_DIR', os.path.join(DATA_DIR, 'downloads'))
 LIBRARY_DIR = os.path.join(DOWNLOAD_DIR, 'library')
-ALBUM_ART_DIR = os.environ.get('PSR_FM_ALBUM_ART_DIR', os.path.join(BASE_DIR, 'static', 'album_art'))
-DATABASE_PATH = os.environ.get('PSR_FM_DATABASE_PATH', os.path.join(BASE_DIR, 'database.db', 'psr_fm.sqlite3'))
-DATABASE_DIR = os.path.dirname(DATABASE_PATH) or os.path.join(BASE_DIR, 'database.db')
+ALBUM_ART_DIR = os.environ.get('PSR_FM_ALBUM_ART_DIR', os.path.join(DATA_DIR, 'album_art'))
+DATABASE_PATH = os.environ.get('PSR_FM_DATABASE_PATH', os.path.join(DATA_DIR, 'psr_fm.sqlite3'))
+DATABASE_DIR = os.path.dirname(DATABASE_PATH) or DATA_DIR
 
 app.config['DATABASE_PATH'] = DATABASE_PATH
 app.config['DOWNLOAD_DIR'] = DOWNLOAD_DIR
@@ -199,16 +200,22 @@ def site_webmanifest():
             "client_mode": "focus-existing"
         },
         "icons": [
-            { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-            { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-            { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
-            { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+            { "src": "/static/img/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+            { "src": "/static/img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+            { "src": "/static/img/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+            { "src": "/static/img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
         ]
     }
     resp = jsonify(manifest_data)
     resp.mimetype = 'application/manifest+json'
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     return resp
+
+
+@app.route('/static/album_art/<path:filename>')
+def serve_album_art(filename):
+    """Serve runtime album and playlist artwork from ALBUM_ART_DIR."""
+    return send_from_directory(app.config.get('ALBUM_ART_DIR') or ALBUM_ART_DIR, filename)
 
 
 @app.route('/service-worker.js')

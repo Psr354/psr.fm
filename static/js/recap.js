@@ -147,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return songs.map((s, idx) => `
                 <div class="song-item capsule-song-item">
                     <span class="rank-number ${idx < 3 ? 'top-3' : ''}">${idx + 1}</span>
-                    <img src="/static/album_art/${mediaUrlName(s.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/icon-192.png';">
+                    <img src="/static/album_art/${mediaUrlName(s.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/img/icon-192.png';">
                     <div class="song-info">
                         <div class="song-title">${escapeHtml(s.title)}</div>
                         <div class="song-artist">${escapeHtml(s.artist || 'Unknown')}</div>

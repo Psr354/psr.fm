@@ -4,7 +4,7 @@
 
 psr.fm adalah aplikasi musik self-hosted untuk menyimpan koleksi audio, membuat playlist, dan mendengarkan musik dari browser. Tambahkan lagu dari YouTube atau file lokal, lalu akses koleksimu lewat komputer maupun ponsel. Akun, playlist, dan riwayat dengar disimpan di server yang kamu kelola sendiri.
 
-![Dashboard psr.fm](static/dashboard.png)
+![Dashboard psr.fm](static/img/dashboard.png)
 
 [Instalasi](#instalasi--setup) · [Penggunaan](#cara-penggunaan) · [Kontribusi](#berkontribusi)
 
@@ -164,11 +164,11 @@ Hentikan aplikasi sementara agar salinan database konsisten. Simpan `.env` beser
 
 | Folder | Data |
 | --- | --- |
-| `database.db/` | Akun, playlist, metadata, lirik, dan riwayat dengar |
-| `downloads/` | File audio |
-| `static/album_art/` | Cover lagu dan playlist |
+| `data/psr_fm.sqlite3` | Akun, playlist, metadata, lirik, dan riwayat dengar |
+| `data/downloads/` | File audio |
+| `data/album_art/` | Cover lagu dan playlist |
 
-Data tersebut disimpan di folder proyek melalui bind mount dan tetap ada setelah `docker compose down`.
+Data tersebut disimpan di folder proyek melalui bind mount (`./data:/app/data`) dan tetap ada setelah `docker compose down`.
 
 ### Pemecahan masalah
 
@@ -186,14 +186,14 @@ Untuk akses melalui internet, gunakan HTTPS dan reverse proxy. Konfigurasi Docke
 
 ```text
 psr.fm/
-├── app.py                  # Aplikasi Flask dan API
+├── app.py                  # Aplikasi Flask, konfigurasi, dan registrasi blueprint
+├── routes/                 # Endpoint HTTP (Flask Blueprints)
 ├── services/               # Database, download, metadata, dan lirik
-├── static/                 # JavaScript, CSS, ikon, dan service worker
+├── static/                 # Aset statis (css/, js/, img/, service worker, manifest)
 ├── templates/              # Halaman HTML
 ├── scripts/                # Utilitas pengelolaan data
-├── tests/                  # Tes backend dan player
-├── downloads/              # File audio (dibuat saat runtime)
-├── database.db/            # Database SQLite (dibuat saat runtime)
+├── tests/                  # Tes backend (backend/) dan frontend (frontend/)
+├── data/                   # Database SQLite, audio, dan album art (dibuat saat runtime)
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
@@ -218,7 +218,7 @@ docker compose exec -T psr_fm python -m unittest -q
 Tes player dan antrean sinkronisasi dijalankan dari folder proyek dengan Node.js:
 
 ```bash
-node --test tests/listening.test.mjs tests/listening-sync.test.mjs
+node --test tests/frontend/listening.test.mjs tests/frontend/listening-sync.test.mjs tests/frontend/player-queue.test.mjs
 ```
 
 Saat melaporkan bug, sertakan langkah reproduksi, perilaku yang diharapkan, serta log atau screenshot yang relevan. Hapus password, cookie, dan secret key dari lampiran.

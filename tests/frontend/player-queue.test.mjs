@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const source = fs.readFileSync(new URL('../static/main.js', import.meta.url), 'utf8');
+const source = fs.readFileSync(new URL('../../static/js/main.js', import.meta.url), 'utf8');
 const songs = [1, 2, 3].map(id => ({ id }));
 const played = [];
 const state = { currentPlaylistSongs: songs, currentPlaylistId: 1, currentSongIndex: 0,

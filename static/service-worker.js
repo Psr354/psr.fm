@@ -1,22 +1,26 @@
-const SHELL_CACHE = 'psr354-shell-v47';
+const SHELL_CACHE = 'psr354-shell-v48';
 const MEDIA_CACHE = 'psr354-media-v3';
 const RUNTIME_CACHE = 'psr354-runtime-v1';
 const APP_SHELL_KEY = '/?offline-app-shell=1';
 const SHELL_FILES = [
-  '/static/offline.html', '/static/offline-register.js',
-  '/static/offline-storage.js',
-  '/static/main.js',
-  '/static/lyrics.js',
-  '/static/modals.js',
-  '/static/theme.js',
-  '/static/user-mgmt.js',
-  '/static/recap.js',
-  '/static/equalizer.js',
-  '/static/listening-sync.js',
-  '/static/style.css',
+  '/static/offline.html',
+  '/static/js/offline-register.js',
+  '/static/js/offline-storage.js',
+  '/static/js/main.js',
+  '/static/js/lyrics.js',
+  '/static/js/modals.js',
+  '/static/js/theme.js',
+  '/static/js/user-mgmt.js',
+  '/static/js/recap.js',
+  '/static/js/equalizer.js',
+  '/static/js/listening-sync.js',
+  '/static/css/style.css',
   '/static/site.webmanifest',
-  '/static/favicon-32.png', '/static/apple-touch-icon.png',
-  '/static/icon-192.png', '/static/icon-512.png', '/static/psrfm.png'
+  '/static/img/favicon-32.png',
+  '/static/img/apple-touch-icon.png',
+  '/static/img/icon-192.png',
+  '/static/img/icon-512.png',
+  '/static/img/psrfm.png'
 ];
 
 async function cacheAuthenticatedAppShell() {
@@ -156,7 +160,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.pathname === '/static/main.js' || url.pathname === '/static/style.css' || url.pathname === '/static/theme.js' || url.pathname === '/static/offline-storage.js' || url.pathname === '/static/lyrics.js' || url.pathname === '/static/modals.js' || url.pathname === '/static/user-mgmt.js' || url.pathname === '/static/recap.js' || url.pathname === '/static/equalizer.js') {
+  if (url.pathname.startsWith('/static/js/') || url.pathname.startsWith('/static/css/')) {
     // Always fetch fresh JS/CSS so feature updates reach the browser immediately.
     // Fall back to cache only when offline so the PWA stays usable.
     event.respondWith(

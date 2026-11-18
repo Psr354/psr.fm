@@ -17,7 +17,7 @@ def resolve_database_path():
     load_dotenv(os.path.join(BASE_DIR, '.env'))
     return os.environ.get(
         'PSR_FM_DATABASE_PATH',
-        os.path.join(BASE_DIR, 'database.db', 'psr_fm.sqlite3'),
+        os.path.join(BASE_DIR, 'data', 'psr_fm.sqlite3'),
     )
 
 

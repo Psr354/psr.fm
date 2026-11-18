@@ -738,7 +738,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadUserInfo();
 
     // ==========================================
-    // USER MANAGEMENT: Extracted to static/user-mgmt.js
+    // USER MANAGEMENT: Extracted to static/js/user-mgmt.js
     // ==========================================
     // ==========================================
     // MODAL HANDLERS (Global)
@@ -922,7 +922,7 @@ document.addEventListener('DOMContentLoaded', () => {
             div.dataset.queueIndex = String(index);
             div.innerHTML = `
                 <button class="queue-drag-handle" type="button" aria-label="Reorder ${escapeHtml(song.title)}" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></button>
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/icon-192.png';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/img/icon-192.png';">
                 <div class="q-info">
                     <div class="q-title">${escapeHtml(song.title)}</div>
                     <div class="q-artist">${escapeHtml(song.artist || 'Unknown')}</div>
@@ -1327,7 +1327,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ==========================================
-    // 16-BAND GRAPHIC EQUALIZER: Extracted to static/equalizer.js
+    // 16-BAND GRAPHIC EQUALIZER: Extracted to static/js/equalizer.js
     // ==========================================
     function applyMasterVolume(vol, isMuted) {
         if (window.applyMasterVolume) {
@@ -2322,7 +2322,7 @@ function resumePlaybackAfterBackground() {
             div.className = 'song-item library-song-item';
             div.setAttribute('data-id', String(song.id));
             div.innerHTML = `
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/icon-192.png';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/img/icon-192.png';">
                 <div class="song-info">
                     <div class="song-title">${escapeHtml(song.title)}</div>
                     <div class="song-artist">${escapeHtml(song.artist || 'Unknown')}</div>
@@ -2677,7 +2677,7 @@ function resumePlaybackAfterBackground() {
 
             div.innerHTML = `
                 ${canReorder ? '<button class="drag-handle" type="button" aria-label="Reorder song" title="Drag to reorder"><i class="fas fa-grip-lines"></i></button>' : ''}
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/icon-192.png';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/img/icon-192.png';">
                 <div class="eq-container"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>
                 <div class="song-info"><div class="song-title">${escapeHtml(song.title)}</div><div class="song-artist">${escapeHtml(song.artist || 'Unknown')}</div></div>
                 <div class="song-duration">${formatTime(song.duration_seconds)}</div>
@@ -2792,7 +2792,7 @@ function resumePlaybackAfterBackground() {
             }
 
             div.innerHTML = `
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/icon-192.png';">
+                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/img/icon-192.png';">
                 <div class="eq-container"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>
                 <div class="song-info">
                     <div class="song-title">${escapeHtml(song.title)}</div>
@@ -3080,7 +3080,7 @@ function resumePlaybackAfterBackground() {
     }
 
     // ==========================================
-    // FREQUENCY FOCUS & SHARE CARD: Extracted to static/recap.js
+    // FREQUENCY FOCUS & SHARE CARD: Extracted to static/js/recap.js
     // ==========================================
     // ==========================================
     // INITIALIZATION
@@ -3140,7 +3140,7 @@ function resumePlaybackAfterBackground() {
             // ==========================================
     // THEME CUSTOMIZATION ENGINE (COHESIVE & HARMONIZED)
     // ==========================================
-    // Theme Customization Engine has been modularized into static/theme.js
+    // Theme Customization Engine has been modularized into static/js/theme.js
     if (typeof window.initThemeManager === 'function') {
         try { window.initThemeManager(); } catch (e) { console.warn('initThemeManager failed:', e); }
     }

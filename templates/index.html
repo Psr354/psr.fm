@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>psr.fm</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_version('style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ asset_version('css/style.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='favicon-32.png') }}">
-    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='img/favicon-32.png') }}">
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='img/apple-touch-icon.png') }}">
     <link rel="manifest" href="/site.webmanifest">
     <meta name="theme-color" content="{{ status_bar_color or '#070908' }}">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -23,7 +23,7 @@
     <div class="app-container">
         <aside class="sidebar" id="primary-sidebar">
             <div class="logo">
-                <img class="brand-logo" src="{{ url_for('static', filename='psrfm.png') }}" alt="">
+                <img class="brand-logo" src="{{ url_for('static', filename='img/psrfm.png') }}" alt="">
                 <div><h1>psr.fm</h1><p>private frequency</p></div>
             </div>
 
@@ -701,15 +701,15 @@
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='listening-sync.js') }}?v={{ asset_version('listening-sync.js') }}"></script>
-    <script src="{{ url_for('static', filename='theme.js') }}?v={{ asset_version('theme.js') }}"></script>
-    <script src="{{ url_for('static', filename='offline-storage.js') }}?v={{ asset_version('offline-storage.js') }}"></script>
-    <script src="{{ url_for('static', filename='main.js') }}?v={{ asset_version('main.js') }}"></script>
-    <script src="{{ url_for('static', filename='lyrics.js') }}?v={{ asset_version('lyrics.js') }}"></script>
-    <script src="{{ url_for('static', filename='modals.js') }}?v={{ asset_version('modals.js') }}"></script>
-    <script src="{{ url_for('static', filename='user-mgmt.js') }}?v={{ asset_version('user-mgmt.js') }}"></script>
-    <script src="{{ url_for('static', filename='recap.js') }}?v={{ asset_version('recap.js') }}"></script>
-    <script src="{{ url_for('static', filename='equalizer.js') }}?v={{ asset_version('equalizer.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/listening-sync.js') }}?v={{ asset_version('js/listening-sync.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/theme.js') }}?v={{ asset_version('js/theme.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/offline-storage.js') }}?v={{ asset_version('js/offline-storage.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}?v={{ asset_version('js/main.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/lyrics.js') }}?v={{ asset_version('js/lyrics.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/modals.js') }}?v={{ asset_version('js/modals.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/user-mgmt.js') }}?v={{ asset_version('js/user-mgmt.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/recap.js') }}?v={{ asset_version('js/recap.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/equalizer.js') }}?v={{ asset_version('js/equalizer.js') }}"></script>
 
     <!-- Equalizer Popover -->
     <div id="eq-popover" class="eq-popover" aria-hidden="true">

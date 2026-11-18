@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Ensure runtime directories exist and set correct ownership
-RUN mkdir -p downloads static/album_art logs database.db && \
+RUN mkdir -p data/downloads/library data/album_art logs && \
     chown -R appuser:appuser /app
 
 USER appuser

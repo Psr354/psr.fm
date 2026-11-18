@@ -10,7 +10,7 @@ if BASE_DIR not in sys.path:
 from services.database import get_db_connection, update_song_lyrics
 from services.lyrics import search_lyrics
 
-DATABASE_PATH = os.environ.get('PSR_FM_DATABASE_PATH', os.path.join(BASE_DIR, 'database.db', 'psr_fm.sqlite3'))
+DATABASE_PATH = os.environ.get('PSR_FM_DATABASE_PATH', os.path.join(BASE_DIR, 'data', 'psr_fm.sqlite3'))
 
 
 def main():

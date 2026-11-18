@@ -76,7 +76,7 @@ def get_database_path():
     if current_app and current_app.config.get('DATABASE_PATH'):
         return current_app.config['DATABASE_PATH']
     return os.environ.get('PSR_FM_DATABASE_PATH', os.path.join(
-        os.path.abspath(os.path.dirname(__file__)), '..', 'database.db', 'psr_fm.sqlite3'
+        os.path.abspath(os.path.dirname(__file__)), '..', 'data', 'psr_fm.sqlite3'
     ))
 
 

@@ -5,11 +5,9 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./downloads:/app/downloads
+      - ./data:/app/data
       - ./static:/app/static
       - ./templates:/app/templates
-      - ./static/album_art:/app/static/album_art
-      - ./database.db:/app/database.db
       - ./logs:/app/logs
       - ./app.py:/app/app.py
       - ./routes:/app/routes
@@ -22,4 +20,6 @@ services:
     environment:
       - FLASK_ENV=production
       - FLASK_DEBUG=0
-      - PSR_FM_DATABASE_PATH=/app/database.db/psr_fm.sqlite3
+      - PSR_FM_DATABASE_PATH=/app/data/psr_fm.sqlite3
+      - PSR_FM_DOWNLOAD_DIR=/app/data/downloads
+      - PSR_FM_ALBUM_ART_DIR=/app/data/album_art

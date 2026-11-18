@@ -1249,6 +1249,77 @@ class AuthAndDownloadTests(unittest.TestCase):
         saved_img = Image.open(saved_cover_path)
         self.assertEqual(saved_img.format, 'JPEG')
 
+    def test_album_art_route_serves_from_configured_album_art_dir(self):
+        client = self.app_module.app.test_client()
+        art_name = 'custom-runtime-cover.png'
+        art_path = os.path.join(self.app_module.ALBUM_ART_DIR, art_name)
+        os.makedirs(self.app_module.ALBUM_ART_DIR, exist_ok=True)
+        with open(art_path, 'wb') as handle:
+            handle.write(b'\x89PNG\r\n\x1a\nfake-png-bytes')
+
+        res = client.get(f'/static/album_art/{art_name}')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data, b'\x89PNG\r\n\x1a\nfake-png-bytes')
+        res.close()
+
+    def test_all_static_shell_manifest_and_template_assets_resolve(self):
+        import re
+        client = self.app_module.app.test_client()
+
+        # 1. Every asset listed in service-worker SHELL_FILES must return 200
+        sw_res = client.get('/service-worker.js')
+        self.assertEqual(sw_res.status_code, 200)
+        sw_text = sw_res.get_data(as_text=True)
+        sw_res.close()
+        shell_block = re.search(r'SHELL_FILES\s*=\s*\[(.*?)\];', sw_text, re.DOTALL)
+        self.assertIsNotNone(shell_block)
+        shell_urls = re.findall(r"['\"](/static/[^'\"]+)['\"]", shell_block.group(1))
+        self.assertGreater(len(shell_urls), 10)
+        for asset_url in shell_urls:
+            resp = client.get(asset_url)
+            self.assertEqual(resp.status_code, 200, f'Missing SW asset: {asset_url}')
+            resp.close()
+
+        # 2. Manifest icons (both dynamic /site.webmanifest and static file) must return 200
+        for manifest_url in ('/site.webmanifest', '/static/site.webmanifest'):
+            m_res = client.get(manifest_url)
+            self.assertEqual(m_res.status_code, 200, f'Missing manifest: {manifest_url}')
+            manifest = json.loads(m_res.get_data(as_text=True))
+            m_res.close()
+            for icon in manifest.get('icons', []):
+                i_res = client.get(icon['src'])
+                self.assertEqual(i_res.status_code, 200, f'Missing manifest icon: {icon["src"]}')
+                i_res.close()
+
+        # 3. Rendered setup, login, index, and offline pages must have no broken /static/ URLs
+        pages_to_check = []
+        setup_page = client.get('/setup')
+        self.assertEqual(setup_page.status_code, 200)
+        pages_to_check.append(('setup', setup_page.get_data(as_text=True)))
+
+        client.post('/api/setup', json={'username': 'admin', 'password': 'secret123'})
+        index_page = client.get('/')
+        self.assertEqual(index_page.status_code, 200)
+        pages_to_check.append(('index', index_page.get_data(as_text=True)))
+
+        offline_page = client.get('/static/offline.html')
+        self.assertEqual(offline_page.status_code, 200)
+        pages_to_check.append(('offline', offline_page.get_data(as_text=True)))
+        offline_page.close()
+
+        client.post('/api/logout', headers={'X-CSRF-Token': self._csrf_token_from_response(index_page)})
+        login_page = client.get('/login')
+        self.assertEqual(login_page.status_code, 200)
+        pages_to_check.append(('login', login_page.get_data(as_text=True)))
+
+        for name, html in pages_to_check:
+            static_urls = set(re.findall(r'(?:href|src)=["\'](/static/[^"\'?]+)', html))
+            self.assertTrue(static_urls, f'No static assets found on {name}')
+            for asset_url in static_urls:
+                resp = client.get(asset_url)
+                self.assertEqual(resp.status_code, 200, f'Broken static URL on {name}: {asset_url}')
+                resp.close()
+
 
 if __name__ == '__main__':
     unittest.main()

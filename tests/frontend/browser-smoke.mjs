@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PSR_PLAYWRIGHT_MODULE || 'playwright');
-const root = fileURLToPath(new URL('../', import.meta.url));
+const root = fileURLToPath(new URL('../../', import.meta.url));
 const python = process.env.PSR_TEST_PYTHON || (process.platform === 'win32' ? path.join(root, 'venv/Scripts/python.exe') : 'python3');
-const server = spawn(python, ['tests/browser_fixture.py'], { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(python, ['tests/backend/browser_fixture.py'], { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 let serverOutput = '';
 server.stderr.on('data', data => { serverOutput += data; });
 let browser;

@@ -2,8 +2,10 @@
 # DATABASE & LOCAL DATA
 # ==========================================
 *.db
+data/
 database.db
 documentation.md
+docs/documentation.md
 
 # ==========================================
 # GENERATED MEDIA & LOGS
@@ -56,3 +58,6 @@ server-import/archive/source/app.py.before-null-fix
 DEPLOYMENT_CHECKLIST.md
 OPTIMIZATION_SUMMARY.md
 YOUTUBE_403_FIX.md
+docs/DEPLOYMENT_CHECKLIST.md
+docs/OPTIMIZATION_SUMMARY.md
+docs/YOUTUBE_403_FIX.md

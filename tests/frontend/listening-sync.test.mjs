@@ -74,7 +74,7 @@ const context = vm.createContext({
         },
     },
 });
-vm.runInContext(fs.readFileSync(new URL('../static/listening-sync.js', import.meta.url), 'utf8'), context);
+vm.runInContext(fs.readFileSync(new URL('../../static/js/listening-sync.js', import.meta.url), 'utf8'), context);
 const create = user => new context.window.PsrListeningSync(user, message => warnings.push(message));
 const occurredAt = '2020-01-01T00:00:05.000Z';
 let sync = create(1);
