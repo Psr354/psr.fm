@@ -1,6 +1,6 @@
-const SHELL_CACHE = 'psr354-shell-v52';
+const SHELL_CACHE = 'psr354-shell-v53';
 const MEDIA_CACHE = 'psr354-media-v3';
-const RUNTIME_CACHE = 'psr354-runtime-v1';
+const RUNTIME_CACHE = 'psr354-runtime-v2';
 const APP_SHELL_KEY = '/?offline-app-shell=1';
 const SHELL_FILES = [
   '/static/offline.html',
@@ -46,7 +46,10 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(keys
-        .filter((key) => key.startsWith('psr354-shell-') && key !== SHELL_CACHE)
+        .filter((key) => (
+          (key.startsWith('psr354-shell-') && key !== SHELL_CACHE)
+          || (key.startsWith('psr354-runtime-') && key !== RUNTIME_CACHE)
+        ))
         .map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
   );
@@ -124,9 +127,11 @@ self.addEventListener('fetch', (event) => {
       event.respondWith(
         caches.open(RUNTIME_CACHE).then(async (cache) => {
           const cached = await cache.match(request);
-          if (cached) return cached;
+          if (cached && !(request.mode === 'cors' && cached.type === 'opaque')) return cached;
           const response = await fetch(request);
-          await cache.put(request, response.clone());
+          if (response.ok && !(request.mode === 'cors' && response.type === 'opaque')) {
+            await cache.put(request, response.clone());
+          }
           return response;
         })
       );
