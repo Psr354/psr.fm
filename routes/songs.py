@@ -1,24 +1,72 @@
-import io
 import json
 import os
+import re
 import uuid
 from flask import Blueprint, request, jsonify, send_from_directory, current_app
 from flask_login import login_required, current_user
-from PIL import Image
 from werkzeug.utils import secure_filename
 
 from services.common import (
     get_db, get_database_path, get_owned_playlist, get_owned_song, get_global_song,
     add_global_song_to_playlists, get_json_object, audio_mimetype,
-    queue_file_deletion
+    queue_file_deletion, save_validated_image, resolve_owned_playlists,
+    collect_unreferenced_media_paths, check_download_rate_limit
 )
 from services.downloader import download_queue, validate_song_url, dispatch_lyrics_lookup
 from services.database import extract_song_source_id
 
 songs_bp = Blueprint('songs', __name__)
 
-MAX_EMBEDDED_ART_BYTES = 5 * 1024 * 1024
-ALLOWED_ART_FORMATS = {'JPEG': '.jpg', 'PNG': '.png', 'WEBP': '.webp'}
+MAX_SONG_META_LENGTH = 200
+SONG_LIST_COLUMNS = (
+    'id, title, artist, filename, album_art, duration_seconds, '
+    'source_url, source_id, play_count, lyrics_status, lyrics_updated_at, user_id, created_at'
+)
+SONG_LIST_COLUMNS_ALIASED = ', '.join(f's.{col.strip()}' for col in SONG_LIST_COLUMNS.split(','))
+
+
+def _max_active_downloads_per_user():
+    raw = os.environ.get('PSR_FM_MAX_ACTIVE_DOWNLOADS_PER_USER', '5').strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 5
+
+
+def _user_storage_quota_bytes():
+    raw = os.environ.get('PSR_FM_USER_STORAGE_QUOTA_MB', '2048').strip()
+    try:
+        mb = int(raw)
+    except ValueError:
+        mb = 2048
+    return mb * 1024 * 1024 if mb > 0 else 0
+
+
+def _calculate_user_audio_usage_bytes(db, user_id, library_dir):
+    if not library_dir or not os.path.exists(library_dir):
+        return 0
+    total = 0
+    rows = db.execute(
+        "SELECT DISTINCT filename FROM songs WHERE user_id = ? AND filename IS NOT NULL AND filename != ''",
+        (user_id,),
+    ).fetchall()
+    for row in rows:
+        safe_name = secure_filename(row['filename'])
+        if not safe_name:
+            continue
+        fpath = os.path.join(library_dir, safe_name)
+        if os.path.isfile(fpath):
+            total += os.path.getsize(fpath)
+    return total
+
+
+def _fallback_song_title(raw_filename):
+    base = os.path.splitext(raw_filename or '')[0]
+    cleaned = re.sub(r'[_\-]+', ' ', base)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    if not cleaned or not any(ch.isalnum() for ch in cleaned):
+        return 'Untitled'
+    return cleaned[:MAX_SONG_META_LENGTH]
 
 
 def _library_audio_exists(filename):
@@ -71,29 +119,18 @@ def _extract_embedded_artwork(file_path):
 
 def _save_reencoded_album_art(raw_bytes, album_art_dir):
     """Validate and re-encode embedded cover bytes via Pillow before saving to disk."""
-    if not album_art_dir or not raw_bytes or len(raw_bytes) > MAX_EMBEDDED_ART_BYTES:
+    if not album_art_dir or not raw_bytes:
         return None, None
-    img = Image.open(io.BytesIO(raw_bytes))
-    img.verify()
-    img = Image.open(io.BytesIO(raw_bytes))
-    if img.format not in ALLOWED_ART_FORMATS:
-        return None, None
-    width, height = img.size
-    if width * height > 25_000_000 or width > 8000 or height > 8000:
-        return None, None
-    save_format = img.format
-    ext = ALLOWED_ART_FORMATS[save_format]
-    if save_format == 'JPEG' and img.mode in ('RGBA', 'P'):
-        img = img.convert('RGB')
-    filename = f"upload_art_{uuid.uuid4().hex[:12]}{ext}"
-    save_path = os.path.join(album_art_dir, filename)
-    img.save(save_path, format=save_format)
-    return filename, save_path
+    return save_validated_image(raw_bytes, album_art_dir, f"upload_art_{uuid.uuid4().hex[:12]}")
 
 
 @songs_bp.route('/api/download', methods=['POST'])
 @login_required
 def download_song():
+    allowed, retry_after = check_download_rate_limit(current_user.id)
+    if not allowed:
+        return jsonify({'error': 'Too many download requests. Please try again later.', 'retry_after': retry_after}), 429
+
     data = get_json_object()
     if data is None:
         return jsonify({'error': 'JSON object required'}), 400
@@ -104,20 +141,11 @@ def download_song():
     is_valid, validation_error = validate_song_url(url)
     if not is_valid:
         return jsonify({'error': validation_error}), 400
-    try:
-        playlist_ids = sorted({int(pid) for pid in playlist_ids})
-    except (TypeError, ValueError):
-        return jsonify({'error': 'Invalid playlist data'}), 400
 
     db = get_db()
-    placeholders = ','.join('?' for _ in playlist_ids)
-    cursor = db.execute(
-        f'SELECT id FROM playlists WHERE user_id = ? AND id IN ({placeholders})',
-        (current_user.id, *playlist_ids)
-    )
-    owned_playlist_ids = [row['id'] for row in cursor.fetchall()]
-    if len(owned_playlist_ids) != len(playlist_ids):
-        return jsonify({'error': 'One or more playlists were not found'}), 404
+    owned_playlist_ids, err_msg, err_code = resolve_owned_playlists(db, current_user.id, playlist_ids)
+    if err_msg:
+        return jsonify({'error': err_msg}), err_code
 
     source_id = extract_song_source_id(url)
     if source_id:
@@ -143,6 +171,14 @@ def download_song():
                 'title': source_song['title'],
                 'artist': source_song['artist'],
             })
+
+    active_jobs = db.execute(
+        "SELECT COUNT(*) AS count FROM download_jobs WHERE user_id = ? AND status IN ('queued', 'processing')",
+        (current_user.id,),
+    ).fetchone()['count']
+    max_active = _max_active_downloads_per_user()
+    if active_jobs >= max_active:
+        return jsonify({'error': f'Too many active downloads (max {max_active}). Please wait for current jobs to finish.'}), 429
 
     download_queue.put({'url': url, 'playlist_ids': owned_playlist_ids, 'user_id': current_user.id})
     return jsonify({'status': 'processing', 'url': url})
@@ -171,30 +207,33 @@ def upload_song():
 
     title = (request.form.get('title') or '').strip()
     artist = (request.form.get('artist') or '').strip() or 'Unknown'
+    if len(title) > MAX_SONG_META_LENGTH:
+        return jsonify({'error': f'Title must be at most {MAX_SONG_META_LENGTH} characters'}), 400
+    if len(artist) > MAX_SONG_META_LENGTH:
+        return jsonify({'error': f'Artist must be at most {MAX_SONG_META_LENGTH} characters'}), 400
+
     playlist_ids_raw = request.form.get('playlist_ids', '[]')
     try:
-        playlist_ids = sorted({int(pid) for pid in json.loads(playlist_ids_raw)})
+        parsed_playlist_ids = json.loads(playlist_ids_raw)
     except (json.JSONDecodeError, TypeError, ValueError):
         return jsonify({'error': 'Invalid playlist data'}), 400
 
-    if not playlist_ids:
-        return jsonify({'error': 'Select at least one playlist'}), 400
-
     db = get_db()
-    placeholders = ','.join('?' for _ in playlist_ids)
-    cursor = db.execute(
-        f'SELECT id FROM playlists WHERE user_id = ? AND id IN ({placeholders})',
-        (current_user.id, *playlist_ids)
-    )
-    owned_playlist_ids = [row['id'] for row in cursor.fetchall()]
-    if len(owned_playlist_ids) != len(playlist_ids):
-        return jsonify({'error': 'One or more playlists were not found'}), 404
+    owned_playlist_ids, err_msg, err_code = resolve_owned_playlists(db, current_user.id, parsed_playlist_ids)
+    if err_msg:
+        return jsonify({'error': err_msg}), err_code
 
     if not title:
-        title = os.path.splitext(file.filename)[0].replace('_', ' ').replace('-', ' ').strip()
+        title = _fallback_song_title(file.filename)
 
     library_dir = current_app.config.get('LIBRARY_DIR', '')
     album_art_dir = current_app.config.get('ALBUM_ART_DIR', '')
+
+    quota_bytes = _user_storage_quota_bytes()
+    if quota_bytes > 0:
+        current_usage = _calculate_user_audio_usage_bytes(db, current_user.id, library_dir)
+        if current_usage + file_size > quota_bytes:
+            return jsonify({'error': 'Storage quota exceeded for this account'}), 413
 
     unique_filename = f"{uuid.uuid4().hex}{ext}"
     save_path = os.path.join(library_dir, unique_filename)
@@ -279,7 +318,7 @@ def upload_song():
                 'playlist_ids': added_playlist_ids,
             }, room=f'user_{current_user.id}')
     except Exception:
-        pass
+        current_app.logger.warning('Failed to emit song_added event after upload', exc_info=True)
 
     return jsonify({
         'status': 'success',
@@ -428,24 +467,10 @@ def add_library_song(song_id):
     data = get_json_object()
     if data is None:
         return jsonify({'error': 'JSON object required'}), 400
-    playlist_ids = data.get('playlist_ids', [])
-    if not playlist_ids:
-        return jsonify({'error': 'Select at least one playlist'}), 400
-
-    try:
-        playlist_ids = sorted({int(pid) for pid in playlist_ids})
-    except (TypeError, ValueError):
-        return jsonify({'error': 'Invalid playlist data'}), 400
-
     db = get_db()
-    placeholders = ','.join('?' for _ in playlist_ids)
-    cursor = db.execute(
-        f'SELECT id FROM playlists WHERE user_id = ? AND id IN ({placeholders})',
-        (current_user.id, *playlist_ids)
-    )
-    owned_playlist_ids = [row['id'] for row in cursor.fetchall()]
-    if len(owned_playlist_ids) != len(playlist_ids):
-        return jsonify({'error': 'One or more playlists were not found'}), 404
+    owned_playlist_ids, err_msg, err_code = resolve_owned_playlists(db, current_user.id, data.get('playlist_ids', []))
+    if err_msg:
+        return jsonify({'error': err_msg}), err_code
 
     source_song = get_global_song(db, song_id)
     if not source_song:
@@ -489,17 +514,23 @@ def get_songs():
     if playlist_id:
         if not get_owned_playlist(db, playlist_id):
             return jsonify({'error': 'Playlist not found'}), 404
-        cursor.execute('''
-            SELECT s.* FROM songs s 
+        cursor.execute(f'''
+            SELECT {SONG_LIST_COLUMNS_ALIASED} FROM songs s 
             JOIN playlist_songs ps ON s.id = ps.song_id 
             WHERE ps.playlist_id = ? AND s.user_id = ?
             ORDER BY ps.position ASC, ps.added_at ASC
         ''', (playlist_id, current_user.id))
     else:
         if limit:
-            cursor.execute('SELECT * FROM songs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?', (current_user.id, limit))
+            cursor.execute(
+                f'SELECT {SONG_LIST_COLUMNS} FROM songs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
+                (current_user.id, limit),
+            )
         else:
-            cursor.execute('SELECT * FROM songs WHERE user_id = ? ORDER BY created_at DESC', (current_user.id,))
+            cursor.execute(
+                f'SELECT {SONG_LIST_COLUMNS} FROM songs WHERE user_id = ? ORDER BY created_at DESC',
+                (current_user.id,),
+            )
     return jsonify([dict(row) for row in cursor.fetchall()])
 
 
@@ -554,33 +585,22 @@ def delete_song(song_id):
         cursor.execute('DELETE FROM listening_logs WHERE song_id = ?', (song_id,))
         cursor.execute('DELETE FROM songs WHERE id = ?', (song_id,))
 
-        filename_ref_count = db.execute(
-            'SELECT COUNT(*) AS count FROM songs WHERE filename = ?',
-            (song['filename'],)
-        ).fetchone()['count']
-        album_art_ref_count = 0
-        if song['album_art']:
-            song_art_refs = db.execute(
-                'SELECT COUNT(*) AS count FROM songs WHERE album_art = ?',
-                (song['album_art'],)
-            ).fetchone()['count']
-            playlist_art_refs = db.execute(
-                'SELECT COUNT(*) AS count FROM playlists WHERE cover_art = ?',
-                (song['album_art'],)
-            ).fetchone()['count']
-            album_art_ref_count = song_art_refs + playlist_art_refs
+        library_dir = current_app.config.get('LIBRARY_DIR', '')
+        album_art_dir = current_app.config.get('ALBUM_ART_DIR', '')
+        files_to_delete = collect_unreferenced_media_paths(
+            db,
+            filenames=[song['filename']],
+            art_files=[song['album_art']] if song['album_art'] else [],
+            library_dir=library_dir,
+            album_art_dir=album_art_dir,
+        )
         db.commit()
     except Exception:
         db.rollback()
         raise
 
-    library_dir = current_app.config.get('LIBRARY_DIR', '')
-    album_art_dir = current_app.config.get('ALBUM_ART_DIR', '')
-
-    if filename_ref_count == 0 and library_dir:
-        queue_file_deletion(os.path.join(library_dir, song['filename']))
-    if song['album_art'] and album_art_ref_count == 0 and album_art_dir:
-        queue_file_deletion(os.path.join(album_art_dir, song['album_art']))
+    for path in files_to_delete:
+        queue_file_deletion(path)
 
     return jsonify({
         'status': 'deleted',
@@ -595,28 +615,15 @@ def add_owned_song_to_playlists(song_id):
     data = get_json_object()
     if data is None:
         return jsonify({'error': 'JSON object required'}), 400
-    playlist_ids = data.get('playlist_ids', [])
-    if not playlist_ids:
-        return jsonify({'error': 'Select at least one playlist'}), 400
-
-    try:
-        playlist_ids = sorted({int(pid) for pid in playlist_ids})
-    except (TypeError, ValueError):
-        return jsonify({'error': 'Invalid playlist data'}), 400
 
     db = get_db()
+    owned_playlist_ids, err_msg, err_code = resolve_owned_playlists(db, current_user.id, data.get('playlist_ids', []))
+    if err_msg:
+        return jsonify({'error': err_msg}), err_code
+
     song = get_owned_song(db, song_id)
     if not song:
         return jsonify({'error': 'Song not found'}), 404
-
-    placeholders = ','.join('?' for _ in playlist_ids)
-    cursor = db.execute(
-        f'SELECT id FROM playlists WHERE user_id = ? AND id IN ({placeholders})',
-        (current_user.id, *playlist_ids)
-    )
-    owned_playlist_ids = [row['id'] for row in cursor.fetchall()]
-    if len(owned_playlist_ids) != len(playlist_ids):
-        return jsonify({'error': 'One or more playlists were not found'}), 404
 
     added_playlist_ids = []
     skipped_playlist_ids = []
@@ -732,8 +739,8 @@ def search_songs():
     db = get_db()
     search_param = f"%{query}%"
     cursor = db.cursor()
-    cursor.execute('''
-        SELECT * FROM songs
+    cursor.execute(f'''
+        SELECT {SONG_LIST_COLUMNS} FROM songs
         WHERE user_id = ? AND (title LIKE ? OR artist LIKE ?)
         ORDER BY created_at DESC
         LIMIT ? OFFSET ?

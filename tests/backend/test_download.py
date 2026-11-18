@@ -406,10 +406,21 @@ class DownloadAndLibraryTests(PsrFmTestCase):
             def close(self):
                 pass
 
-        # Non-image payload rejected
+        # Untrusted host / http scheme rejected without calling requests.get
+        with patch.object(downloader.requests, 'get', side_effect=AssertionError('should not fetch untrusted host')):
+            self.assertEqual(
+                downloader._download_and_save_thumbnail('https://example.com/bad.jpg', self.app_module.ALBUM_ART_DIR, 'bad0'),
+                '',
+            )
+            self.assertEqual(
+                downloader._download_and_save_thumbnail('http://i.ytimg.com/vi/abc/hqdefault.jpg', self.app_module.ALBUM_ART_DIR, 'http0'),
+                '',
+            )
+
+        # Non-image payload from allowed host rejected
         with patch.object(downloader.requests, 'get', return_value=FakeResp(b'<svg><script>alert(1)</script></svg>')):
             self.assertEqual(
-                downloader._download_and_save_thumbnail('https://example.com/bad.jpg', self.app_module.ALBUM_ART_DIR, 'bad1'),
+                downloader._download_and_save_thumbnail('https://i.ytimg.com/vi/abc/bad.jpg', self.app_module.ALBUM_ART_DIR, 'bad1'),
                 '',
             )
 
@@ -417,17 +428,18 @@ class DownloadAndLibraryTests(PsrFmTestCase):
         oversized = b'A' * (downloader.MAX_THUMBNAIL_BYTES + 1024)
         with patch.object(downloader.requests, 'get', return_value=FakeResp(oversized)):
             self.assertEqual(
-                downloader._download_and_save_thumbnail('https://example.com/big.jpg', self.app_module.ALBUM_ART_DIR, 'big1'),
+                downloader._download_and_save_thumbnail('https://i.ytimg.com/vi/abc/big.jpg', self.app_module.ALBUM_ART_DIR, 'big1'),
                 '',
             )
 
-        # Valid PNG re-encoded and saved
+        # Valid PNG from allowed host re-encoded and saved
         buf = io.BytesIO()
         Image.new('RGBA', (20, 20), color=(10, 200, 120, 255)).save(buf, format='PNG')
-        with patch.object(downloader.requests, 'get', return_value=FakeResp(buf.getvalue())):
-            saved_name = downloader._download_and_save_thumbnail('https://example.com/ok.png', self.app_module.ALBUM_ART_DIR, 'ok1')
+        with patch.object(downloader.requests, 'get', return_value=FakeResp(buf.getvalue())) as mock_get:
+            saved_name = downloader._download_and_save_thumbnail('https://i.ytimg.com/vi/abc/ok.png', self.app_module.ALBUM_ART_DIR, 'ok1')
         self.assertEqual(saved_name, 'ok1.png')
         self.assertTrue(os.path.exists(os.path.join(self.app_module.ALBUM_ART_DIR, saved_name)))
+        self.assertFalse(mock_get.call_args.kwargs.get('allow_redirects', True))
 
     def test_process_download_global_deduplication_reuses_existing_file(self):
         from services import downloader
@@ -605,6 +617,187 @@ class DownloadAndLibraryTests(PsrFmTestCase):
             downloader.download_worker(self.app_module.DATABASE_PATH, self.app_module.DOWNLOAD_DIR, self.app_module.ALBUM_ART_DIR, FakeSio())
 
         self.assertEqual(emitted[0][1]['error'], 'Video exceeds the 10 minute limit')
+
+    def test_youtube_channel_and_playlist_urls_rejected_and_active_job_limit(self):
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+        playlist_id = self._create_playlist()
+
+        for bad_url in (
+            'https://www.youtube.com/@somechannel',
+            'https://www.youtube.com/playlist?list=PL1234567890',
+            'https://music.youtube.com/browse/FEmusic_home',
+        ):
+            res = client.post(
+                '/api/download',
+                headers={'X-CSRF-Token': csrf},
+                json={'url': bad_url, 'playlist_ids': [playlist_id]},
+            )
+            self.assertEqual(res.status_code, 400, f'Expected 400 for {bad_url}')
+
+        # Active download jobs cap per user
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            conn.executemany(
+                "INSERT INTO download_jobs (user_id, url, playlist_ids, status) VALUES (?, ?, ?, ?)",
+                [
+                    (1, 'https://youtu.be/aaaaaaaaaaa', '[1]', 'queued'),
+                    (1, 'https://youtu.be/bbbbbbbbbbb', '[1]', 'processing'),
+                ],
+            )
+            conn.commit()
+        with patch.dict(os.environ, {'PSR_FM_MAX_ACTIVE_DOWNLOADS_PER_USER': '2'}):
+            blocked = client.post(
+                '/api/download',
+                headers={'X-CSRF-Token': csrf},
+                json={'url': 'https://youtu.be/ccccccccccc', 'playlist_ids': [playlist_id]},
+            )
+        self.assertEqual(blocked.status_code, 429)
+
+    def test_upload_quota_metadata_validation_and_symbol_title_fallback(self):
+        import wave
+
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+        playlist_id = self._create_playlist()
+
+        wav_buf = io.BytesIO()
+        with wave.open(wav_buf, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(8000)
+            wf.writeframes(b'\x00\x00' * 8000)
+        wav_bytes = wav_buf.getvalue()
+
+        # Oversized title rejected
+        long_res = client.post(
+            '/api/upload',
+            headers={'X-CSRF-Token': csrf},
+            data={
+                'file': (io.BytesIO(wav_bytes), 'track.wav'),
+                'title': 'X' * 201,
+                'playlist_ids': json.dumps([playlist_id]),
+            },
+            content_type='multipart/form-data',
+        )
+        self.assertEqual(long_res.status_code, 400)
+
+        # Symbol-only filename falls back to 'Untitled'
+        sym_res = client.post(
+            '/api/upload',
+            headers={'X-CSRF-Token': csrf},
+            data={
+                'file': (io.BytesIO(wav_bytes), '---.wav'),
+                'playlist_ids': json.dumps([playlist_id]),
+            },
+            content_type='multipart/form-data',
+        )
+        self.assertEqual(sym_res.status_code, 201)
+        self.assertEqual(sym_res.get_json()['title'], 'Untitled')
+
+        # Storage quota exceeded returns 413
+        with patch('routes.songs._user_storage_quota_bytes', return_value=10):
+            quota_res = client.post(
+                '/api/upload',
+                headers={'X-CSRF-Token': csrf},
+                data={
+                    'file': (io.BytesIO(wav_bytes), 'over.wav'),
+                    'playlist_ids': json.dumps([playlist_id]),
+                },
+                content_type='multipart/form-data',
+            )
+        self.assertEqual(quota_res.status_code, 413)
+
+    def test_worker_reuse_recovers_missing_file_and_scans_all_global_candidates(self):
+        from services import downloader
+
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+        u2_id = client.post('/api/users', headers={'X-CSRF-Token': csrf}, json={
+            'username': 'user2', 'password': 'password123'
+        }).get_json()['user_id']
+        u3_id = client.post('/api/users', headers={'X-CSRF-Token': csrf}, json={
+            'username': 'user3', 'password': 'password123'
+        }).get_json()['user_id']
+
+        pl1 = self._create_playlist(user_id=1, name='P1')
+        # First row (user 1) has missing file; second row (user 2) also missing; third row (user 3) has valid file + public lyrics
+        self._create_song(user_id=1, filename='missing1.mp3', source_id='scan1234567', create_file=False)
+        self._create_song(user_id=u2_id, filename='missing2.mp3', source_id='scan1234567', create_file=False)
+        self._create_song(
+            user_id=u3_id,
+            filename='valid3.mp3',
+            source_id='scan1234567',
+            lyrics='Public found lyrics',
+            lyrics_status='found',
+            create_file=True,
+        )
+
+        reused = downloader._reuse_existing_song_by_source_id(
+            self.app_module.DATABASE_PATH,
+            self.app_module.LIBRARY_DIR,
+            1,
+            'scan1234567',
+            'https://youtu.be/scan1234567',
+            [pl1],
+        )
+        self.assertTrue(reused)
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute('SELECT filename FROM songs WHERE user_id = 1 AND source_id = ?', ('scan1234567',)).fetchone()
+        self.assertEqual(row['filename'], 'valid3.mp3')
+
+    def test_songs_and_search_do_not_overfetch_lyrics_columns_and_backfill_spotify(self):
+        from scripts.backfill_song_sources import backfill_sources
+
+        client = self.app_module.app.test_client()
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        pl = self._create_playlist(user_id=1, name='Mix')
+        sid = self._create_song(
+            user_id=1,
+            title='Heavy Lyrics Song',
+            artist='Singer',
+            filename='heavy.mp3',
+            lyrics='A' * 5000,
+            synced_lyrics='[00:01.00] A',
+            lyrics_status='found',
+            source_url='https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT',
+            source_id='',
+        )
+        self._add_song_to_playlist(pl, sid)
+
+        for url in ('/api/songs', f'/api/songs?playlist_id={pl}', '/api/search?q=Heavy'):
+            items = client.get(url).get_json()
+            self.assertEqual(len(items), 1)
+            for forbidden in ('lyrics', 'synced_lyrics', 'word_synced_lyrics'):
+                self.assertNotIn(forbidden, items[0], f'{url} over-fetched {forbidden}')
+
+        # Backfill recognizes Spotify URL and skips IntegrityError duplicates
+        self._create_song(
+            user_id=1,
+            title='Duplicate Spotify',
+            artist='Singer',
+            filename='heavy2.mp3',
+            source_url='https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT',
+            source_id='',
+        )
+        updated, skipped, failed, scanned = backfill_sources(self.app_module.DATABASE_PATH, dry_run=False)
+        self.assertEqual(updated, 1)
+        self.assertEqual(skipped, 1)
+        self.assertEqual(failed, 0)
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            val = conn.execute('SELECT source_id FROM songs WHERE id = ?', (sid,)).fetchone()[0]
+        self.assertEqual(val, 'spotify:4cOdK2wGLETKBW3PvgPWqT')
 
 
 if __name__ == '__main__':

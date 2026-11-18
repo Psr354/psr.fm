@@ -6,6 +6,7 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
     const CLIENT_DEVICE_ID = state.deviceId;
     const showToast = (...args) => app.showToast(...args);
     const mediaUrlName = (...args) => app.mediaUrlName(...args);
+    const albumArtUrl = (...args) => app.albumArtUrl(...args);
     const formatTime = (...args) => app.formatTime(...args);
     const updatePlayPauseIcon = (...args) => app.updatePlayPauseIcon(...args);
     const updateSyncedLyrics = (...args) => app.updateSyncedLyrics(...args);
@@ -28,6 +29,7 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
     let serverSyncTimer = null;
     let remoteSyncTimeout = null;
     let syncPromptActive = false;
+    let activeLoadedMetadataHandler = null;
 
     function showSyncAutoplayPrompt(targetTime, isRemote = true) {
         if (syncPromptActive) return;
@@ -40,6 +42,8 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         );
 
         const unlockAudio = () => {
+            document.removeEventListener('click', unlockAudio);
+            document.removeEventListener('touchend', unlockAudio);
             syncPromptActive = false;
             if (!isRemote) {
                 state.isPrimarySyncLeader = true;
@@ -211,7 +215,7 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         if (el.playerTitle) el.playerTitle.innerText = saved.songMeta.title || '';
         if (el.playerArtist) el.playerArtist.innerText = saved.songMeta.artist || 'Unknown';
         if (el.playerArt) {
-            el.playerArt.src = '/static/album_art/' + mediaUrlName(saved.songMeta.album_art);
+            el.playerArt.src = albumArtUrl(saved.songMeta.album_art);
             el.playerArt.alt = (saved.songMeta.title || 'Track') + ' album artwork';
         }
         if (saved.duration && el.duration) {
@@ -252,8 +256,11 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             : '/api/library-songs/' + saved.songMeta.id + '/stream';
 
         const currentSrc = el.audio ? (el.audio.getAttribute('src') || el.audio.src || '') : '';
-        const targetFilename = mediaUrlName(saved.songMeta.filename || '');
-        const isDifferentSrc = !currentSrc || (targetFilename && !currentSrc.includes(encodeURI(targetFilename)));
+        let currentPath = currentSrc;
+        try {
+            if (currentSrc) currentPath = new URL(currentSrc, window.location.origin).pathname;
+        } catch (_) {}
+        const isDifferentSrc = !currentPath || currentPath !== audioSrc;
 
         const triggerPlayback = () => {
             if (shouldPlay) {
@@ -276,14 +283,20 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         };
 
         if (el.audio) {
+            if (activeLoadedMetadataHandler) {
+                el.audio.removeEventListener('loadedmetadata', activeLoadedMetadataHandler);
+                activeLoadedMetadataHandler = null;
+            }
             if (isDifferentSrc || !isSameSong) {
                 el.audio.src = audioSrc;
                 const onLoaded = () => {
+                    activeLoadedMetadataHandler = null;
                     state.isSyncSeeking = true;
                     try { el.audio.currentTime = targetTime; } catch (_) {}
                     updateSyncedLyrics(true);
                     triggerPlayback();
                 };
+                activeLoadedMetadataHandler = onLoaded;
                 el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
             } else {
                 const drift = Math.abs((el.audio.currentTime || 0) - targetTime);

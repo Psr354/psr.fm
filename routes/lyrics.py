@@ -114,6 +114,9 @@ def refresh_song_lyrics(song_id):
     })
 
 
+MAX_LYRICS_LENGTH = 65536
+
+
 @lyrics_bp.route('/api/songs/<int:song_id>/lyrics', methods=['PUT'])
 @login_required
 def save_song_lyrics(song_id):
@@ -125,8 +128,16 @@ def save_song_lyrics(song_id):
     data = get_json_object()
     if data is None:
         return jsonify({'error': 'JSON object required'}), 400
-    lyrics = str(data.get('lyrics') or '').strip()
-    synced_lyrics = str(data.get('synced_lyrics') or '').strip()
+    raw_lyrics = data.get('lyrics')
+    raw_synced = data.get('synced_lyrics')
+    if (raw_lyrics is not None and not isinstance(raw_lyrics, str)) or (
+        raw_synced is not None and not isinstance(raw_synced, str)
+    ):
+        return jsonify({'error': 'Lyrics fields must be strings'}), 400
+    lyrics = (raw_lyrics or '').strip()
+    synced_lyrics = (raw_synced or '').strip()
+    if len(lyrics) > MAX_LYRICS_LENGTH or len(synced_lyrics) > MAX_LYRICS_LENGTH:
+        return jsonify({'error': f'Lyrics exceed maximum length of {MAX_LYRICS_LENGTH} characters'}), 400
     status = 'manual' if lyrics or synced_lyrics else 'none'
 
     db.execute(

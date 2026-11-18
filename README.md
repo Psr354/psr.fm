@@ -81,7 +81,10 @@ Pertahankan key yang sama saat restart atau update. Jangan masukkan `.env` ke Gi
 
 ### 3. Build dan jalankan
 
+Siapkan direktori data dan log (opsional, juga otomatis ditangani oleh entrypoint container):
+
 ```bash
+mkdir -p data logs
 docker compose up -d --build
 ```
 

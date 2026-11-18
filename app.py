@@ -7,7 +7,7 @@ from flask_wtf.csrf import CSRFProtect, generate_csrf, validate_csrf
 from flask_compress import Compress
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from services.database import init_db
+from services.database import init_db, validate_user_session
 from services.downloader import download_queue, start_worker  # noqa: F401
 from services.lyrics import search_lyrics  # noqa: F401
 from services.common import (
@@ -81,7 +81,17 @@ login_manager.init_app(app)
 login_manager.login_view = 'auth.login_page'
 login_manager.login_message = None
 
-socketio_origins = os.environ.get('PSR_FM_SOCKETIO_ORIGINS', '').strip() or None
+def _parse_socketio_origins(raw_value):
+    cleaned = (raw_value or '').strip()
+    if not cleaned:
+        return None
+    if cleaned == '*':
+        return '*'
+    origins = [origin.strip() for origin in cleaned.split(',') if origin.strip()]
+    return origins or None
+
+
+socketio_origins = _parse_socketio_origins(os.environ.get('PSR_FM_SOCKETIO_ORIGINS', ''))
 socketio = SocketIO(app, cors_allowed_origins=socketio_origins, async_mode='threading')
 app.socketio = socketio
 
@@ -89,7 +99,7 @@ init_db(DATABASE_PATH)
 if os.environ.get('PSR_FM_DISABLE_WORKER') != '1':
     start_worker(DATABASE_PATH, DOWNLOAD_DIR, ALBUM_ART_DIR, socketio)
 
-MAINTENANCE_MODE = False
+MAINTENANCE_MODE = os.environ.get('PSR_FM_MAINTENANCE_MODE', '').strip().lower() in ('1', 'true', 'yes')
 
 
 @app.before_request
@@ -98,7 +108,7 @@ def maintenance_check():
         return render_template('maintenance.html'), 503
 
 
-CSP_REPORT_ONLY_POLICY = (
+CSP_POLICY = (
     "default-src 'self'; "
     "script-src 'self' https://cdnjs.cloudflare.com; "
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
@@ -120,7 +130,7 @@ def set_csrf_cookie(response):
 
     is_static_path = request.path.startswith('/static/')
     if not is_static_path:
-        response.headers.setdefault('Content-Security-Policy-Report-Only', CSP_REPORT_ONLY_POLICY)
+        response.headers.setdefault('Content-Security-Policy', CSP_POLICY)
         token = generate_csrf()
         response.set_cookie(
             'csrf_token',
@@ -155,24 +165,31 @@ def csrf_protect():
 @login_manager.user_loader
 def load_user(user_id):
     raw = str(user_id or '')
-    if ':' not in raw:
+    parts = raw.split(':')
+    if len(parts) not in (2, 3):
         return None
-    uid_part, token = raw.split(':', 1)
+    uid_part = parts[0]
+    token = parts[1]
+    device_token = parts[2] if len(parts) == 3 else ''
     if not uid_part.isdigit() or not token:
         return None
+    uid = int(uid_part)
     conn = get_db()
     row = conn.execute(
         'SELECT id, username, role, session_token FROM users WHERE id = ? AND session_token = ?',
-        (int(uid_part), token),
+        (uid, token),
     ).fetchone()
-    if row:
-        return User(
-            id=row['id'],
-            username=row['username'],
-            role=row['role'],
-            session_token=row['session_token'],
-        )
-    return None
+    if not row:
+        return None
+    if len(parts) == 3 and not validate_user_session(conn, uid, device_token):
+        return None
+    return User(
+        id=row['id'],
+        username=row['username'],
+        role=row['role'],
+        session_token=row['session_token'],
+        device_token=device_token,
+    )
 
 
 @login_manager.unauthorized_handler
@@ -184,8 +201,9 @@ def unauthorized():
 
 @socketio.on('connect')
 def on_socket_connect():
-    if current_user.is_authenticated:
-        join_room(f'user_{current_user.id}')
+    if not current_user.is_authenticated:
+        return False
+    join_room(f'user_{current_user.id}')
 
 
 @app.teardown_appcontext
@@ -263,6 +281,14 @@ def site_webmanifest():
 @login_required
 def serve_album_art(filename):
     """Serve runtime album and playlist artwork from ALBUM_ART_DIR."""
+    base_name = os.path.basename(filename)
+    if base_name.startswith('pl_cover_'):
+        owned = get_db().execute(
+            'SELECT 1 FROM playlists WHERE cover_art = ? AND user_id = ?',
+            (base_name, current_user.id),
+        ).fetchone()
+        if not owned:
+            return jsonify({'error': 'Not found'}), 404
     return send_from_directory(app.config.get('ALBUM_ART_DIR') or ALBUM_ART_DIR, filename)
 
 

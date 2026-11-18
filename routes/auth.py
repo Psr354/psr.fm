@@ -1,4 +1,3 @@
-import os
 from flask import Blueprint, jsonify, render_template, redirect, url_for, current_app
 from flask_login import login_user, login_required, logout_user, current_user
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -7,17 +6,27 @@ from services.database import (
     get_db_connection, get_user_by_id, get_user_by_username, create_user,
     create_initial_admin, has_any_user,
     get_all_users, get_user_files, delete_user_cascade, update_user_password,
-    update_user_role
+    update_user_role, create_user_session, revoke_user_session, revoke_all_user_sessions
 )
 from services.common import (
     User, get_json_object, get_database_path, is_admin,
     check_login_rate_limit, record_failed_login, clear_login_rate_limit,
     check_password_change_rate_limit, record_failed_password_change, clear_password_change_rate_limit,
-    MAX_PASSWORD_LENGTH
+    cleanup_unreferenced_media, MAX_PASSWORD_LENGTH
 )
 
 auth_bp = Blueprint('auth', __name__)
 _DUMMY_PASSWORD_HASH = generate_password_hash('psr-fm-dummy-timing-guard', method='pbkdf2:sha256', salt_length=16)
+
+
+def _close_user_socket_room(user_id):
+    sio = getattr(current_app, 'socketio', None)
+    if not sio:
+        return
+    try:
+        sio.close_room(f'user_{user_id}')
+    except Exception:
+        current_app.logger.warning('Failed to close Socket.IO room for user %s', user_id, exc_info=True)
 
 
 @auth_bp.route('/login')
@@ -66,11 +75,13 @@ def setup_account():
         return jsonify({'error': 'Username already taken'}), 400
 
     user_row = get_user_by_id(db_path, user_id)
+    device_token = create_user_session(db_path, user_id)
     user = User(
         id=user_id,
         username=username,
         role='admin',
         session_token=user_row['session_token'] if user_row else '',
+        device_token=device_token,
     )
     login_user(user, remember=True)
     return jsonify({'status': 'success', 'message': 'Account created successfully'})
@@ -108,11 +119,13 @@ def login():
         return jsonify({'error': 'Invalid username or password'}), 401
 
     clear_login_rate_limit(username)
+    device_token = create_user_session(db_path, user_row['id'])
     user = User(
         id=user_row['id'],
         username=user_row['username'],
         role=user_row['role'],
         session_token=user_row['session_token'],
+        device_token=device_token,
     )
     login_user(user, remember=True)
     return jsonify({'status': 'success', 'username': user.username})
@@ -121,8 +134,22 @@ def login():
 @auth_bp.route('/api/logout', methods=['POST'])
 @login_required
 def logout():
+    device_token = getattr(current_user, 'device_token', '')
+    if device_token:
+        revoke_user_session(get_database_path(), current_user.id, device_token)
     logout_user()
     return jsonify({'status': 'success'})
+
+
+@auth_bp.route('/api/logout-all', methods=['POST'])
+@login_required
+def logout_all_devices():
+    """Revoke all active sessions for the current user across all devices."""
+    user_id = current_user.id
+    revoke_all_user_sessions(get_database_path(), user_id)
+    _close_user_socket_room(user_id)
+    logout_user()
+    return jsonify({'status': 'success', 'message': 'Signed out from all devices'})
 
 
 @auth_bp.route('/api/me')
@@ -202,52 +229,27 @@ def delete_user(user_id):
     if delete_status != 'deleted':
         return jsonify({'error': 'Failed to delete user'}), 500
 
+    _close_user_socket_room(user_id)
+
     library_dir = current_app.config.get('LIBRARY_DIR', '')
     album_art_dir = current_app.config.get('ALBUM_ART_DIR', '')
     conn = get_db_connection(db_path)
     try:
-        for file_info in user_files:
-            try:
-                if file_info.get('filename') and library_dir:
-                    filename_count = conn.execute(
-                        'SELECT COUNT(*) AS count FROM songs WHERE filename = ?',
-                        (file_info['filename'],)
-                    ).fetchone()['count']
-                    if filename_count == 0:
-                        mp3_path = os.path.join(library_dir, file_info['filename'])
-                        if os.path.exists(mp3_path):
-                            os.remove(mp3_path)
-
-                if file_info.get('album_art') and album_art_dir:
-                    album_art_count = conn.execute(
-                        'SELECT COUNT(*) AS count FROM songs WHERE album_art = ?',
-                        (file_info['album_art'],)
-                    ).fetchone()['count']
-                    playlist_art_count = conn.execute(
-                        'SELECT COUNT(*) AS count FROM playlists WHERE cover_art = ?',
-                        (file_info['album_art'],)
-                    ).fetchone()['count']
-                    if album_art_count == 0 and playlist_art_count == 0:
-                        art_path = os.path.join(album_art_dir, file_info['album_art'])
-                        if os.path.exists(art_path):
-                            os.remove(art_path)
-
-                if file_info.get('cover_art') and album_art_dir:
-                    cover_art_count = conn.execute(
-                        'SELECT COUNT(*) AS count FROM playlists WHERE cover_art = ?',
-                        (file_info['cover_art'],)
-                    ).fetchone()['count']
-                    song_art_count = conn.execute(
-                        'SELECT COUNT(*) AS count FROM songs WHERE album_art = ?',
-                        (file_info['cover_art'],)
-                    ).fetchone()['count']
-                    if cover_art_count == 0 and song_art_count == 0:
-                        cover_path = os.path.join(album_art_dir, file_info['cover_art'])
-                        if os.path.exists(cover_path):
-                            os.remove(cover_path)
-            except Exception as e:
-                target = file_info.get('filename') or file_info.get('album_art') or file_info.get('cover_art') or 'unknown file'
-                print(f"[WARN] Failed to delete {target}: {e}")
+        filenames = [info.get('filename') for info in user_files if info.get('filename')]
+        art_files = [
+            art
+            for info in user_files
+            for art in (info.get('album_art'), info.get('cover_art'))
+            if art
+        ]
+        cleanup_unreferenced_media(
+            conn,
+            filenames=filenames,
+            art_files=art_files,
+            library_dir=library_dir,
+            album_art_dir=album_art_dir,
+            async_delete=False,
+        )
     finally:
         conn.close()
 
@@ -295,14 +297,17 @@ def change_password():
     if not success:
         return jsonify({'error': 'Failed to update password'}), 500
 
+    _close_user_socket_room(current_user.id)
     updated_row = get_user_by_id(db_path, current_user.id)
     if updated_row:
+        device_token = create_user_session(db_path, current_user.id)
         login_user(
             User(
                 id=updated_row['id'],
                 username=updated_row['username'],
                 role=updated_row['role'],
                 session_token=updated_row['session_token'],
+                device_token=device_token,
             ),
             remember=True,
         )
@@ -335,6 +340,7 @@ def reset_user_password(user_id):
     if not success:
         return jsonify({'error': 'User not found'}), 404
 
+    _close_user_socket_room(user_id)
     return jsonify({'status': 'success', 'message': 'Password reset successfully'})
 
 

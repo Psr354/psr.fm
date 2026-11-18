@@ -1,5 +1,6 @@
 import argparse
 import os
+import sqlite3
 import sys
 
 import yt_dlp
@@ -7,7 +8,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from services.database import extract_youtube_video_id, get_db_connection
+from services.database import extract_song_source_id, get_db_connection
 
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -73,7 +74,7 @@ def backfill_sources(database_path, dry_run=False, limit=None):
         failed = 0
 
         for song in songs:
-            existing_source_id = extract_youtube_video_id(song['source_url'])
+            existing_source_id = extract_song_source_id(song['source_url'])
             source = None
             if existing_source_id:
                 source = {
@@ -95,11 +96,17 @@ def backfill_sources(database_path, dry_run=False, limit=None):
 
             print(f"[OK] song {song['id']}: {song['title']} -> {source['source_id']}")
             if not dry_run:
-                cursor.execute(
-                    'UPDATE songs SET source_url = ?, source_id = ? WHERE id = ?',
-                    (source['source_url'], source['source_id'], song['id']),
-                )
-                conn.commit()
+                try:
+                    cursor.execute(
+                        'UPDATE songs SET source_url = ?, source_id = ? WHERE id = ?',
+                        (source['source_url'], source['source_id'], song['id']),
+                    )
+                    conn.commit()
+                except sqlite3.IntegrityError:
+                    conn.rollback()
+                    skipped += 1
+                    print(f"[SKIP] song {song['id']}: duplicate source_id {source['source_id']} for user")
+                    continue
             updated += 1
 
         return updated, skipped, failed, len(songs)

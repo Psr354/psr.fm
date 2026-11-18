@@ -5,6 +5,7 @@ window.createPlaylistViewModule = function createPlaylistViewModule(app) {
     const { state, el } = app;
     const escapeHtml = (...args) => app.escapeHtml(...args);
     const mediaUrlName = (...args) => app.mediaUrlName(...args);
+    const albumArtUrl = (...args) => app.albumArtUrl(...args);
     const formatTime = (...args) => app.formatTime(...args);
     const formatBytes = (...args) => app.formatBytes(...args);
     const debounce = (...args) => app.debounce(...args);
@@ -100,7 +101,7 @@ window.createPlaylistViewModule = function createPlaylistViewModule(app) {
             div.className = 'song-item library-song-item';
             div.setAttribute('data-id', String(song.id));
             div.innerHTML = `
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/img/icon-192.png';">
+                <img src="${albumArtUrl(song.album_art)}" class="song-art" alt="" loading="lazy" data-fallback="icon">
                 <div class="song-info">
                     <div class="song-title">${escapeHtml(song.title)}</div>
                     <div class="song-artist">${escapeHtml(song.artist || 'Unknown')}</div>
@@ -454,7 +455,7 @@ window.createPlaylistViewModule = function createPlaylistViewModule(app) {
 
             div.innerHTML = `
                 ${canReorder ? '<button class="drag-handle" type="button" aria-label="Reorder song" title="Drag to reorder"><i class="fas fa-grip-lines"></i></button>' : ''}
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/img/icon-192.png';">
+                <img src="${albumArtUrl(song.album_art)}" class="song-art" alt="" loading="lazy" data-fallback="icon">
                 <div class="eq-container"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>
                 <div class="song-info"><div class="song-title">${escapeHtml(song.title)}</div><div class="song-artist">${escapeHtml(song.artist || 'Unknown')}</div></div>
                 <div class="song-duration">${formatTime(song.duration_seconds)}</div>
@@ -568,7 +569,7 @@ window.createPlaylistViewModule = function createPlaylistViewModule(app) {
             }
 
             div.innerHTML = `
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/img/icon-192.png';">
+                <img src="${albumArtUrl(song.album_art)}" class="song-art" alt="" loading="lazy" data-fallback="icon">
                 <div class="eq-container"><div class="eq-bar"></div><div class="eq-bar"></div><div class="eq-bar"></div></div>
                 <div class="song-info">
                     <div class="song-title">${escapeHtml(song.title)}</div>

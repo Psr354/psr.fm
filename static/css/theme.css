@@ -1,0 +1,513 @@
+/* ==========================================
+   THEME CUSTOMIZATION & DYNAMIC STYLES
+   ========================================== */
+
+/* -- Quick Theme Button inside .user-info -- */
+.theme-quick-btn {
+    margin-left: auto;
+    width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+    border-radius: 8px;
+    border: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    transition: all 0.2s cubic-bezier(.2, .8, .2, 1);
+}
+.theme-quick-btn:hover {
+    color: var(--accent-color);
+    background: rgba(var(--accent-rgb), 0.14);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    transform: scale(1.08) rotate(12deg);
+}
+
+/* -- Dynamic Sidebar / Navbar Appearance -- */
+.sidebar {
+    background-color: var(--bg-sidebar, var(--bg-elevated)) !important;
+    background:
+        radial-gradient(circle at 10% 8%, rgba(var(--accent-rgb), 0.06), transparent 28%),
+        var(--bg-sidebar, var(--bg-elevated)) !important;
+    border-right: 1px solid var(--border-subtle) !important;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+/* -- Active Nav item with contrast-aware text -- */
+.nav-item.active {
+    color: var(--accent-contrast, #061109) !important;
+    background: var(--accent-color) !important;
+    box-shadow: 0 8px 22px rgba(var(--accent-rgb), 0.2);
+    font-weight: 700;
+}
+.nav-item.active i {
+    color: var(--accent-contrast, #061109) !important;
+}
+
+/* -- Player Bar dynamic background -- */
+.player-bar {
+    background: var(--bg-elevated) !important;
+    background-color: var(--bg-elevated) !important;
+    border-top: 1px solid var(--border-subtle) !important;
+    transition: background 0.2s ease;
+}
+
+/* -- Theme Settings Button in Sidebar Footer -- */
+.theme-settings-btn {
+    color: var(--accent-color);
+    border-color: rgba(var(--accent-rgb), 0.2);
+    background: rgba(var(--accent-rgb), 0.06);
+    gap: 10px;
+    font-weight: 600;
+}
+.theme-settings-btn:hover {
+    background: rgba(var(--accent-rgb), 0.14);
+    color: var(--accent-hover);
+    border-color: rgba(var(--accent-rgb), 0.35);
+}
+
+/* -- Modal Shell -- */
+.theme-modal-content {
+    max-width: 520px;
+    width: 95vw;
+    padding: 0;
+    overflow: hidden;
+    border-radius: 20px;
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-elevated);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    max-height: 90vh;
+    animation: themeModalEnter 0.2s cubic-bezier(.2, .8, .2, 1);
+}
+@keyframes themeModalEnter {
+    from { opacity: 0; transform: scale(0.96) translateY(8px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* -- Modal Header -- */
+.theme-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
+    flex-shrink: 0;
+}
+.theme-modal-title-wrap h3 {
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin: 0;
+}
+.theme-modal-title-wrap h3 i {
+    color: var(--accent-color);
+}
+.theme-modal-subtitle {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.theme-modal-close {
+    width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+    border-radius: 50%;
+    color: var(--text-muted);
+}
+.theme-modal-close:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.08);
+}
+
+/* -- Modal Body -- */
+.theme-modal-body {
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* -- Section Headers -- */
+.theme-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.theme-section-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+.theme-section-label {
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.9px;
+    color: var(--text-secondary);
+}
+.theme-section-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+/* -- Preset Swatches -- */
+.theme-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 9px;
+}
+.theme-swatch {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 3px solid transparent;
+    cursor: pointer;
+    transition: transform 0.16s, box-shadow 0.16s, border-color 0.16s;
+    outline: none;
+    flex-shrink: 0;
+}
+.theme-swatch:hover {
+    transform: scale(1.15);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.2);
+}
+.theme-swatch.active {
+    border-color: #ffffff;
+    box-shadow: 0 0 0 2px var(--bg-elevated), 0 0 0 4px var(--accent-color);
+    transform: scale(1.08);
+}
+
+/* -- Color Pickers Row -- */
+.theme-color-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.theme-color-picker-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--bg-highlight);
+    padding: 4px 10px 4px 4px;
+    border-radius: 10px;
+    border: 1px solid var(--border-subtle);
+    transition: border-color 0.2s;
+}
+.theme-color-picker-wrap:hover {
+    border-color: var(--accent-color);
+}
+.theme-color-input {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    padding: 0;
+}
+.theme-color-hex {
+    font-size: 12px;
+    font-weight: 700;
+    font-family: 'Space Mono', monospace;
+    color: var(--text-primary);
+    cursor: pointer;
+    letter-spacing: 0.05em;
+    user-select: all;
+}
+.theme-color-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.theme-custom-row {
+    padding: 10px 12px;
+    background: var(--bg-soft);
+    border-radius: 10px;
+    border: 1px solid var(--border-subtle);
+    animation: fadeIn 0.16s ease;
+}
+
+/* -- Navbar / Sidebar Pill Options -- */
+.theme-navbar-options {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.theme-pill-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 20px;
+    border: 1.5px solid var(--border-subtle);
+    background: var(--bg-highlight);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.16s ease;
+}
+.theme-pill-btn i {
+    font-size: 11px;
+}
+.theme-pill-btn:hover {
+    border-color: rgba(var(--accent-rgb), 0.5);
+    color: var(--text-primary);
+}
+.theme-pill-btn.active {
+    border-color: var(--accent-color);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: var(--accent-color);
+    font-weight: 700;
+}
+
+/* -- Background Presets -- */
+.theme-bg-presets {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.theme-bg-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 13px;
+    border-radius: 10px;
+    border: 1.5px solid var(--border-subtle);
+    background: var(--bg-highlight);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.16s ease;
+}
+.theme-bg-btn:hover {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: var(--text-primary);
+}
+.theme-bg-btn.active {
+    border-color: var(--accent-color);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: var(--accent-color);
+    font-weight: 700;
+}
+.theme-bg-preview {
+    width: 15px;
+    height: 15px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    display: inline-block;
+    flex-shrink: 0;
+}
+.theme-bg-preview-custom {
+    border: 1.5px dashed rgba(255, 255, 255, 0.4);
+}
+
+/* -- Mini Interactive Preview Card -- */
+.theme-preview-card {
+    display: flex;
+    height: 110px;
+    border-radius: 12px;
+    border: 1px solid var(--border-subtle);
+    overflow: hidden;
+    background: var(--bg-main);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.05);
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+.theme-preview-sidebar {
+    width: 110px;
+    background: var(--bg-sidebar, var(--bg-elevated));
+    border-right: 1px solid var(--border-subtle);
+    padding: 10px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    transition: background-color 0.2s ease;
+}
+.theme-preview-logo {
+    font-size: 11px;
+    font-weight: 800;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+    padding-left: 4px;
+}
+.theme-preview-nav-item {
+    font-size: 10px;
+    padding: 4px 6px;
+    border-radius: 5px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 600;
+}
+.theme-preview-nav-item.active {
+    background: var(--accent-color);
+    color: var(--accent-contrast, #061109);
+    font-weight: 700;
+}
+.theme-preview-nav-item.active i {
+    color: var(--accent-contrast, #061109);
+}
+.theme-preview-content {
+    flex: 1;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    background: var(--bg-main);
+    transition: background-color 0.2s ease;
+}
+.theme-preview-heading {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+.theme-preview-chips {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.theme-preview-btn-play {
+    font-size: 10px;
+    font-weight: 700;
+    background: var(--accent-color);
+    color: var(--accent-contrast, #061109);
+    padding: 3px 10px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.theme-preview-now-playing {
+    font-size: 10px;
+    color: var(--accent-color);
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.theme-preview-pulse-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent-color);
+    animation: pulse 1.4s infinite;
+}
+.theme-preview-card-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: var(--surface-1);
+    border: 1px solid var(--border-subtle);
+    padding: 4px 6px;
+    border-radius: 6px;
+}
+.theme-preview-card-art {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    background: var(--accent-color);
+    opacity: 0.85;
+}
+.theme-preview-song-title {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.1;
+}
+.theme-preview-song-sub {
+    font-size: 8px;
+    color: var(--text-muted);
+}
+
+/* -- Interface Scale Buttons -- */
+.theme-scale-row {
+    display: flex;
+    gap: 8px;
+}
+.theme-scale-btn {
+    flex: 1;
+    height: 36px;
+    border-radius: 9px;
+    border: 1.5px solid var(--border-subtle);
+    background: var(--bg-highlight);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.16s ease;
+}
+.theme-scale-btn:hover {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    color: var(--text-primary);
+}
+.theme-scale-btn.active {
+    border-color: var(--accent-color);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: var(--accent-color);
+}
+
+/* -- Footer Actions -- */
+.theme-modal-actions {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg-elevated);
+    flex-shrink: 0;
+}
+.theme-actions-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.theme-modal-actions .btn-secondary {
+    padding: 10px 16px;
+    font-size: 13px;
+    border-radius: 10px;
+}
+.theme-modal-actions .btn-primary {
+    padding: 10px 20px;
+    font-size: 13px;
+    border-radius: 10px;
+}
+
+
+
+.theme-preview-lyric {
+    margin-top: 10px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.theme-preview-lyric i {
+    opacity: 0.5;
+    font-size: 10px;
+}
+.theme-preview-lyric .preview-lyric-spoken {
+    color: var(--lyric-spoken, var(--accent-hover));
+}
+.theme-preview-lyric .preview-lyric-active {
+    color: #ffffff;
+    text-shadow: 0 0 8px rgba(var(--lyric-rgb, var(--accent-rgb)), 0.65);
+}
+

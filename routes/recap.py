@@ -5,14 +5,17 @@ import shutil
 import time
 import uuid
 from datetime import datetime, timezone, timedelta
+from threading import Lock
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
+from werkzeug.utils import secure_filename
 
 from services.common import (
     get_db, get_owned_song, get_json_object, playback_timestamp, valid_playback_id, is_admin
 )
 
 recap_bp = Blueprint('recap', __name__)
+MAX_SESSION_LISTEN_SECONDS = 7200
 
 
 @recap_bp.route('/api/listen', methods=['POST'])
@@ -67,12 +70,17 @@ def log_listen():
         UPDATE playback_sessions
         SET seconds_listened = seconds_listened + ?
         WHERE id = ? AND song_id = ? AND user_id = ?
+          AND seconds_listened + ? <= ?
           AND seconds_listened + ? <=
               CASE WHEN ? THEN COALESCE(duration_seconds, 0) + 10
                    ELSE ((julianday('now') - julianday(started_at)) * 86400) + 10
               END
         ''',
-        (seconds, session_id, song_id, current_user.id, seconds, offline_reconciliation),
+        (
+            seconds, session_id, song_id, current_user.id,
+            seconds, MAX_SESSION_LISTEN_SECONDS,
+            seconds, offline_reconciliation,
+        ),
     )
     if accepted.rowcount != 1:
         db.rollback()
@@ -152,7 +160,18 @@ def _get_storage_used(download_dir, album_art_dir, ttl_seconds=30):
     return total_size
 
 
-def _get_user_storage_used(db, user_id, library_dir, album_art_dir):
+_user_storage_cache = {}
+_user_storage_cache_lock = Lock()
+
+
+def _get_user_storage_used(db, user_id, library_dir, album_art_dir, ttl_seconds=30):
+    now = time.time()
+    cache_key = (user_id, library_dir, album_art_dir)
+    with _user_storage_cache_lock:
+        cached = _user_storage_cache.get(cache_key)
+        if cached and (now - cached['timestamp']) < ttl_seconds:
+            return cached['size']
+
     total_size = 0
     if library_dir and os.path.exists(library_dir):
         song_files = {
@@ -163,7 +182,10 @@ def _get_user_storage_used(db, user_id, library_dir, album_art_dir):
             ).fetchall()
         }
         for fname in song_files:
-            fpath = os.path.join(library_dir, fname)
+            safe_name = secure_filename(fname)
+            if not safe_name:
+                continue
+            fpath = os.path.join(library_dir, safe_name)
             if os.path.isfile(fpath):
                 total_size += os.path.getsize(fpath)
 
@@ -183,10 +205,15 @@ def _get_user_storage_used(db, user_id, library_dir, album_art_dir):
             ).fetchall()
         )
         for fname in art_files:
-            fpath = os.path.join(album_art_dir, fname)
+            safe_name = secure_filename(fname)
+            if not safe_name:
+                continue
+            fpath = os.path.join(album_art_dir, safe_name)
             if os.path.isfile(fpath):
                 total_size += os.path.getsize(fpath)
 
+    with _user_storage_cache_lock:
+        _user_storage_cache[cache_key] = {'timestamp': now, 'size': total_size}
     return total_size
 
 

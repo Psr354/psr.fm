@@ -1,13 +1,12 @@
-import io
 import os
 import uuid
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
-from PIL import Image
 
 from services.common import (
-    get_db, get_owned_playlist, get_json_object, queue_file_deletion
+    get_db, get_owned_playlist, get_json_object, queue_file_deletion,
+    save_validated_image, collect_unreferenced_media_paths, DEFAULT_MAX_IMAGE_BYTES
 )
 
 playlists_bp = Blueprint('playlists', __name__)
@@ -76,43 +75,47 @@ def upload_cover(playlist_id):
         return jsonify({'error': 'No file selected'}), 400
 
     album_art_dir = current_app.config.get('ALBUM_ART_DIR', '')
+    file_bytes = file.read(DEFAULT_MAX_IMAGE_BYTES + 1)
+    if len(file_bytes) > DEFAULT_MAX_IMAGE_BYTES:
+        return jsonify({'error': 'Cover image is too large. Maximum size is 5MB'}), 400
 
+    prefix = f"pl_cover_{playlist_id}_{uuid.uuid4().hex[:8]}"
     try:
-        max_cover_size = 5 * 1024 * 1024
-        file_bytes = file.read(max_cover_size + 1)
-        if len(file_bytes) > max_cover_size:
-            return jsonify({'error': 'Cover image is too large. Maximum size is 5MB'}), 400
-        file.seek(0)
-        img = Image.open(io.BytesIO(file_bytes))
-        img.verify()
-        img = Image.open(io.BytesIO(file_bytes))
-        allowed_formats = ['JPEG', 'PNG', 'WEBP']
-        if img.format not in allowed_formats:
-            return jsonify({'error': f'Invalid image format: {img.format}'}), 400
-        width, height = img.size
-        if width * height > 25_000_000 or width > 8000 or height > 8000:
-            return jsonify({'error': 'Cover image dimensions are too large'}), 400
-        ext_map = {'JPEG': '.jpg', 'PNG': '.png', 'WEBP': '.webp'}
-        ext = ext_map[img.format]
+        filename, save_path = save_validated_image(file_bytes, album_art_dir, prefix)
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
     except Exception:
         return jsonify({'error': 'Invalid or corrupted image file'}), 400
 
-    filename = f"pl_cover_{playlist_id}_{uuid.uuid4().hex[:8]}{ext}"
-    save_path = os.path.join(album_art_dir, filename)
-    cursor = db.cursor()
-    cursor.execute('SELECT cover_art FROM playlists WHERE id = ? AND user_id = ?', (playlist_id, current_user.id))
-    old = cursor.fetchone()
-    if old and old['cover_art'] and album_art_dir:
-        old_path = os.path.join(album_art_dir, old['cover_art'])
-        if os.path.exists(old_path):
-            os.remove(old_path)
+    old = db.execute(
+        'SELECT cover_art FROM playlists WHERE id = ? AND user_id = ?',
+        (playlist_id, current_user.id),
+    ).fetchone()
+    old_cover = old['cover_art'] if old else ''
 
-    save_format = img.format
-    if save_format == 'JPEG' and img.mode in ('RGBA', 'P'):
-        img = img.convert('RGB')
-    img.save(save_path, format=save_format)
-    db.execute('UPDATE playlists SET cover_art = ? WHERE id = ? AND user_id = ?', (filename, playlist_id, current_user.id))
-    db.commit()
+    old_paths_to_delete = []
+    try:
+        db.execute(
+            'UPDATE playlists SET cover_art = ? WHERE id = ? AND user_id = ?',
+            (filename, playlist_id, current_user.id),
+        )
+        if old_cover and old_cover != filename and album_art_dir:
+            old_paths_to_delete = collect_unreferenced_media_paths(
+                db,
+                art_files=[old_cover],
+                album_art_dir=album_art_dir,
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        if save_path and os.path.exists(save_path):
+            os.remove(save_path)
+        current_app.logger.exception('Failed to update playlist cover')
+        return jsonify({'error': 'Failed to save playlist cover'}), 500
+
+    for old_path in old_paths_to_delete:
+        queue_file_deletion(old_path)
+
     return jsonify({'status': 'success', 'cover_art': filename})
 
 
@@ -161,37 +164,13 @@ def delete_playlist(playlist_id):
         library_dir = current_app.config.get('LIBRARY_DIR', '')
         album_art_dir = current_app.config.get('ALBUM_ART_DIR', '')
 
-        for song in orphaned_songs:
-            filename_in_use = db.execute(
-                'SELECT 1 FROM songs WHERE filename = ? LIMIT 1',
-                (song['filename'],)
-            ).fetchone()
-            if not filename_in_use and library_dir:
-                files_to_delete.append(os.path.join(library_dir, song['filename']))
-
-            if song['album_art'] and album_art_dir:
-                album_art_in_use = db.execute(
-                    'SELECT 1 FROM songs WHERE album_art = ? LIMIT 1',
-                    (song['album_art'],)
-                ).fetchone()
-                cover_ref_in_use = db.execute(
-                    'SELECT 1 FROM playlists WHERE cover_art = ? LIMIT 1',
-                    (song['album_art'],)
-                ).fetchone()
-                if not album_art_in_use and not cover_ref_in_use:
-                    files_to_delete.append(os.path.join(album_art_dir, song['album_art']))
-
-        if cover_art and album_art_dir:
-            cover_art_in_use = db.execute(
-                'SELECT 1 FROM playlists WHERE cover_art = ? LIMIT 1',
-                (cover_art,)
-            ).fetchone()
-            song_art_in_use = db.execute(
-                'SELECT 1 FROM songs WHERE album_art = ? LIMIT 1',
-                (cover_art,)
-            ).fetchone()
-            if not cover_art_in_use and not song_art_in_use:
-                files_to_delete.append(os.path.join(album_art_dir, cover_art))
+        files_to_delete = collect_unreferenced_media_paths(
+            db,
+            filenames=[song['filename'] for song in orphaned_songs],
+            art_files=[song['album_art'] for song in orphaned_songs if song['album_art']] + ([cover_art] if cover_art else []),
+            library_dir=library_dir,
+            album_art_dir=album_art_dir,
+        )
 
         db.commit()
     except Exception:

@@ -366,5 +366,48 @@ class PlaylistTests(PsrFmTestCase):
             role_row = conn.execute('SELECT role FROM users WHERE id = ?', (user2_id,)).fetchone()
         self.assertEqual(role_row[0], 'admin')
 
+    def test_upload_cover_preserves_old_cover_on_db_commit_failure(self):
+        from PIL import Image
+
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+
+        os.makedirs(self.app_module.ALBUM_ART_DIR, exist_ok=True)
+        old_cover = 'pl_cover_1_old.png'
+        old_path = os.path.join(self.app_module.ALBUM_ART_DIR, old_cover)
+        with open(old_path, 'wb') as f:
+            f.write(b'old-cover-bytes')
+        pl_id = self._create_playlist(user_id=1, name='Cover Safe', cover_art=old_cover)
+
+        buf = io.BytesIO()
+        Image.new('RGB', (16, 16), color='blue').save(buf, format='PNG')
+        buf.seek(0)
+
+        real_get_db = self.app_module.get_db
+
+        class FailingCommitDb:
+            def __init__(self, inner):
+                self._inner = inner
+            def execute(self, *args, **kwargs):
+                return self._inner.execute(*args, **kwargs)
+            def commit(self):
+                raise sqlite3.OperationalError('disk full')
+            def rollback(self):
+                return self._inner.rollback()
+
+        with patch('routes.playlists.get_db', side_effect=lambda: FailingCommitDb(real_get_db())):
+            res = client.post(
+                f'/api/playlists/{pl_id}/cover',
+                headers={'X-CSRF-Token': csrf},
+                data={'cover': (buf, 'new.png')},
+                content_type='multipart/form-data',
+            )
+        self.assertEqual(res.status_code, 500)
+        self.assertTrue(os.path.exists(old_path), 'Old cover must remain intact when DB commit fails')
+
+
 if __name__ == '__main__':
     unittest.main()

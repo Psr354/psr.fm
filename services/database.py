@@ -58,14 +58,7 @@ def get_db_connection(db_path):
     return conn
 
 
-def init_db(db_path):
-    """Initialize database with all required tables and migrations"""
-    conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-
-    # ==========================================
-    # USERS TABLE (with role support)
-    # ==========================================
+def _init_users_and_sessions_tables(cursor):
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,29 +70,37 @@ def init_db(db_path):
         )
     ''')
 
-    # Migration: add role column to existing users table
     cursor.execute("PRAGMA table_info(users)")
     user_cols = [col[1] for col in cursor.fetchall()]
     if 'role' not in user_cols:
         cursor.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
-        # Set first user as admin (backward compatibility)
         cursor.execute("UPDATE users SET role = 'admin' WHERE id = 1")
 
     if 'session_token' not in user_cols:
         cursor.execute("ALTER TABLE users ADD COLUMN session_token TEXT DEFAULT ''")
 
-    missing_tokens = cursor.execute(
-        "SELECT id FROM users WHERE session_token IS NULL OR session_token = ''"
-    ).fetchall()
-    for row in missing_tokens:
+    cursor.execute("SELECT id FROM users WHERE session_token IS NULL OR session_token = ''")
+    for row in cursor.fetchall():
         cursor.execute(
             'UPDATE users SET session_token = ? WHERE id = ?',
             (secrets.token_hex(16), row['id'])
         )
 
-    # ==========================================
-    # PLAYLISTS TABLE
-    # ==========================================
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            token TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id
+        ON user_sessions (user_id)
+    ''')
+
+
+def _init_playlists_and_songs_tables(cursor):
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS playlists (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -107,24 +108,19 @@ def init_db(db_path):
             folder_name TEXT NOT NULL,
             cover_art TEXT DEFAULT '',
             user_id INTEGER NOT NULL DEFAULT 1,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )
     ''')
 
-    # Migration: add cover_art column
     cursor.execute("PRAGMA table_info(playlists)")
     playlist_cols = [col[1] for col in cursor.fetchall()]
     if 'cover_art' not in playlist_cols:
         cursor.execute("ALTER TABLE playlists ADD COLUMN cover_art TEXT DEFAULT ''")
-
-    # Migration: add user_id column
     if 'user_id' not in playlist_cols:
         cursor.execute("ALTER TABLE playlists ADD COLUMN user_id INTEGER DEFAULT 1")
         cursor.execute("UPDATE playlists SET user_id = 1 WHERE user_id IS NULL")
 
-    # ==========================================
-    # SONGS TABLE
-    # ==========================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS songs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -142,35 +138,30 @@ def init_db(db_path):
             lyrics_status TEXT DEFAULT 'none',
             lyrics_updated_at TIMESTAMP,
             user_id INTEGER NOT NULL DEFAULT 1,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )
     ''')
 
-    # Migration: handle legacy playlist_id column (old schema)
     cursor.execute("PRAGMA table_info(songs)")
     song_cols = [col[1] for col in cursor.fetchall()]
-    
+
     if 'playlist_id' in song_cols:
-        # Create playlist_songs junction table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS playlist_songs (
-                playlist_id INTEGER, 
-                song_id INTEGER, 
+                playlist_id INTEGER,
+                song_id INTEGER,
                 added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 position INTEGER DEFAULT 0,
-            PRIMARY KEY (playlist_id, song_id),
-            FOREIGN KEY (playlist_id) REFERENCES playlists (id) ON DELETE CASCADE,
-            FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE CASCADE
+                PRIMARY KEY (playlist_id, song_id),
+                FOREIGN KEY (playlist_id) REFERENCES playlists (id) ON DELETE CASCADE,
+                FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE CASCADE
             )
         ''')
-        
-        # Migrate data from old schema
         cursor.execute('''
-            INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id, position) 
+            INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id, position)
             SELECT playlist_id, id, id FROM songs WHERE playlist_id IS NOT NULL
         ''')
-        
-        # Recreate songs table without playlist_id
         cursor.execute('''
             CREATE TABLE songs_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -187,21 +178,19 @@ def init_db(db_path):
                 lyrics_status TEXT DEFAULT 'none',
                 lyrics_updated_at TIMESTAMP,
                 user_id INTEGER NOT NULL DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
             )
         ''')
-        
         cursor.execute('''
-            INSERT INTO songs_new 
+            INSERT INTO songs_new
             SELECT id, title, artist, filename, album_art, duration_seconds,
                    NULL, NULL, COALESCE(play_count, 0), NULL, NULL, 'none', NULL, 1, created_at
             FROM songs
         ''')
-        
         cursor.execute('DROP TABLE songs')
         cursor.execute('ALTER TABLE songs_new RENAME TO songs')
     else:
-        # Add missing columns to existing songs table
         if 'play_count' not in song_cols:
             cursor.execute("ALTER TABLE songs ADD COLUMN play_count INTEGER DEFAULT 0")
         if 'lyrics' not in song_cols:
@@ -210,16 +199,14 @@ def init_db(db_path):
             cursor.execute("ALTER TABLE songs ADD COLUMN synced_lyrics TEXT")
         if 'lyrics_status' not in song_cols:
             cursor.execute("ALTER TABLE songs ADD COLUMN lyrics_status TEXT DEFAULT 'none'")
-            cursor.execute(
-                '''
+            cursor.execute('''
                 UPDATE songs
                 SET lyrics_status = CASE
                     WHEN COALESCE(lyrics, '') != '' OR COALESCE(synced_lyrics, '') != '' THEN 'found'
                     ELSE 'none'
                 END
                 WHERE lyrics_status IS NULL OR lyrics_status = ''
-                '''
-            )
+            ''')
         if 'lyrics_updated_at' not in song_cols:
             cursor.execute("ALTER TABLE songs ADD COLUMN lyrics_updated_at TIMESTAMP")
         if 'source_url' not in song_cols:
@@ -234,14 +221,12 @@ def init_db(db_path):
     if 'word_synced_lyrics' not in [col[1] for col in cursor.fetchall()]:
         cursor.execute("ALTER TABLE songs ADD COLUMN word_synced_lyrics TEXT")
 
-    cursor.execute(
-        '''
+    cursor.execute('''
         SELECT id, source_url FROM songs
         WHERE (source_id IS NULL OR source_id = '')
           AND source_url IS NOT NULL
           AND source_url != ''
-        '''
-    )
+    ''')
     for row in cursor.fetchall():
         source_id = extract_song_source_id(row['source_url'])
         if source_id:
@@ -250,9 +235,6 @@ def init_db(db_path):
                 (source_id, row['id'])
             )
 
-    # ==========================================
-    # PLAYLIST_SONGS JUNCTION TABLE (Many-to-Many)
-    # ==========================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS playlist_songs (
             playlist_id INTEGER,
@@ -269,27 +251,22 @@ def init_db(db_path):
     playlist_song_cols = [col[1] for col in cursor.fetchall()]
     if 'position' not in playlist_song_cols:
         cursor.execute("ALTER TABLE playlist_songs ADD COLUMN position INTEGER DEFAULT 0")
-
         cursor.execute("SELECT DISTINCT playlist_id FROM playlist_songs")
         playlist_ids = [row['playlist_id'] for row in cursor.fetchall()]
         for playlist_id in playlist_ids:
-            cursor.execute(
-                '''
+            cursor.execute('''
                 SELECT song_id FROM playlist_songs
                 WHERE playlist_id = ?
                 ORDER BY position ASC, added_at ASC, song_id ASC
-                ''',
-                (playlist_id,)
-            )
+            ''', (playlist_id,))
             for index, row in enumerate(cursor.fetchall()):
                 cursor.execute(
                     'UPDATE playlist_songs SET position = ? WHERE playlist_id = ? AND song_id = ?',
                     (index, playlist_id, row['song_id'])
                 )
 
-    # ==========================================
-    # LISTENING LOGS TABLE
-    # ==========================================
+
+def _init_listening_tables(cursor):
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS listening_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -302,7 +279,6 @@ def init_db(db_path):
         )
     ''')
 
-    # Migration: add user_id to listening_logs
     cursor.execute("PRAGMA table_info(listening_logs)")
     log_cols = [col[1] for col in cursor.fetchall()]
     if 'user_id' not in log_cols:
@@ -317,9 +293,6 @@ def init_db(db_path):
         ON listening_logs (song_id, user_id)
     ''')
 
-    # ==========================================
-    # PLAY EVENTS TABLE
-    # ==========================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS play_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -339,9 +312,6 @@ def init_db(db_path):
         ON play_events (song_id, user_id)
     ''')
 
-    # ==========================================
-    # PLAYBACK SESSIONS TABLE
-    # ==========================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS playback_sessions (
             id TEXT PRIMARY KEY,
@@ -370,9 +340,8 @@ def init_db(db_path):
         )
     ''')
 
-    # ==========================================
-    # CROSS-DEVICE PLAYBACK & SETTINGS STATE
-    # ==========================================
+
+def _init_settings_and_jobs_tables(cursor):
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS user_playback_state (
             user_id INTEGER PRIMARY KEY,
@@ -390,9 +359,6 @@ def init_db(db_path):
         )
     ''')
 
-    # ==========================================
-    # DOWNLOAD JOBS QUEUE (PERSISTENCE)
-    # ==========================================
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS download_jobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -407,18 +373,17 @@ def init_db(db_path):
         )
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_download_jobs_status ON download_jobs (status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_download_jobs_user_status ON download_jobs (user_id, status)')
 
-    # Enforce one row per YouTube source for each user when legacy data is clean
-    # enough to support it. Older installations may already contain duplicates;
-    # the worker still performs an atomic lookup before inserting in that case.
-    duplicate_source = cursor.execute('''
+    cursor.execute('''
         SELECT 1
         FROM songs
         WHERE source_id IS NOT NULL AND source_id != ''
         GROUP BY user_id, source_id
         HAVING COUNT(*) > 1
         LIMIT 1
-    ''').fetchone()
+    ''')
+    duplicate_source = cursor.fetchone()
     if not duplicate_source:
         cursor.execute('''
             CREATE UNIQUE INDEX IF NOT EXISTS idx_songs_user_source_unique
@@ -426,8 +391,19 @@ def init_db(db_path):
             WHERE source_id IS NOT NULL AND source_id != ''
         ''')
 
-    conn.commit()
-    conn.close()
+
+def init_db(db_path):
+    """Initialize database with all required tables and migrations."""
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        _init_users_and_sessions_tables(cursor)
+        _init_playlists_and_songs_tables(cursor)
+        _init_listening_tables(cursor)
+        _init_settings_and_jobs_tables(cursor)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ==========================================
@@ -584,6 +560,7 @@ def delete_user_cascade(database_path, user_id):
         ''', (user_id,))
         cursor.execute('DELETE FROM playlists WHERE user_id = ?', (user_id,))
         cursor.execute('DELETE FROM songs WHERE user_id = ?', (user_id,))
+        cursor.execute('DELETE FROM user_sessions WHERE user_id = ?', (user_id,))
         cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
         if cursor.rowcount == 0:
             conn.rollback()
@@ -594,6 +571,66 @@ def delete_user_cascade(database_path, user_id):
         conn.rollback()
         print(f"[ERROR] delete_user_cascade: {e}")
         return 'error'
+    finally:
+        conn.close()
+
+
+def create_user_session(database_path, user_id):
+    """Create a per-device session token for server-side logout revocation."""
+    token = secrets.token_hex(24)
+    conn = get_db_connection(database_path)
+    try:
+        conn.execute(
+            'INSERT INTO user_sessions (token, user_id) VALUES (?, ?)',
+            (token, user_id),
+        )
+        conn.commit()
+        return token
+    finally:
+        conn.close()
+
+
+def validate_user_session(conn, user_id, device_token):
+    """Return True if device_token belongs to an active session for user_id."""
+    if not device_token:
+        return False
+    row = conn.execute(
+        'SELECT 1 FROM user_sessions WHERE token = ? AND user_id = ?',
+        (device_token, user_id),
+    ).fetchone()
+    return row is not None
+
+
+def revoke_user_session(database_path, user_id, device_token):
+    """Revoke a single device session on logout."""
+    if not device_token:
+        return False
+    conn = get_db_connection(database_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            'DELETE FROM user_sessions WHERE token = ? AND user_id = ?',
+            (device_token, user_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def revoke_all_user_sessions(database_path, user_id):
+    """Rotate user session_token and remove all active device sessions."""
+    conn = get_db_connection(database_path)
+    try:
+        new_session_token = secrets.token_hex(16)
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE users SET session_token = ? WHERE id = ?',
+            (new_session_token, user_id),
+        )
+        cursor.execute('DELETE FROM user_sessions WHERE user_id = ?', (user_id,))
+        conn.commit()
+        return cursor.rowcount >= 0
     finally:
         conn.close()
 
@@ -619,8 +656,11 @@ def update_user_password(database_path, user_id, new_password):
             'UPDATE users SET password_hash = ?, session_token = ? WHERE id = ?',
             (new_hash, new_session_token, user_id)
         )
+        updated = cursor.rowcount > 0
+        if updated:
+            cursor.execute('DELETE FROM user_sessions WHERE user_id = ?', (user_id,))
         conn.commit()
-        return cursor.rowcount > 0
+        return updated
     finally:
         conn.close()
 

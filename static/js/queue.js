@@ -4,7 +4,7 @@
 window.createQueueModule = function createQueueModule(app) {
     const { state, el } = app;
     const escapeHtml = (...args) => app.escapeHtml(...args);
-    const mediaUrlName = (...args) => app.mediaUrlName(...args);
+    const albumArtUrl = (...args) => app.albumArtUrl(...args);
     const showToast = (...args) => app.showToast(...args);
     const setQueueOpen = (...args) => app.setQueueOpen(...args);
     const triggerDownload = (...args) => app.triggerDownload(...args);
@@ -70,7 +70,7 @@ window.createQueueModule = function createQueueModule(app) {
             div.dataset.queueIndex = String(index);
             div.innerHTML = `
                 <button class="queue-drag-handle" type="button" aria-label="Reorder ${escapeHtml(song.title)}" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></button>
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/img/icon-192.png';">
+                <img src="${albumArtUrl(song.album_art)}" alt="" loading="lazy" data-fallback="icon">
                 <div class="q-info">
                     <div class="q-title">${escapeHtml(song.title)}</div>
                     <div class="q-artist">${escapeHtml(song.artist || 'Unknown')}</div>

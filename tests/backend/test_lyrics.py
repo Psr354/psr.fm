@@ -304,6 +304,23 @@ class LyricsAndAssetsTests(PsrFmTestCase):
             worker.join(timeout=2)
         self.assertEqual(lock_was_free, [True])
 
+    def test_save_song_lyrics_rejects_oversized_payload(self):
+        from routes.lyrics import MAX_LYRICS_LENGTH
+
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+        song_id = self._create_song(user_id=1, title='Long Lyrics', filename='long-lyrics.mp3')
+
+        res = client.put(
+            f'/api/songs/{song_id}/lyrics',
+            headers={'X-CSRF-Token': csrf},
+            json={'lyrics': 'A' * (MAX_LYRICS_LENGTH + 1), 'synced_lyrics': ''},
+        )
+        self.assertEqual(res.status_code, 400)
+
 
 if __name__ == '__main__':
     unittest.main()

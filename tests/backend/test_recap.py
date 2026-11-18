@@ -225,7 +225,7 @@ class RecapAndSettingsTests(PsrFmTestCase):
         setup = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={'username': 'psr354', 'password': 'secret123'})
         headers = {'X-CSRF-Token': self._csrf_token_from_response(setup)}
         song_id = self._create_song(duration_seconds=338)
-        started = datetime(2020, 1, 31, 23, 50, tzinfo=timezone.utc)
+        started = (datetime.now(timezone.utc) - timedelta(days=5)).replace(hour=23, minute=50, second=0, microsecond=0)
         for repeat in range(3):
             session_id = f'psr354-offline-{repeat}'
             session_start = started + timedelta(seconds=338 * repeat)
@@ -238,7 +238,7 @@ class RecapAndSettingsTests(PsrFmTestCase):
                           'occurred_at': (session_start + timedelta(seconds=offset + seconds)).isoformat()}
                 self.assertEqual(client.post('/api/listen', json=listen, headers=headers).status_code, 200)
                 self.assertEqual(client.post('/api/listen', json=listen, headers=headers).status_code, 200)
-        recap = client.get('/api/recap?period=year&year=2020').get_json()
+        recap = client.get(f'/api/recap?period=year&year={started.year}').get_json()
         self.assertEqual(recap['stats']['total_seconds'], 1014)
         self.assertEqual(recap['stats']['total_plays'], 3)
         with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
@@ -477,6 +477,45 @@ class RecapAndSettingsTests(PsrFmTestCase):
         self.assertEqual(breakdown[1]['top_song']['total_listened'], 240)
         self.assertEqual(breakdown[3]['top_song']['title'], 'March Hit')
         self.assertEqual(breakdown[3]['top_song']['total_listened'], 180)
+
+    def test_play_and_listen_reject_old_backdate_and_cap_session_seconds(self):
+        from routes.recap import MAX_SESSION_LISTEN_SECONDS
+
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+        song_id = self._create_song(user_id=1, duration_seconds=200)
+
+        too_old = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
+        old_play = client.post(
+            f'/api/songs/{song_id}/play',
+            headers={'X-CSRF-Token': csrf},
+            json={'playback_session_id': 'too-old-session', 'occurred_at': too_old},
+        )
+        self.assertEqual(old_play.status_code, 400)
+
+        # Valid session capped at MAX_SESSION_LISTEN_SECONDS
+        started = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+        ok_play = client.post(
+            f'/api/songs/{song_id}/play',
+            headers={'X-CSRF-Token': csrf},
+            json={'playback_session_id': 'cap-session', 'occurred_at': started},
+        )
+        self.assertEqual(ok_play.status_code, 200)
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            conn.execute(
+                'UPDATE playback_sessions SET seconds_listened = ? WHERE id = ?',
+                (MAX_SESSION_LISTEN_SECONDS - 5, 'cap-session'),
+            )
+            conn.commit()
+        over_cap = client.post(
+            '/api/listen',
+            headers={'X-CSRF-Token': csrf},
+            json={'song_id': song_id, 'playback_session_id': 'cap-session', 'seconds': 10},
+        )
+        self.assertEqual(over_cap.status_code, 409)
 
 
 if __name__ == '__main__':

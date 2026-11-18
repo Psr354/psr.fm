@@ -327,13 +327,133 @@ class AuthTests(PsrFmTestCase):
         self.assertEqual(res.status_code, 401)
         mock_check.assert_called_once()
 
-    def test_csp_report_only_header_present_on_non_static_responses(self):
+    def test_csp_enforce_header_and_no_inline_scripts(self):
         client = self.app_module.app.test_client()
-        res = client.get('/setup')
-        self.assertEqual(res.status_code, 200)
-        csp = res.headers.get('Content-Security-Policy-Report-Only', '')
+        setup_res = client.get('/setup')
+        self.assertEqual(setup_res.status_code, 200)
+        csp = setup_res.headers.get('Content-Security-Policy', '')
         self.assertIn("default-src 'self'", csp)
+        self.assertIn("script-src 'self' https://cdnjs.cloudflare.com", csp)
         self.assertIn("object-src 'none'", csp)
+        self.assertNotIn('<script>', setup_res.get_data(as_text=True))
+
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        client.post('/api/logout', headers={'X-CSRF-Token': self._csrf_token(client)})
+        login_res = client.get('/login')
+        self.assertEqual(login_res.status_code, 200)
+        self.assertNotIn('<script>', login_res.get_data(as_text=True))
+
+    def test_socketio_rejects_unauthenticated_and_closes_room_on_revocation(self):
+        client = self.app_module.app.test_client()
+        # Unauthenticated connect returns False
+        with self.app_module.app.test_request_context('/'):
+            self.assertFalse(self.app_module.on_socket_connect())
+
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+        u2_res = client.post('/api/users', headers={'X-CSRF-Token': csrf}, json={
+            'username': 'member', 'password': 'password123'
+        })
+        u2_id = u2_res.get_json()['user_id']
+
+        with patch.object(self.app_module.socketio, 'close_room') as mock_close_room:
+            self.assertEqual(
+                client.post(
+                    '/api/user/change-password',
+                    headers={'X-CSRF-Token': csrf},
+                    json={'current_password': 'secret123', 'new_password': 'newsecret123'},
+                ).status_code,
+                200,
+            )
+            mock_close_room.assert_any_call('user_1')
+
+            self.assertEqual(
+                client.post(
+                    f'/api/admin/users/{u2_id}/reset-password',
+                    headers={'X-CSRF-Token': csrf},
+                    json={'password': 'resetpassword123'},
+                ).status_code,
+                200,
+            )
+            mock_close_room.assert_any_call(f'user_{u2_id}')
+
+            self.assertEqual(
+                client.delete(f'/api/admin/users/{u2_id}', headers={'X-CSRF-Token': csrf}).status_code,
+                200,
+            )
+            self.assertEqual(mock_close_room.call_args_list[-1].args, (f'user_{u2_id}',))
+
+    def test_socketio_origins_multi_origin_parsing(self):
+        parse = self.app_module._parse_socketio_origins
+        self.assertIsNone(parse(''))
+        self.assertEqual(parse('*'), '*')
+        self.assertEqual(
+            parse('https://a.example.com, https://b.example.com , '),
+            ['https://a.example.com', 'https://b.example.com'],
+        )
+
+    def test_logout_revokes_only_current_device_and_logout_all_revokes_all(self):
+        client_a = self.app_module.app.test_client()
+        client_b = self.app_module.app.test_client()
+
+        setup_res = client_a.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client_a)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf_a = self._csrf_token_from_response(setup_res)
+        saved_cookie_a = client_a.get_cookie('session')
+
+        login_b = client_b.post('/api/login', headers={'X-CSRF-Token': self._csrf_token(client_b)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf_b = self._csrf_token_from_response(login_b)
+        self.assertEqual(client_b.get('/api/me').status_code, 200)
+
+        # Logout device A
+        self.assertEqual(client_a.post('/api/logout', headers={'X-CSRF-Token': csrf_a}).status_code, 200)
+        # Replaying old session cookie of device A must fail server-side
+        replay_client = self.app_module.app.test_client()
+        if saved_cookie_a is not None:
+            replay_client.set_cookie(saved_cookie_a.key, saved_cookie_a.value)
+        self.assertEqual(replay_client.get('/api/me').status_code, 401)
+        # Device B remains signed in
+        self.assertEqual(client_b.get('/api/me').status_code, 200)
+
+        # Logout all from device B revokes B too
+        self.assertEqual(client_b.post('/api/logout-all', headers={'X-CSRF-Token': csrf_b}).status_code, 200)
+        self.assertEqual(client_b.get('/api/me').status_code, 401)
+
+    def test_private_playlist_cover_blocked_across_accounts(self):
+        client_a = self.app_module.app.test_client()
+        setup_res = client_a.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client_a)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf_a = self._csrf_token_from_response(setup_res)
+        client_a.post('/api/users', headers={'X-CSRF-Token': csrf_a}, json={
+            'username': 'user2', 'password': 'password123'
+        })
+
+        os.makedirs(self.app_module.ALBUM_ART_DIR, exist_ok=True)
+        cover_name = 'pl_cover_1_private.jpg'
+        with open(os.path.join(self.app_module.ALBUM_ART_DIR, cover_name), 'wb') as f:
+            f.write(b'fake-jpeg-bytes')
+        self._create_playlist(user_id=1, name='Private PL', cover_art=cover_name)
+
+        owner_resp = client_a.get(f'/static/album_art/{cover_name}')
+        try:
+            self.assertEqual(owner_resp.status_code, 200)
+        finally:
+            owner_resp.close()
+
+        client_b = self.app_module.app.test_client()
+        client_b.post('/api/login', headers={'X-CSRF-Token': self._csrf_token(client_b)}, json={
+            'username': 'user2', 'password': 'password123'
+        })
+        other_resp = client_b.get(f'/static/album_art/{cover_name}')
+        self.assertEqual(other_resp.status_code, 404)
 
 
 if __name__ == '__main__':

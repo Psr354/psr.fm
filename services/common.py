@@ -1,6 +1,8 @@
+import io
 import os
 import queue
 import re
+import sqlite3
 import threading
 import time
 import mimetypes
@@ -8,6 +10,8 @@ from datetime import datetime, timezone, timedelta
 from threading import Lock
 from flask import g, current_app, request
 from flask_login import UserMixin, current_user
+from PIL import Image
+from werkzeug.utils import secure_filename
 from services.database import get_db_connection, get_user_theme
 
 AUDIO_MIME_TYPES = {
@@ -36,7 +40,17 @@ PASSWORD_CHANGE_RATE_LIMIT_MAX_ATTEMPTS = 5
 _password_change_rate_limit_lock = Lock()
 _password_change_rate_limit_state = {}
 
+DOWNLOAD_RATE_LIMIT_WINDOW_SECONDS = 60
+DOWNLOAD_RATE_LIMIT_MAX_REQUESTS = 15
+_download_rate_limit_lock = Lock()
+_download_rate_limit_state = {}
+
 MAX_PASSWORD_LENGTH = 128
+MAX_PLAYBACK_BACKDATE_DAYS = 30
+ALLOWED_IMAGE_FORMATS = {'JPEG': '.jpg', 'PNG': '.png', 'WEBP': '.webp'}
+DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+DEFAULT_MAX_IMAGE_DIM = 8000
+DEFAULT_MAX_IMAGE_PIXELS = 25_000_000
 
 _file_cleanup_queue = queue.Queue()
 
@@ -64,14 +78,153 @@ def queue_file_deletion(file_path):
 
 
 class User(UserMixin):
-    def __init__(self, id, username, role='user', session_token=''):
+    def __init__(self, id, username, role='user', session_token='', device_token=''):
         self.id = id
         self.username = username
         self.role = role
         self.session_token = session_token or ''
+        self.device_token = device_token or ''
 
     def get_id(self):
-        return f'{self.id}:{self.session_token}' if self.session_token else str(self.id)
+        if self.session_token and self.device_token:
+            return f'{self.id}:{self.session_token}:{self.device_token}'
+        if self.session_token:
+            return f'{self.id}:{self.session_token}'
+        return str(self.id)
+
+
+def save_validated_image(
+    raw_bytes,
+    dest_dir,
+    filename_prefix,
+    max_bytes=DEFAULT_MAX_IMAGE_BYTES,
+    max_dim=DEFAULT_MAX_IMAGE_DIM,
+    max_pixels=DEFAULT_MAX_IMAGE_PIXELS,
+):
+    """Validate, verify, and re-encode an image via Pillow before saving to disk.
+
+    Raises ValueError for invalid size, format, dimensions, or corrupted image data.
+    Returns (filename, save_path).
+    """
+    if not dest_dir:
+        raise ValueError('Image destination directory is not configured')
+    if not raw_bytes:
+        raise ValueError('Image payload is empty')
+    if len(raw_bytes) > max_bytes:
+        raise ValueError(f'Image exceeds maximum size of {max_bytes // (1024 * 1024)}MB')
+
+    try:
+        img = Image.open(io.BytesIO(raw_bytes))
+        img.verify()
+        img = Image.open(io.BytesIO(raw_bytes))
+    except Exception as exc:
+        raise ValueError('Invalid or corrupted image file') from exc
+
+    if img.format not in ALLOWED_IMAGE_FORMATS:
+        raise ValueError(f'Invalid image format: {img.format}')
+
+    width, height = img.size
+    if width <= 0 or height <= 0 or width * height > max_pixels or width > max_dim or height > max_dim:
+        raise ValueError('Image dimensions are too large')
+
+    save_format = img.format
+    ext = ALLOWED_IMAGE_FORMATS[save_format]
+    if save_format == 'JPEG' and img.mode in ('RGBA', 'P'):
+        img = img.convert('RGB')
+
+    os.makedirs(dest_dir, exist_ok=True)
+    filename = f'{filename_prefix}{ext}'
+    save_path = os.path.join(dest_dir, filename)
+    img.save(save_path, format=save_format)
+    return filename, save_path
+
+
+def resolve_owned_playlists(db, user_id, raw_playlist_ids):
+    """Parse, deduplicate, and verify ownership of playlist IDs.
+
+    Returns (owned_ids, error_message, status_code).
+    """
+    if not raw_playlist_ids or not isinstance(raw_playlist_ids, (list, tuple, set)):
+        return None, 'Select at least one playlist', 400
+    try:
+        playlist_ids = sorted({int(pid) for pid in raw_playlist_ids})
+    except (TypeError, ValueError):
+        return None, 'Invalid playlist data', 400
+    if not playlist_ids:
+        return None, 'Select at least one playlist', 400
+
+    placeholders = ','.join('?' for _ in playlist_ids)
+    rows = db.execute(
+        f'SELECT id FROM playlists WHERE user_id = ? AND id IN ({placeholders})',
+        (user_id, *playlist_ids),
+    ).fetchall()
+    owned_ids = [row['id'] for row in rows]
+    if len(owned_ids) != len(playlist_ids):
+        return None, 'One or more playlists were not found', 404
+    return owned_ids, None, 200
+
+
+def collect_unreferenced_media_paths(db, filenames=(), art_files=(), library_dir='', album_art_dir=''):
+    """Return paths of audio/artwork files that have zero remaining DB references."""
+    paths = []
+    seen_paths = set()
+
+    if library_dir:
+        for raw_name in {f for f in filenames if f}:
+            safe_name = secure_filename(raw_name)
+            if not safe_name:
+                continue
+            ref_count = db.execute(
+                'SELECT COUNT(*) AS count FROM songs WHERE filename = ?',
+                (raw_name,),
+            ).fetchone()['count']
+            if ref_count == 0:
+                full_path = os.path.join(library_dir, safe_name)
+                if full_path not in seen_paths:
+                    seen_paths.add(full_path)
+                    paths.append(full_path)
+
+    if album_art_dir:
+        for raw_art in {a for a in art_files if a}:
+            safe_art = secure_filename(raw_art)
+            if not safe_art:
+                continue
+            song_refs = db.execute(
+                'SELECT COUNT(*) AS count FROM songs WHERE album_art = ?',
+                (raw_art,),
+            ).fetchone()['count']
+            playlist_refs = db.execute(
+                'SELECT COUNT(*) AS count FROM playlists WHERE cover_art = ?',
+                (raw_art,),
+            ).fetchone()['count']
+            if song_refs == 0 and playlist_refs == 0:
+                full_path = os.path.join(album_art_dir, safe_art)
+                if full_path not in seen_paths:
+                    seen_paths.add(full_path)
+                    paths.append(full_path)
+
+    return paths
+
+
+def cleanup_unreferenced_media(db, filenames=(), art_files=(), library_dir='', album_art_dir='', async_delete=True):
+    """Remove unreferenced audio/artwork files either asynchronously or synchronously."""
+    paths = collect_unreferenced_media_paths(
+        db,
+        filenames=filenames,
+        art_files=art_files,
+        library_dir=library_dir,
+        album_art_dir=album_art_dir,
+    )
+    for file_path in paths:
+        if async_delete:
+            queue_file_deletion(file_path)
+        else:
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as exc:
+                print(f"[WARN] Failed to delete {file_path}: {exc}")
+    return paths
 
 
 def audio_mimetype(filename):
@@ -150,33 +303,50 @@ def add_global_song_to_playlists(db, source_song, playlist_ids):
         )
         copied_status = 'found' if copy_public_lyrics else 'none'
         copied_updated_at = source_song['lyrics_updated_at'] if copy_public_lyrics else None
-        cursor = db.execute(
-            '''
-            INSERT INTO songs (
-                title, artist, filename, album_art, duration_seconds,
-                source_url, source_id, lyrics, synced_lyrics, word_synced_lyrics,
-                lyrics_status, lyrics_updated_at, user_id
+        try:
+            cursor = db.execute(
+                '''
+                INSERT INTO songs (
+                    title, artist, filename, album_art, duration_seconds,
+                    source_url, source_id, lyrics, synced_lyrics, word_synced_lyrics,
+                    lyrics_status, lyrics_updated_at, user_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    source_song['title'],
+                    source_song['artist'],
+                    source_song['filename'],
+                    source_song['album_art'],
+                    source_song['duration_seconds'],
+                    source_song['source_url'],
+                    source_song['source_id'],
+                    copied_lyrics,
+                    copied_synced,
+                    copied_word_synced,
+                    copied_status,
+                    copied_updated_at,
+                    current_user.id,
+                )
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''',
-            (
-                source_song['title'],
-                source_song['artist'],
-                source_song['filename'],
-                source_song['album_art'],
-                source_song['duration_seconds'],
-                source_song['source_url'],
-                source_song['source_id'],
-                copied_lyrics,
-                copied_synced,
-                copied_word_synced,
-                copied_status,
-                copied_updated_at,
-                current_user.id,
-            )
-        )
-        song_id = cursor.lastrowid
-        created = True
+            song_id = cursor.lastrowid
+            created = True
+        except sqlite3.IntegrityError:
+            raced_song = None
+            if source_song['source_id']:
+                raced_song = db.execute(
+                    'SELECT id FROM songs WHERE user_id = ? AND source_id = ? ORDER BY id ASC LIMIT 1',
+                    (current_user.id, source_song['source_id']),
+                ).fetchone()
+            if not raced_song:
+                raced_song = db.execute(
+                    'SELECT id FROM songs WHERE user_id = ? AND filename = ? ORDER BY id ASC LIMIT 1',
+                    (current_user.id, source_song['filename']),
+                ).fetchone()
+            if not raced_song:
+                raise
+            song_id = raced_song['id']
+            created = False
 
     added_playlist_ids = []
     skipped_playlist_ids = []
@@ -317,6 +487,21 @@ def clear_password_change_rate_limit(user_id):
         _password_change_rate_limit_state.pop(key, None)
 
 
+def check_download_rate_limit(user_id):
+    now = time.monotonic()
+    with _download_rate_limit_lock:
+        timestamps = [
+            ts for ts in _download_rate_limit_state.get(user_id, [])
+            if now - ts < DOWNLOAD_RATE_LIMIT_WINDOW_SECONDS
+        ]
+        if len(timestamps) >= DOWNLOAD_RATE_LIMIT_MAX_REQUESTS:
+            _download_rate_limit_state[user_id] = timestamps
+            return False, int(DOWNLOAD_RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0]))
+        timestamps.append(now)
+        _download_rate_limit_state[user_id] = timestamps
+        return True, None
+
+
 def reset_rate_limits():
     with _login_rate_limit_lock:
         _login_rate_limit_state.clear()
@@ -324,19 +509,24 @@ def reset_rate_limits():
         _lyrics_rate_limit_state.clear()
     with _password_change_rate_limit_lock:
         _password_change_rate_limit_state.clear()
+    with _download_rate_limit_lock:
+        _download_rate_limit_state.clear()
 
 
 
 def playback_timestamp(value):
-    """Normalize queued client timestamps to SQLite UTC, rejecting future dates."""
+    """Normalize queued client timestamps to SQLite UTC, rejecting future or overly old dates."""
     if value is None:
         return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
     if parsed.tzinfo is None:
         raise ValueError('Timezone required')
     parsed = parsed.astimezone(timezone.utc)
-    if parsed > datetime.now(timezone.utc) + timedelta(seconds=10):
+    now = datetime.now(timezone.utc)
+    if parsed > now + timedelta(seconds=10):
         raise ValueError('Future timestamp')
+    if parsed < now - timedelta(days=MAX_PLAYBACK_BACKDATE_DAYS):
+        raise ValueError('Timestamp too old')
     return parsed.strftime('%Y-%m-%d %H:%M:%S')
 
 

@@ -4,6 +4,7 @@
 window.createPlayerModule = function createPlayerModule(app) {
     const { state, el, listeningSync } = app;
     const mediaUrlName = (...args) => app.mediaUrlName(...args);
+    const albumArtUrl = (...args) => app.albumArtUrl(...args);
     const formatTime = (...args) => app.formatTime(...args);
     const showToast = (...args) => app.showToast(...args);
     const isOfflineMode = () => app.isOfflineMode();
@@ -255,7 +256,7 @@ window.createPlayerModule = function createPlayerModule(app) {
 
     function updateMediaSession(song) {
         if (!('mediaSession' in navigator) || !('MediaMetadata' in window)) return;
-        const artworkUrl = new URL(`/static/album_art/${mediaUrlName(song.album_art)}`, window.location.origin).href;
+        const artworkUrl = new URL(albumArtUrl(song.album_art), window.location.origin).href;
         navigator.mediaSession.metadata = new MediaMetadata({
             title: song.title || 'Unknown',
             artist: song.artist || 'Unknown',
@@ -637,7 +638,7 @@ window.createPlayerModule = function createPlayerModule(app) {
         if (el.playerTitle) el.playerTitle.innerText = previewSong.title;
         if (el.playerArtist) el.playerArtist.innerText = previewSong.artist || 'Unknown';
         if (el.playerArt) {
-            el.playerArt.src = `/static/album_art/${mediaUrlName(previewSong.album_art)}`;
+            el.playerArt.src = albumArtUrl(previewSong.album_art);
             el.playerArt.alt = `${previewSong.title} album artwork`;
         }
 
@@ -679,7 +680,7 @@ window.createPlayerModule = function createPlayerModule(app) {
         if (el.playerTitle) el.playerTitle.innerText = song.title;
         if (el.playerArtist) el.playerArtist.innerText = song.artist || 'Unknown';
         if (el.playerArt) {
-            el.playerArt.src = `/static/album_art/${mediaUrlName(song.album_art)}`;
+            el.playerArt.src = albumArtUrl(song.album_art);
             el.playerArt.alt = `${song.title} album artwork`;
         }
 

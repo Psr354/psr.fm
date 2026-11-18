@@ -1,4 +1,4 @@
-import io
+import logging
 import os
 import uuid
 import queue
@@ -9,10 +9,14 @@ import re
 from urllib.parse import urlparse
 import yt_dlp
 import requests
-from PIL import Image
 from services.metadata import extract_duration
-from services.database import extract_song_source_id, get_db_connection, update_song_lyrics
+from services.database import (
+    extract_song_source_id, extract_youtube_video_id, get_db_connection, update_song_lyrics
+)
+from services.common import save_validated_image, DEFAULT_MAX_IMAGE_BYTES
 from services.lyrics import search_lyrics
+
+logger = logging.getLogger(__name__)
 
 
 class PersistentDownloadQueue(queue.Queue):
@@ -27,6 +31,7 @@ class PersistentDownloadQueue(queue.Queue):
     def _recover_unprocessed(self):
         if not self.db_path or not os.path.exists(self.db_path):
             return
+        conn = None
         try:
             conn = get_db_connection(self.db_path)
             conn.execute(
@@ -47,12 +52,15 @@ class PersistentDownloadQueue(queue.Queue):
                     'playlist_ids': pids,
                     'user_id': row['user_id'],
                 })
-            conn.close()
         except Exception as e:
-            print(f"[WARN] Failed to recover download queue: {e}")
+            logger.warning("Failed to recover download queue: %s", e)
+        finally:
+            if conn is not None:
+                conn.close()
 
     def put(self, item, block=True, timeout=None):
         if isinstance(item, dict) and 'job_id' not in item and self.db_path and os.path.exists(self.db_path):
+            conn = None
             try:
                 conn = get_db_connection(self.db_path)
                 cursor = conn.cursor()
@@ -65,9 +73,11 @@ class PersistentDownloadQueue(queue.Queue):
                 )
                 conn.commit()
                 item['job_id'] = cursor.lastrowid
-                conn.close()
             except Exception as e:
-                print(f"[WARN] Failed to persist download job: {e}")
+                logger.warning("Failed to persist download job: %s", e)
+            finally:
+                if conn is not None:
+                    conn.close()
         super().put(item, block=block, timeout=timeout)
 
 
@@ -132,7 +142,9 @@ def validate_song_url(url):
 
     youtube_hosts = {'youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be'}
     if host in youtube_hosts:
-        return True, ''
+        if extract_youtube_video_id(url):
+            return True, ''
+        return False, 'Only individual YouTube video URLs are supported'
 
     if host == 'open.spotify.com':
         if extract_song_source_id(url).startswith('spotify:'):
@@ -196,6 +208,30 @@ def _first_media_entry(info, desired_duration=0):
         return entries[0] if entries else None
     return info
 
+def _update_download_job_status(db_path, job_id, status, error=None):
+    if not job_id or not db_path or not os.path.exists(db_path):
+        return
+    conn = None
+    try:
+        conn = get_db_connection(db_path)
+        if error is not None:
+            conn.execute(
+                "UPDATE download_jobs SET status = ?, error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (status, str(error)[:500], job_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE download_jobs SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (status, job_id),
+            )
+        conn.commit()
+    except Exception:
+        logger.warning("Failed to update download_jobs id=%s status=%s", job_id, status, exc_info=True)
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 def download_worker(db_path, download_dir, album_art_dir, sio):
     global socketio_instance
     socketio_instance = sio
@@ -205,35 +241,14 @@ def download_worker(db_path, download_dir, album_art_dir, sio):
         if task is None:
             break
         job_id = task.get('job_id')
-        if job_id and db_path and os.path.exists(db_path):
-            try:
-                conn = get_db_connection(db_path)
-                conn.execute("UPDATE download_jobs SET status = 'processing', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (job_id,))
-                conn.commit()
-                conn.close()
-            except Exception:
-                pass
+        _update_download_job_status(db_path, job_id, 'processing')
         try:
             process_download(task, db_path, download_dir, album_art_dir)
-            if job_id and db_path and os.path.exists(db_path):
-                try:
-                    conn = get_db_connection(db_path)
-                    conn.execute("UPDATE download_jobs SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (job_id,))
-                    conn.commit()
-                    conn.close()
-                except Exception:
-                    pass
+            _update_download_job_status(db_path, job_id, 'completed')
         except Exception as e:
-            print(f"[ERROR] Download failed for {task.get('url')}: {e}")
+            logger.error("Download failed for %s: %s", task.get('url'), e)
             client_error = str(e) if isinstance(e, DownloadUserError) else GENERIC_DOWNLOAD_ERROR
-            if job_id and db_path and os.path.exists(db_path):
-                try:
-                    conn = get_db_connection(db_path)
-                    conn.execute("UPDATE download_jobs SET status = 'failed', error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (str(e)[:500], job_id))
-                    conn.commit()
-                    conn.close()
-                except Exception:
-                    pass
+            _update_download_job_status(db_path, job_id, 'failed', error=e)
             if socketio_instance:
                 socketio_instance.emit('download_error', {'url': task['url'], 'error': client_error}, room=f"user_{task['user_id']}")
         finally:
@@ -274,13 +289,39 @@ def emit_song_added(song, playlist_ids):
         'source_id': song['source_id'],
     }, room=f"user_{song['user_id']}")
 
-MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024
-ALLOWED_THUMBNAIL_FORMATS = {'JPEG': '.jpg', 'PNG': '.png', 'WEBP': '.webp'}
+MAX_THUMBNAIL_BYTES = DEFAULT_MAX_IMAGE_BYTES
+ALLOWED_THUMBNAIL_HOSTS = {
+    'i.ytimg.com',
+    'i9.ytimg.com',
+    'img.youtube.com',
+    'yt3.ggpht.com',
+    'lh3.googleusercontent.com',
+    'i.scdn.co',
+    'mosaic.scdn.co',
+    'image-cdn-ak.spotifycdn.com',
+    'image-cdn-fa.spotifycdn.com',
+}
+ALLOWED_THUMBNAIL_SUFFIXES = ('.ytimg.com', '.scdn.co', '.spotifycdn.com', '.googleusercontent.com')
+
+
+def _is_allowed_thumbnail_url(url):
+    try:
+        parsed = urlparse((url or '').strip())
+    except Exception:
+        return False
+    if parsed.scheme != 'https':
+        return False
+    host = (parsed.hostname or '').lower()
+    if not host:
+        return False
+    if host in ALLOWED_THUMBNAIL_HOSTS:
+        return True
+    return any(host.endswith(suffix) for suffix in ALLOWED_THUMBNAIL_SUFFIXES)
 
 
 def _download_and_save_thumbnail(thumbnail_url, album_art_dir, file_uuid):
     """Download, verify, and re-encode a remote thumbnail via Pillow."""
-    if not thumbnail_url or not album_art_dir:
+    if not thumbnail_url or not album_art_dir or not _is_allowed_thumbnail_url(thumbnail_url):
         return ""
     try:
         resp = requests.get(
@@ -288,6 +329,7 @@ def _download_and_save_thumbnail(thumbnail_url, album_art_dir, file_uuid):
             timeout=10,
             headers=YOUTUBE_HTTP_HEADERS,
             stream=True,
+            allow_redirects=False,
         )
         try:
             if resp.status_code != 200:
@@ -313,23 +355,15 @@ def _download_and_save_thumbnail(thumbnail_url, album_art_dir, file_uuid):
 
         if not raw_bytes:
             return ""
-        img = Image.open(io.BytesIO(raw_bytes))
-        img.verify()
-        img = Image.open(io.BytesIO(raw_bytes))
-        if img.format not in ALLOWED_THUMBNAIL_FORMATS:
-            return ""
-        width, height = img.size
-        if width * height > 25_000_000 or width > 8000 or height > 8000:
-            return ""
-        save_format = img.format
-        ext = ALLOWED_THUMBNAIL_FORMATS[save_format]
-        if save_format == 'JPEG' and img.mode in ('RGBA', 'P'):
-            img = img.convert('RGB')
-        candidate_art = f"{file_uuid}{ext}"
-        img.save(os.path.join(album_art_dir, candidate_art), format=save_format)
+        candidate_art, _ = save_validated_image(
+            raw_bytes,
+            album_art_dir,
+            file_uuid,
+            max_bytes=MAX_THUMBNAIL_BYTES,
+        )
         return candidate_art
     except Exception as e:
-        print(f"[WARN] Failed to download thumbnail: {e}")
+        logger.warning("Failed to download thumbnail: %s", e)
         return ""
 
 
@@ -373,32 +407,82 @@ dispatch_lyrics_lookup = _dispatch_lyrics_lookup
 
 
 def _reuse_existing_song_by_source_id(db_path, library_dir, user_id, source_id, source_url, playlist_ids):
-    """Reuse an existing song row (same user or global cross-account) if already on disk."""
+    """Reuse an existing song row (same user or global cross-account) if its audio file is on disk."""
     if not source_id:
         return False
     conn = get_db_connection(db_path)
     try:
         conn.execute('BEGIN IMMEDIATE')
+        if not conn.execute('SELECT 1 FROM users WHERE id = ?', (user_id,)).fetchone():
+            conn.rollback()
+            raise Exception('User no longer exists')
+
         existing_song = conn.execute(
             'SELECT * FROM songs WHERE user_id = ? AND source_id = ? ORDER BY id LIMIT 1',
             (user_id, source_id),
         ).fetchone()
-        if existing_song:
+        if existing_song and existing_song['filename'] and os.path.isfile(os.path.join(library_dir, existing_song['filename'])):
             add_song_to_playlists(conn.cursor(), existing_song['id'], playlist_ids)
             conn.commit()
             emit_song_added(existing_song, playlist_ids)
             return True
 
-        global_song = conn.execute(
-            'SELECT * FROM songs WHERE source_id = ? ORDER BY id LIMIT 1',
+        global_candidates = conn.execute(
+            'SELECT * FROM songs WHERE source_id = ? ORDER BY id ASC',
             (source_id,),
-        ).fetchone()
-        if global_song and global_song['filename'] and os.path.exists(os.path.join(library_dir, global_song['filename'])):
+        ).fetchall()
+        global_song = next(
+            (
+                row for row in global_candidates
+                if row['filename'] and os.path.isfile(os.path.join(library_dir, row['filename']))
+            ),
+            None,
+        )
+        if global_song:
             cursor = conn.cursor()
+            if existing_song:
+                cursor.execute(
+                    '''
+                    UPDATE songs
+                    SET filename = ?,
+                        album_art = COALESCE(NULLIF(album_art, ''), ?),
+                        duration_seconds = COALESCE(NULLIF(duration_seconds, 0), ?)
+                    WHERE id = ? AND user_id = ?
+                    ''',
+                    (
+                        global_song['filename'],
+                        global_song['album_art'],
+                        global_song['duration_seconds'],
+                        existing_song['id'],
+                        user_id,
+                    ),
+                )
+                add_song_to_playlists(cursor, existing_song['id'], playlist_ids)
+                conn.commit()
+                repaired_payload = dict(existing_song)
+                repaired_payload['filename'] = global_song['filename']
+                if not repaired_payload.get('album_art'):
+                    repaired_payload['album_art'] = global_song['album_art']
+                emit_song_added(repaired_payload, playlist_ids)
+                return True
+
+            copy_public_lyrics = (global_song['lyrics_status'] or 'none') == 'found'
+            copied_lyrics = (global_song['lyrics'] or '') if copy_public_lyrics else ''
+            copied_synced = (global_song['synced_lyrics'] or '') if copy_public_lyrics else ''
+            copied_word_synced = (
+                (global_song['word_synced_lyrics'] or '')
+                if copy_public_lyrics and 'word_synced_lyrics' in global_song.keys()
+                else ''
+            )
+            copied_status = 'found' if copy_public_lyrics else 'none'
+            copied_updated_at = global_song['lyrics_updated_at'] if copy_public_lyrics else None
             cursor.execute(
                 '''
-                INSERT INTO songs (title, artist, filename, album_art, duration_seconds, source_url, source_id, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO songs (
+                    title, artist, filename, album_art, duration_seconds, source_url, source_id,
+                    lyrics, synced_lyrics, word_synced_lyrics, lyrics_status, lyrics_updated_at, user_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
                 (
                     global_song['title'],
@@ -408,6 +492,11 @@ def _reuse_existing_song_by_source_id(db_path, library_dir, user_id, source_id, 
                     global_song['duration_seconds'],
                     global_song['source_url'] or source_url,
                     source_id,
+                    copied_lyrics,
+                    copied_synced,
+                    copied_word_synced,
+                    copied_status,
+                    copied_updated_at,
                     user_id,
                 ),
             )
@@ -427,9 +516,10 @@ def _reuse_existing_song_by_source_id(db_path, library_dir, user_id, source_id, 
                 'user_id': user_id,
             }
             emit_song_added(cloned_payload, playlist_ids)
-            _dispatch_lyrics_lookup(
-                db_path, cloned_id, global_song['title'], global_song['artist'], global_song['duration_seconds']
-            )
+            if not copy_public_lyrics:
+                _dispatch_lyrics_lookup(
+                    db_path, cloned_id, global_song['title'], global_song['artist'], global_song['duration_seconds']
+                )
             return True
         conn.rollback()
         return False
@@ -532,10 +622,14 @@ def process_download(task, db_path, download_dir, album_art_dir):
     album_art_filename = _download_and_save_thumbnail(thumbnail_url, album_art_dir, file_uuid)
             
     conn = get_db_connection(db_path)
+    reused_existing_with_file = False
     try:
         # Serialize the final lookup and insert so concurrent workers cannot both
         # create a row for the same user and canonical YouTube video.
         conn.execute('BEGIN IMMEDIATE')
+        if not conn.execute('SELECT 1 FROM users WHERE id = ?', (user_id,)).fetchone():
+            raise Exception('User no longer exists')
+
         existing_song = None
         if source_id:
             existing_song = conn.execute(
@@ -546,6 +640,19 @@ def process_download(task, db_path, download_dir, album_art_dir):
         cursor = conn.cursor()
         if existing_song:
             song_id = existing_song['id']
+            if existing_song['filename'] and os.path.isfile(os.path.join(library_dir, existing_song['filename'])):
+                reused_existing_with_file = True
+            else:
+                cursor.execute(
+                    '''
+                    UPDATE songs
+                    SET filename = ?,
+                        album_art = COALESCE(NULLIF(album_art, ''), ?),
+                        duration_seconds = ?
+                    WHERE id = ? AND user_id = ?
+                    ''',
+                    (expected_file, album_art_filename, duration_seconds, song_id, user_id),
+                )
         else:
             cursor.execute(
                 '''
@@ -577,7 +684,7 @@ def process_download(task, db_path, download_dir, album_art_dir):
     finally:
         conn.close()
 
-    if existing_song:
+    if existing_song and reused_existing_with_file:
         os.remove(os.path.join(library_dir, expected_file))
         if album_art_filename:
             album_art_path = os.path.join(album_art_dir, album_art_filename)

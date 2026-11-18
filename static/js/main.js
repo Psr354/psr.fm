@@ -24,8 +24,8 @@ window.fetch = async function(url, options = {}) {
     try {
         const response = await _originalFetch.call(this, url, requestOptions);
 
-        // Handle 401 Unauthorized (skip untuk auth endpoints)
-        if (response.status === 401) {
+        // Handle 401 Unauthorized (skip untuk auth endpoints & cross-origin)
+        if (response.status === 401 && isSameOrigin) {
             const requestUrl = new URL(
                 url instanceof Request ? url.url : url,
                 window.location.href,
@@ -263,6 +263,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.escapeHtml = escapeHtml;
     window.formatTime = formatTime;
     window.mediaUrlName = mediaUrlName;
+    window.albumArtUrl = albumArtUrl;
     window.showView = showView;
     window.drawRoundRect = drawRoundRect;
     window.loadCanvasImage = loadCanvasImage;
@@ -318,6 +319,33 @@ document.addEventListener('DOMContentLoaded', () => {
         return encodeURIComponent(name);
     }
 
+    function albumArtUrl(value) {
+        const cleaned = String(value || '').trim();
+        if (!cleaned) return '/static/img/icon-192.png';
+        return `/static/album_art/${mediaUrlName(cleaned)}`;
+    }
+
+    // CSP-safe centralized image fallback handler (replaces inline onerror attributes)
+    document.addEventListener('error', (event) => {
+        const target = event.target;
+        if (!target || target.tagName !== 'IMG') return;
+        const mode = target.dataset.fallback;
+        if (!mode) return;
+        delete target.dataset.fallback;
+        if (mode === 'icon') {
+            target.style.background = '#282828';
+            target.src = '/static/img/icon-192.png';
+        } else if (mode === 'blank') {
+            target.style.background = '#282828';
+            target.removeAttribute('src');
+        } else if (mode === 'hide') {
+            target.style.display = 'none';
+            if (target.nextElementSibling) {
+                target.nextElementSibling.style.display = 'flex';
+            }
+        }
+    }, true);
+
     function formatTime(s) {
         if (!s || isNaN(s)) return '0:00';
         const h = Math.floor(s / 3600);
@@ -334,31 +362,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (parts.length === 2) return parts[0] * 60 + parts[1];
         if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
         return 0;
-    }
-
-    function parseLRC(lrc) {
-        if (!lrc) return [];
-        const timestampPattern = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
-        const lines = [];
-        String(lrc).split(/\r?\n/).forEach((rawLine) => {
-            const line = rawLine.trim();
-            if (!line) return;
-            const matches = [...line.matchAll(timestampPattern)];
-            if (!matches.length) return;
-            const lastMatch = matches[matches.length - 1];
-            const text = line.slice(lastMatch.index + lastMatch[0].length).trim();
-            matches.forEach((match) => {
-                const minutes = parseInt(match[1], 10);
-                const seconds = parseInt(match[2], 10);
-                const fraction = (match[3] || '0').padEnd(3, '0').slice(0, 3);
-                lines.push({
-                    timestamp: minutes * 60 + seconds + parseInt(fraction, 10) / 1000,
-                    text
-                });
-            });
-        });
-        return lines
-            .sort((a, b) => a.timestamp - b.timestamp);
     }
 
     function formatBytes(b) {
@@ -981,6 +984,7 @@ document.addEventListener('DOMContentLoaded', () => {
         listeningSync,
         escapeHtml,
         mediaUrlName,
+        albumArtUrl,
         formatTime,
         formatBytes,
         debounce,
@@ -1309,12 +1313,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function initAudioGraph() {
-        if (window.initAudioGraph) {
-            window.initAudioGraph();
-        }
-    }
-
     // ==========================================
     // KEYBOARD SHORTCUTS
     // ==========================================
@@ -1323,8 +1321,11 @@ document.addEventListener('DOMContentLoaded', () => {
             closeShareLyricsModal();
             return;
         }
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        const target = e.target;
+        const tag = target?.tagName || '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;
         if (e.code === 'Space' || e.keyCode === 32) {
+            if (target?.closest?.('button, a')) return;
             e.preventDefault();
             state.isPrimarySyncLeader = true;
             togglePlay();

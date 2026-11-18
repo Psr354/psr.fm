@@ -18,7 +18,9 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
-          pip install -r requirements.txt ruff
+          pip install -r requirements.txt ruff pip-audit
+      - name: Audit Python dependencies
+        run: pip-audit --desc
       - name: Check Python syntax and lint
         run: |
           python -m py_compile app.py routes/*.py services/*.py scripts/backfill_song_sources.py scripts/fetch_lyrics_batch.py tests/backend/*.py

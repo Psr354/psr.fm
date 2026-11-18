@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'psr354-shell-v55';
+const SHELL_CACHE = 'psr354-shell-v56';
 const MEDIA_CACHE = 'psr354-media-v3';
 const RUNTIME_CACHE = 'psr354-runtime-v2';
 const APP_SHELL_KEY = '/?offline-app-shell=1';
@@ -19,6 +19,11 @@ const SHELL_FILES = [
   '/static/js/equalizer.js',
   '/static/js/listening-sync.js',
   '/static/css/style.css',
+  '/static/css/listening-room.css',
+  '/static/css/player-controls.css',
+  '/static/css/user-mgmt.css',
+  '/static/css/theme.css',
+  '/static/css/recap.css',
   '/static/site.webmanifest',
   '/static/img/favicon-32.png',
   '/static/img/apple-touch-icon.png',

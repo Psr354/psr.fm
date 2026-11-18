@@ -105,7 +105,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
                 <div class="capsule-hero-art" aria-hidden="true">
-                    ${heroArt ? `<img src="${heroArt}" alt="" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">` : ''}
+                    ${heroArt ? `<img src="${heroArt}" alt="" loading="lazy" data-fallback="hide">` : ''}
                     <div class="capsule-hero-fallback" ${heroArt ? 'style="display:none;"' : ''}><i class="fas fa-wave-square"></i></div>
                 </div>
             </section>
@@ -127,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="stat-card capsule-stat-card stat-top-track">
                     <div class="stat-icon stat-top-track-art">
-                        ${topTrackArt ? `<img src="${topTrackArt}" alt="" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">` : ''}
+                        ${topTrackArt ? `<img src="${topTrackArt}" alt="" loading="lazy" data-fallback="hide">` : ''}
                         <div class="stat-top-track-fallback" ${topTrackArt ? 'style="display:none;"' : ''}><i class="fas fa-star"></i></div>
                     </div>
                     <div><p>Top Track</p><h4 title="${topTrackLabel}">${topTrackLabel}</h4></div>
@@ -147,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return songs.map((s, idx) => `
                 <div class="song-item capsule-song-item">
                     <span class="rank-number ${idx < 3 ? 'top-3' : ''}">${idx + 1}</span>
-                    <img src="/static/album_art/${mediaUrlName(s.album_art)}" class="song-art" alt="" loading="lazy" onerror="this.onerror=null; this.style.background='#282828'; this.src='/static/img/icon-192.png';">
+                    <img src="${window.albumArtUrl ? window.albumArtUrl(s.album_art) : `/static/album_art/${mediaUrlName(s.album_art)}`}" class="song-art" alt="" loading="lazy" data-fallback="icon">
                     <div class="song-info">
                         <div class="song-title">${escapeHtml(s.title)}</div>
                         <div class="song-artist">${escapeHtml(s.artist || 'Unknown')}</div>

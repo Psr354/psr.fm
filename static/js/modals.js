@@ -549,7 +549,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (addSongsSelected.has(song.id)) row.classList.add('is-selected');
             row.innerHTML = `
                 <input type="checkbox" value="${song.id}" ${alreadyIn ? 'disabled' : ''} ${addSongsSelected.has(song.id) ? 'checked' : ''}>
-                <img src="/static/album_art/${mediaUrlName(song.album_art)}" alt="" loading="lazy" onerror="this.style.background='#282828'; this.removeAttribute('src');">
+                <img src="${window.albumArtUrl ? window.albumArtUrl(song.album_art) : `/static/album_art/${mediaUrlName(song.album_art)}`}" alt="" loading="lazy" data-fallback="blank">
                 <div class="add-song-info">
                     <div class="add-song-title">${escapeHtml(song.title)}</div>
                     <div class="add-song-artist">${escapeHtml(song.artist || 'Unknown')}</div>
