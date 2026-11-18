@@ -85,13 +85,23 @@ for (let repeat = 0; repeat < 3; repeat++) {
 assert.deepEqual([...sessions.values()], [338, 338, 338]);
 assert.equal(nextSession, 3, 'Exactly one play per repetition');
 
-// Pause/resume does not create another play; early pause records its 3 seconds.
+// Skipping or pausing before 3 seconds of heard audio must NOT count as a play.
 state.playbackRequestId++;
 state.playEventLogged = false;
+state.pendingPlaySeconds = 0;
 audio.currentTime = 0;
+audio.paused = false;
 listeners.play();
 listeners.playing();
+audio.currentTime = 2.5;
+listeners.pause();
 await settle();
+assert.equal(nextSession, 3, 'Under 3 seconds must not create a play');
+
+// Resuming the same song and crossing 3 total heard seconds counts 1 play and flushes all heard time.
+audio.paused = false;
+listeners.play();
+listeners.playing();
 audio.currentTime = 3;
 listeners.pause();
 listeners.pause();
@@ -107,6 +117,7 @@ assert.equal(nextSession, 4);
 deferPlay = true;
 audio.paused = false;
 state.playEventLogged = false;
+state.pendingPlaySeconds = 0;
 state.playbackRequestId++;
 audio.currentTime = 0;
 listeners.play();
@@ -116,6 +127,8 @@ listeners.timeupdate();
 const completeOldPlay = resolvePlay;
 deferPlay = false;
 context.playNext(true);
+audio.currentTime = 3;
+listeners.timeupdate();
 await settle();
 const newestSession = state.playbackSessionId;
 completeOldPlay();
@@ -126,19 +139,19 @@ assert.equal(state.playbackSessionId, newestSession, 'Old response must not repl
 // A seek must save only actual playback, including when pause/timeupdate arrive
 // before seeked (mobile pointer controls and keyboard/media-session seeks).
 state.playEventLogged = false;
+state.pendingPlaySeconds = 0;
 state.playbackRequestId++;
 audio.currentTime = 0;
 audio.paused = false;
 listeners.play();
 listeners.playing();
-await settle();
-const seekSession = state.playbackSessionId;
 audio.currentTime = 3;
 context.seekAudio(180);
 listeners.timeupdate();
 listeners.pause();
 listeners.seeked();
 await settle();
+const seekSession = state.playbackSessionId;
 assert.equal(sessions.get(seekSession), 3, 'Skip to 3:00 must not log the skipped 177 seconds');
 listeners.play();
 audio.currentTime = 185;

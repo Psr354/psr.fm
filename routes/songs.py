@@ -9,7 +9,8 @@ from werkzeug.utils import secure_filename
 
 from services.common import (
     get_db, get_owned_playlist, get_owned_song, get_global_song,
-    add_global_song_to_playlists, get_json_object, audio_mimetype
+    add_global_song_to_playlists, get_json_object, audio_mimetype,
+    queue_file_deletion
 )
 from services.downloader import download_queue, validate_song_url
 from services.database import extract_song_source_id
@@ -485,60 +486,68 @@ def delete_song(song_id):
         if playlist_id is None:
             return jsonify({'error': 'Invalid playlist id'}), 400
 
-    if playlist_id is not None:
-        if not get_owned_playlist(db, playlist_id):
-            return jsonify({'error': 'Playlist not found'}), 404
+    try:
+        db.execute('BEGIN IMMEDIATE')
+        if playlist_id is not None:
+            if not get_owned_playlist(db, playlist_id):
+                db.rollback()
+                return jsonify({'error': 'Playlist not found'}), 404
 
-        membership = db.execute(
-            'SELECT 1 FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
-            (playlist_id, song_id)
-        ).fetchone()
-        if not membership:
-            return jsonify({'error': 'Song not found in playlist'}), 404
+            membership = db.execute(
+                'SELECT 1 FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
+                (playlist_id, song_id)
+            ).fetchone()
+            if not membership:
+                db.rollback()
+                return jsonify({'error': 'Song not found in playlist'}), 404
 
-        db.execute(
-            'DELETE FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
-            (playlist_id, song_id)
-        )
-        remaining_playlist_count = db.execute(
-            'SELECT COUNT(*) AS count FROM playlist_songs WHERE song_id = ?',
-            (song_id,)
+            db.execute(
+                'DELETE FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
+                (playlist_id, song_id)
+            )
+            remaining_playlist_count = db.execute(
+                'SELECT COUNT(*) AS count FROM playlist_songs WHERE song_id = ?',
+                (song_id,)
+            ).fetchone()['count']
+            if remaining_playlist_count > 0:
+                db.commit()
+                return jsonify({
+                    'status': 'removed_from_playlist',
+                    'song_deleted': False,
+                    'remaining_playlist_count': remaining_playlist_count,
+                })
+
+        cursor.execute('DELETE FROM playlist_songs WHERE song_id = ?', (song_id,))
+        cursor.execute('DELETE FROM listening_logs WHERE song_id = ?', (song_id,))
+        cursor.execute('DELETE FROM songs WHERE id = ?', (song_id,))
+
+        filename_ref_count = db.execute(
+            'SELECT COUNT(*) AS count FROM songs WHERE filename = ?',
+            (song['filename'],)
         ).fetchone()['count']
-        if remaining_playlist_count > 0:
-            db.commit()
-            return jsonify({
-                'status': 'removed_from_playlist',
-                'song_deleted': False,
-                'remaining_playlist_count': remaining_playlist_count,
-            })
-
-    filename_ref_count = db.execute(
-        'SELECT COUNT(*) AS count FROM songs WHERE filename = ?',
-        (song['filename'],)
-    ).fetchone()['count']
-    album_art_ref_count = 0
-    if song['album_art']:
-        album_art_ref_count = db.execute(
-            'SELECT COUNT(*) AS count FROM songs WHERE album_art = ?',
-            (song['album_art'],)
-        ).fetchone()['count']
-
-    cursor.execute('DELETE FROM playlist_songs WHERE song_id = ?', (song_id,))
-    cursor.execute('DELETE FROM listening_logs WHERE song_id = ?', (song_id,))
-    cursor.execute('DELETE FROM songs WHERE id = ?', (song_id,))
-    db.commit()
+        album_art_ref_count = 0
+        if song['album_art']:
+            song_art_refs = db.execute(
+                'SELECT COUNT(*) AS count FROM songs WHERE album_art = ?',
+                (song['album_art'],)
+            ).fetchone()['count']
+            playlist_art_refs = db.execute(
+                'SELECT COUNT(*) AS count FROM playlists WHERE cover_art = ?',
+                (song['album_art'],)
+            ).fetchone()['count']
+            album_art_ref_count = song_art_refs + playlist_art_refs
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     library_dir = current_app.config.get('LIBRARY_DIR', '')
     album_art_dir = current_app.config.get('ALBUM_ART_DIR', '')
 
-    if filename_ref_count <= 1 and library_dir:
-        mp3 = os.path.join(library_dir, song['filename'])
-        if os.path.exists(mp3):
-            os.remove(mp3)
-    if song['album_art'] and album_art_ref_count <= 1 and album_art_dir:
-        art = os.path.join(album_art_dir, song['album_art'])
-        if os.path.exists(art):
-            os.remove(art)
+    if filename_ref_count == 0 and library_dir:
+        queue_file_deletion(os.path.join(library_dir, song['filename']))
+    if song['album_art'] and album_art_ref_count == 0 and album_art_dir:
+        queue_file_deletion(os.path.join(album_art_dir, song['album_art']))
 
     return jsonify({
         'status': 'deleted',

@@ -19,6 +19,8 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
           pip install -r requirements.txt
+      - name: Check Python syntax
+        run: python -m py_compile app.py routes/*.py services/*.py scripts/backfill_song_sources.py scripts/fetch_lyrics_batch.py tests/backend/*.py
       - name: Run backend unit tests
         run: python -m unittest -v
 
@@ -29,5 +31,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Check JavaScript syntax
+        run: for f in static/js/*.js static/service-worker.js; do node --check "$f"; done
       - name: Run frontend unit tests
         run: node --test tests/frontend/listening.test.mjs tests/frontend/listening-sync.test.mjs tests/frontend/player-queue.test.mjs

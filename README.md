@@ -127,7 +127,7 @@ Fitur offline memerlukan browser yang mendukung Service Worker dan akses melalui
 
 ### Lihat recap
 
-Buka **Frequency Focus** untuk melihat recap bulan atau tahun. **Most Played** menghitung berapa kali lagu mulai diputar; **Most Listened** menghitung total waktu yang didengarkan.
+Buka **Frequency Focus** untuk melihat recap bulan atau tahun. **Most Played** menghitung berapa kali lagu diputar minimal 3 detik; **Most Listened** menghitung total waktu yang didengarkan.
 
 ## Pengelolaan Aplikasi
 

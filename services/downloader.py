@@ -278,11 +278,16 @@ def process_download(task, db_path, download_dir, album_art_dir):
     def progress_hook(d):
         if socketio_instance:
             if d['status'] == 'downloading':
-                percent_str = d.get('_percent_str', '0%').strip().replace('%', '').replace(' ', '')
-                try:
-                    percent = float(percent_str)
-                except (ValueError, TypeError):
-                    percent = 0.0
+                downloaded = d.get('downloaded_bytes')
+                total = d.get('total_bytes') or d.get('total_bytes_estimate')
+                if isinstance(downloaded, (int, float)) and isinstance(total, (int, float)) and total > 0:
+                    percent = round(min(100.0, max(0.0, (downloaded / total) * 100.0)), 1)
+                else:
+                    percent_str = re.sub(r'\x1b\[[0-9;]*m', '', str(d.get('_percent_str', '0%'))).strip().replace('%', '').replace(' ', '')
+                    try:
+                        percent = float(percent_str)
+                    except (ValueError, TypeError):
+                        percent = 0.0
                 socketio_instance.emit('download_progress', {'url': url, 'percent': percent}, room=f'user_{user_id}')
             elif d['status'] == 'finished':
                 socketio_instance.emit('download_progress', {'url': url, 'percent': 100}, room=f'user_{user_id}')

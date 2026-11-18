@@ -67,10 +67,16 @@ try {
     console.log('PASS repeat one: three full 4-second sessions, four starts');
 
     await page.locator('#repeat-btn').click(); // Off.
+    before = await stats();
     await selectSong(3);
     await wait(async () => (await readAudio()).currentTime > 1, 'Audio did not advance');
     await page.locator('#play-pause-btn').click();
-    await wait(async () => (await stats()).sessions.some(s => s.song_id === 3 && s.seconds_listened > 0), 'Early pause did not flush');
+    await page.waitForTimeout(400);
+    assert.equal((await stats()).plays, before.plays, 'Under 3 seconds should not count as a play');
+    await page.locator('#play-pause-btn').click();
+    await wait(async () => (await readAudio()).currentTime > 3.2, 'Audio did not cross 3s play threshold');
+    await page.locator('#play-pause-btn').click();
+    await wait(async () => (await stats()).sessions.some(s => s.song_id === 3 && s.seconds_listened >= 3), 'Early pause after 3s did not flush');
     before = await stats();
     await page.locator('#play-pause-btn').click();
     await page.locator('#progress-bar').focus();
@@ -80,7 +86,7 @@ try {
     await page.waitForTimeout(500);
     assert.equal((await stats()).plays, before.plays, 'Pause or seeking unexpectedly added a play');
     assert.ok((await stats()).seconds - before.seconds < 3, 'Seek jump counted as listening');
-    console.log('PASS pause/resume and keyboard seek');
+    console.log('PASS pause/resume, 3s play threshold and keyboard seek');
 
     await selectSong(1);
     await wait(async () => (await stats()).songs[1].play_count >= 1, 'Auto-next did not play second track');
@@ -111,9 +117,11 @@ try {
     await page.locator('#play-pause-btn').click();
     console.log('PASS equalizer, manual lyrics and share-card PNG');
 
+    const beforeAckPlays = (await stats()).songs[2].play_count;
     await selectSong(3);
-    await wait(async () => (await stats()).songs[2].play_count >= 4, 'Play was not synced before lost-ACK test');
+    await wait(async () => (await stats()).songs[2].play_count > beforeAckPlays, 'Play was not synced before lost-ACK test');
     const ackSession = (await stats()).sessions.at(-1).id;
+    await wait(async () => (await stats()).sessions.find(s => s.id === ackSession)?.seconds_listened >= 3, 'Initial 3s listen was not synced before lost-ACK test');
     const attempts = new Map();
     let loseAck = true;
     await page.route('**/api/listen', async route => {
@@ -126,7 +134,8 @@ try {
             await route.abort(); // Server committed, browser never receives ACK.
         } else await route.continue();
     });
-    await wait(async () => (await readAudio()).currentTime > 1, 'Audio did not advance before lost ACK');
+    const ackStartTime = (await readAudio()).currentTime;
+    await wait(async () => (await readAudio()).currentTime > ackStartTime + 1, 'Audio did not advance before lost ACK');
     await page.locator('#play-pause-btn').click();
     const heard = (await readAudio()).currentTime;
     await wait(async () => [...attempts.values()].some(count => count >= 2), 'Lost ACK was not retried');
@@ -141,7 +150,7 @@ try {
     before = await stats();
     await context.setOffline(true);
     await selectSong(1);
-    await wait(async () => (await readAudio()).currentTime > 1, 'Offline audio did not play');
+    await wait(async () => (await readAudio()).currentTime > 3.2, 'Offline audio did not cross 3s play threshold');
     await page.locator('#play-pause-btn').click();
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.locator('#user-name').waitFor();
@@ -165,7 +174,7 @@ try {
     await mobile.locator('#playlist-list li').first().click();
     before = await stats();
     await mobile.locator('#playlist-songs-list .song-item[data-id="3"] .song-title').click();
-    await mobile.waitForFunction(() => document.getElementById('audio-player').currentTime > 1);
+    await mobile.waitForFunction(() => document.getElementById('audio-player').currentTime > 3.2);
     await wait(async () => (await stats()).plays === before.plays + 1, 'Mobile playback start was not counted');
     const mobileSession = (await stats()).sessions.at(-1).id;
     const bar = await mobile.locator('#progress-bar').boundingBox();
@@ -177,15 +186,16 @@ try {
         await mobile.waitForFunction(() => !document.getElementById('audio-player').paused);
     }
     await mobile.locator('#play-pause-btn').click();
-    await wait(async () => (await stats()).sessions.find(s => s.id === mobileSession).seconds_listened > 0, 'Mobile listening was not flushed');
+    await wait(async () => (await stats()).sessions.find(s => s.id === mobileSession).seconds_listened >= 3, 'Mobile listening was not flushed');
     await mobile.waitForTimeout(500);
     assert.equal((await stats()).plays, before.plays + 1, 'Mobile drag or resume added another play');
-    assert.ok((await stats()).sessions.find(s => s.id === mobileSession).seconds_listened < 5, 'Mobile drag counted skipped audio');
+    assert.ok((await stats()).sessions.find(s => s.id === mobileSession).seconds_listened < 7, 'Mobile drag counted skipped audio');
     await mobileContext.close();
     console.log('PASS mobile touch-drag: one play, actual heard time, no listening rejection');
 
     await selectSong(3);
-    await wait(async () => (await readAudio()).currentTime > 0.5, 'Audio did not start before A-B loop');
+    await wait(async () => (await readAudio()).currentTime > 3.2, 'Audio did not cross 3s before A-B loop');
+    await wait(async () => (await stats()).sessions.some(s => s.song_id === 3 && s.seconds_listened >= 3), 'Initial play not recorded before A-B loop');
     before = await stats();
     await page.locator('#loop-btn').click();
     await page.locator('#loop-start-input').fill('0:00');

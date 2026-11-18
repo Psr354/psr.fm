@@ -1267,18 +1267,26 @@ class AuthAndDownloadTests(unittest.TestCase):
         with open(art_path, 'wb') as handle:
             handle.write(b'\x89PNG\r\n\x1a\nfake-png-bytes')
 
-        # Unauthenticated request must be redirected to login
+        # Unauthenticated request must be redirected to login without long-term caching
         unauth_res = client.get(f'/static/album_art/{art_name}')
         self.assertEqual(unauth_res.status_code, 302)
+        self.assertIsNone(unauth_res.cache_control.max_age)
 
-        # Authenticated request serves the file from ALBUM_ART_DIR
+        # Authenticated request serves the file privately from ALBUM_ART_DIR
         client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
             'username': 'admin', 'password': 'secret123'
         })
         res = client.get(f'/static/album_art/{art_name}')
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data, b'\x89PNG\r\n\x1a\nfake-png-bytes')
+        self.assertTrue(res.cache_control.private)
+        self.assertFalse(res.cache_control.public)
+        self.assertEqual(res.cache_control.max_age, 31536000)
         res.close()
+
+        health_res = client.get('/healthz')
+        self.assertEqual(health_res.status_code, 200)
+        self.assertEqual(health_res.get_json()['status'], 'ok')
 
     def test_all_static_shell_manifest_and_template_assets_resolve(self):
         import re
@@ -1513,15 +1521,39 @@ class AuthAndDownloadTests(unittest.TestCase):
         ).status_code, 200)
 
         self.assertEqual(client.post(
-            '/api/playback-state',
+            '/api/user-settings/theme',
             headers={'X-CSRF-Token': csrf},
-            json={'unknownKey': 'x' * 100},
+            json={'scale': True},
         ).status_code, 400)
         self.assertEqual(client.post(
             '/api/playback-state',
             headers={'X-CSRF-Token': csrf},
-            json={'songId': 1, 'currentTime': 12.5, 'repeatMode': 'one', 'isPlaying': True},
-        ).status_code, 200)
+            json={'unknownKey': 'x' * 100},
+        ).status_code, 400)
+        for bad_repeat in ('one', 'off', True, False, 3, -1):
+            self.assertEqual(client.post(
+                '/api/playback-state',
+                headers={'X-CSRF-Token': csrf},
+                json={'songId': 1, 'repeatMode': bad_repeat},
+            ).status_code, 400)
+        for valid_repeat in (0, 1, 2):
+            self.assertEqual(client.post(
+                '/api/playback-state',
+                headers={'X-CSRF-Token': csrf},
+                json={
+                    'songId': 1,
+                    'playlistId': 1,
+                    'songIndex': 0,
+                    'currentTime': 12.5,
+                    'duration': 180.0,
+                    'repeatMode': valid_repeat,
+                    'isPlaying': True,
+                    'isShuffle': False,
+                    'isMuted': False,
+                    'volume': 0.8,
+                    'timestamp': 1700000000000,
+                },
+            ).status_code, 200)
 
     def test_password_change_invalidates_other_sessions_and_reencodes_apic(self):
         from routes.songs import _save_reencoded_album_art

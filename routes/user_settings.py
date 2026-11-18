@@ -55,6 +55,8 @@ def _validate_theme_payload(payload):
                 return None, f'Invalid value for {key}'
             cleaned[key] = value
         elif key == 'scale':
+            if isinstance(value, bool):
+                return None, 'Invalid scale'
             try:
                 scale_val = float(value)
             except (TypeError, ValueError):
@@ -92,14 +94,31 @@ def _validate_playback_payload(payload):
         if not all(_validate_song_meta(item) for item in songs):
             return None, 'Invalid playlistSongs item'
 
-    for num_field in ('currentTime', 'duration', 'volume'):
+    for id_field in ('songId', 'playlistId'):
+        if id_field in payload and payload[id_field] is not None:
+            val = payload[id_field]
+            if isinstance(val, bool) or not isinstance(val, (int, str)) or (isinstance(val, str) and len(val) > 64):
+                return None, f'Invalid {id_field}'
+
+    if 'songIndex' in payload and payload['songIndex'] is not None:
+        val = payload['songIndex']
+        if isinstance(val, bool) or not isinstance(val, int) or val < -1 or val > 100000:
+            return None, 'Invalid songIndex'
+
+    for bool_field in ('isPlaying', 'isShuffle', 'isMuted'):
+        if bool_field in payload and payload[bool_field] is not None:
+            if not isinstance(payload[bool_field], bool):
+                return None, f'Invalid {bool_field}'
+
+    for num_field in ('currentTime', 'duration', 'volume', 'timestamp'):
         if num_field in payload and payload[num_field] is not None:
             val = payload[num_field]
             if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val):
                 return None, f'Invalid {num_field}'
 
     if 'repeatMode' in payload and payload['repeatMode'] is not None:
-        if payload['repeatMode'] not in ('off', 'all', 'one'):
+        val = payload['repeatMode']
+        if isinstance(val, bool) or val not in (0, 1, 2):
             return None, 'Invalid repeatMode'
 
     if 'deviceId' in payload and payload['deviceId'] is not None:

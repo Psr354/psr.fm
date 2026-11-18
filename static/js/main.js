@@ -129,6 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
         trackTransitionTimer: null,
         shouldBePlaying: false,
         playEventLogged: false,
+        pendingPlaySeconds: 0,
         playbackSessionId: null,
         playbackSessionPromise: null,
         offlineAudioUrl: null
@@ -1551,6 +1552,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const targetSongId = String(saved.songId || saved.songMeta.id || '');
         const isSameSong = Boolean(currentPlayingId && targetSongId && currentPlayingId === targetSongId);
 
+        if (!isSameSong) {
+            flushListenLog();
+            state.playEventLogged = false;
+            state.pendingPlaySeconds = 0;
+            state.playbackSessionId = null;
+            state.playbackSessionPromise = null;
+            state.playbackRequestId += 1;
+        }
+
         // Update State
         state.currentPlaylistId = saved.playlistId || null;
         state.currentPlaylistSongs = Array.isArray(saved.playlistSongs) && saved.playlistSongs.length ? saved.playlistSongs : [saved.songMeta];
@@ -1772,8 +1782,11 @@ function resumePlaybackAfterBackground() {
 
             if (!el.audio.paused && !el.audio.seeking && !state.isSeeking && state.currentPlayingSongId) {
                 const delta = el.audio.currentTime - state.lastLoggedTime;
-                if (delta >= 5) {
-                    logListenDuration(state.currentPlayingSongId, delta);
+                const chunkThreshold = state.playEventLogged
+                    ? 5
+                    : Math.max(0.25, getPlayCountThreshold() - (state.pendingPlaySeconds || 0));
+                if (delta >= chunkThreshold) {
+                    ensurePlayLoggedAndFlush(delta);
                     state.lastLoggedTime = el.audio.currentTime;
                 } else if (delta < 0) {
                     state.lastLoggedTime = el.audio.currentTime;
@@ -1809,22 +1822,6 @@ function resumePlaybackAfterBackground() {
 
     el.audio.addEventListener('playing', () => {
         if (typeof resumeEqContext === 'function') resumeEqContext();
-        if (state.currentPlayingSongId && !state.playEventLogged) {
-            state.playEventLogged = true;
-            state.playbackSessionId = null;
-            const songId = state.currentPlayingSongId;
-            const playbackRequestId = state.playbackRequestId;
-            state.playbackSessionPromise = state.playbackStatisticsSongId
-                ? logPlay(state.playbackStatisticsSongId) : Promise.resolve(null);
-            state.playbackSessionPromise.then((sessionId) => {
-                if (
-                    String(state.currentPlayingSongId) === String(songId)
-                    && state.playbackRequestId === playbackRequestId
-                ) {
-                    state.playbackSessionId = sessionId;
-                }
-            });
-        }
     });
 
     el.audio.addEventListener('pause', () => {
@@ -2031,10 +2028,53 @@ function resumePlaybackAfterBackground() {
         if (state.currentPlayingSongId) {
             const delta = el.audio.currentTime - state.lastLoggedTime;
             if (delta > 0 && !el.audio.seeking && !state.isSeeking) {
-                logListenDuration(state.currentPlayingSongId, delta);
+                ensurePlayLoggedAndFlush(delta);
             }
             state.lastLoggedTime = el.audio.currentTime;
         }
+    }
+
+    const PLAY_COUNT_THRESHOLD_SECONDS = 3;
+
+    function canRecordPlaybackStats() {
+        return typeof isPrimarySyncLeader === 'undefined' || isPrimarySyncLeader;
+    }
+
+    function getPlayCountThreshold() {
+        const dur = el.audio && el.audio.duration;
+        if (dur && Number.isFinite(dur) && dur > 0) {
+            return Math.min(PLAY_COUNT_THRESHOLD_SECONDS, dur);
+        }
+        return PLAY_COUNT_THRESHOLD_SECONDS;
+    }
+
+    function ensurePlayLoggedAndFlush(seconds) {
+        if (!canRecordPlaybackStats() || !state.currentPlayingSongId || !(seconds > 0)) return;
+        if (!state.playEventLogged) {
+            state.pendingPlaySeconds = (state.pendingPlaySeconds || 0) + seconds;
+            if (state.pendingPlaySeconds < getPlayCountThreshold()) {
+                return;
+            }
+            const initialSeconds = state.pendingPlaySeconds;
+            state.pendingPlaySeconds = 0;
+            state.playEventLogged = true;
+            state.playbackSessionId = null;
+            const songId = state.currentPlayingSongId;
+            const playbackRequestId = state.playbackRequestId;
+            state.playbackSessionPromise = state.playbackStatisticsSongId
+                ? logPlay(state.playbackStatisticsSongId) : Promise.resolve(null);
+            state.playbackSessionPromise.then((sessionId) => {
+                if (
+                    String(state.currentPlayingSongId) === String(songId)
+                    && state.playbackRequestId === playbackRequestId
+                ) {
+                    state.playbackSessionId = sessionId;
+                }
+            });
+            logListenDuration(songId, initialSeconds);
+            return;
+        }
+        logListenDuration(state.currentPlayingSongId, seconds);
     }
 
     async function logListen(songId, seconds) {
@@ -2956,6 +2996,7 @@ function resumePlaybackAfterBackground() {
         state.playbackStatisticsSongId = Object.hasOwn(song, 'in_my_library')
             ? song.owned_song_id : song.id;
         state.playEventLogged = false;
+        state.pendingPlaySeconds = 0;
         state.playbackSessionId = null;
         state.playbackSessionPromise = null;
 
@@ -2995,6 +3036,7 @@ function resumePlaybackAfterBackground() {
         state.currentPlayingSongId = String(song.id);
         state.playbackStatisticsSongId = song.id;
         state.playEventLogged = false;
+        state.pendingPlaySeconds = 0;
         state.playbackSessionId = null;
         state.playbackSessionPromise = null;
 
@@ -3043,6 +3085,7 @@ function resumePlaybackAfterBackground() {
         if (state.repeatMode === 2 && isFromSongEnded) {
             state.playbackRequestId += 1;
             state.playEventLogged = false;
+            state.pendingPlaySeconds = 0;
             state.playbackSessionId = null;
             state.playbackSessionPromise = null;
             state.lastLoggedTime = 0;

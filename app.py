@@ -11,7 +11,7 @@ from services.database import init_db, get_db_connection
 from services.downloader import download_queue, start_worker
 from services.lyrics import search_lyrics
 from services.common import (
-    User, get_user_status_bar_color, reset_rate_limits,
+    User, get_db, get_user_status_bar_color, reset_rate_limits,
     LOGIN_RATE_LIMIT_MAX_ATTEMPTS
 )
 
@@ -108,9 +108,14 @@ def set_csrf_cookie(response):
         samesite='Lax',
         secure=COOKIE_SECURE,
     )
-    if request.path.startswith('/static/album_art/') or request.path.endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg')):
-        response.cache_control.max_age = 31536000
-        response.cache_control.public = True
+    if response.status_code == 200:
+        if request.path.startswith('/static/album_art/'):
+            response.cache_control.max_age = 31536000
+            response.cache_control.private = True
+            response.cache_control.public = False
+        elif request.path.endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg')):
+            response.cache_control.max_age = 31536000
+            response.cache_control.public = True
     return response
 
 
@@ -134,14 +139,11 @@ def load_user(user_id):
     uid_part, token = raw.split(':', 1)
     if not uid_part.isdigit() or not token:
         return None
-    conn = get_db_connection(app.config.get('DATABASE_PATH') or DATABASE_PATH)
-    try:
-        row = conn.execute(
-            'SELECT id, username, role, session_token FROM users WHERE id = ? AND session_token = ?',
-            (int(uid_part), token),
-        ).fetchone()
-    finally:
-        conn.close()
+    conn = get_db()
+    row = conn.execute(
+        'SELECT id, username, role, session_token FROM users WHERE id = ? AND session_token = ?',
+        (int(uid_part), token),
+    ).fetchone()
     if row:
         return User(
             id=row['id'],
@@ -187,6 +189,15 @@ def get_asset_version(filename):
 @app.context_processor
 def inject_asset_version():
     return dict(asset_version=get_asset_version)
+
+
+@app.route('/healthz')
+def healthz():
+    try:
+        get_db().execute('SELECT 1').fetchone()
+        return jsonify({'status': 'ok'}), 200
+    except Exception:
+        return jsonify({'status': 'error'}), 503
 
 
 @app.route('/')
