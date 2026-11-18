@@ -26,6 +26,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${h}h ${m}m`;
     }
 
+    let recapAbortController = null;
+
     async function loadFrequencyFocus(periodCode = 'month-current') {
         state.capsulePeriod = periodCode;
         const now = new Date();
@@ -46,15 +48,30 @@ document.addEventListener('DOMContentLoaded', () => {
             year -= 1;
         }
 
+        if (recapAbortController) {
+            recapAbortController.abort();
+        }
+        const controller = new AbortController();
+        recapAbortController = controller;
+
         try {
-            const response = await fetch(`/api/recap?period=${period}&month=${month}&year=${year}&tz_offset=${now.getTimezoneOffset()}`);
+            const response = await fetch(
+                `/api/recap?period=${period}&month=${month}&year=${year}&tz_offset=${now.getTimezoneOffset()}`,
+                { signal: controller.signal }
+            );
             if (!response.ok) throw new Error("Failed to fetch recap");
             const data = await response.json();
+            if (recapAbortController !== controller) return;
             state.capsuleData = data;
             renderFrequencyFocus(data);
         } catch (e) {
+            if (e && e.name === 'AbortError') return;
             console.error(e);
             showToast("Error loading Frequency Focus");
+        } finally {
+            if (recapAbortController === controller) {
+                recapAbortController = null;
+            }
         }
     }
 

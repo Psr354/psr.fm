@@ -329,75 +329,179 @@ def get_recap():
 
     db = get_db()
 
-    top_played_rows = db.execute('''
-        SELECT
-            MAX(s.id) AS id,
-            COALESCE(MAX(s.title), NULLIF(MAX(pe.song_title), ''), 'Deleted Song') AS title,
-            COALESCE(MAX(s.artist), NULLIF(MAX(pe.song_artist), ''), 'Unknown') AS artist,
-            COALESCE(MAX(s.album_art), '') AS album_art,
-            COUNT(pe.id) AS play_count,
-            COALESCE((
-                SELECT SUM(l.seconds_listened)
-                FROM listening_logs l
-                WHERE l.user_id = pe.user_id
-                  AND l.timestamp >= ? AND l.timestamp <= ?
-                  AND (
-                      CASE
-                          WHEN l.song_id IS NOT NULL THEN 'id:' || l.song_id
-                          ELSE 'del:' || COALESCE(l.song_title, '') || '|' || COALESCE(l.song_artist, '')
-                      END
-                  ) = (
-                      CASE
-                          WHEN pe.song_id IS NOT NULL THEN 'id:' || pe.song_id
-                          ELSE 'del:' || COALESCE(pe.song_title, '') || '|' || COALESCE(pe.song_artist, '')
-                      END
-                  )
-            ), 0) AS total_listened
-        FROM play_events pe
-        LEFT JOIN songs s ON pe.song_id = s.id
-        WHERE pe.user_id = ? AND pe.timestamp >= ? AND pe.timestamp <= ?
-        GROUP BY CASE
-            WHEN pe.song_id IS NOT NULL THEN 'id:' || pe.song_id
-            ELSE 'del:' || COALESCE(pe.song_title, '') || '|' || COALESCE(pe.song_artist, '')
-        END
-        ORDER BY play_count DESC, total_listened DESC
-        LIMIT 10
-    ''', (start_str, end_str, current_user.id, start_str, end_str)).fetchall()
+    listen_by_key = {}
+    play_by_key = {}
+    monthly_stats = {}
+    top_song_by_month = {}
+    monthly_breakdown = []
 
-    top_listened_rows = db.execute('''
-        SELECT
-            MAX(s.id) AS id,
-            COALESCE(MAX(s.title), NULLIF(MAX(l.song_title), ''), 'Deleted Song') AS title,
-            COALESCE(MAX(s.artist), NULLIF(MAX(l.song_artist), ''), 'Unknown') AS artist,
-            COALESCE(MAX(s.album_art), '') AS album_art,
-            SUM(l.seconds_listened) AS total_listened,
-            (
-                SELECT COUNT(pe.id)
-                FROM play_events pe
-                WHERE pe.user_id = l.user_id
-                  AND pe.timestamp >= ? AND pe.timestamp <= ?
-                  AND (
-                      CASE
-                          WHEN pe.song_id IS NOT NULL THEN 'id:' || pe.song_id
-                          ELSE 'del:' || COALESCE(pe.song_title, '') || '|' || COALESCE(pe.song_artist, '')
-                      END
-                  ) = (
-                      CASE
-                          WHEN l.song_id IS NOT NULL THEN 'id:' || l.song_id
-                          ELSE 'del:' || COALESCE(l.song_title, '') || '|' || COALESCE(l.song_artist, '')
-                      END
-                  )
-            ) AS play_count
-        FROM listening_logs l
-        LEFT JOIN songs s ON l.song_id = s.id
-        WHERE l.user_id = ? AND l.timestamp >= ? AND l.timestamp <= ?
-        GROUP BY CASE
-            WHEN l.song_id IS NOT NULL THEN 'id:' || l.song_id
-            ELSE 'del:' || COALESCE(l.song_title, '') || '|' || COALESCE(l.song_artist, '')
-        END
-        ORDER BY total_listened DESC, play_count DESC
-        LIMIT 10
-    ''', (start_str, end_str, current_user.id, start_str, end_str)).fetchall()
+    if period == 'year':
+        monthly_listen_rows = db.execute('''
+            SELECT
+                CAST(strftime('%m', datetime(l.timestamp, ?)) AS INTEGER) AS month_num,
+                CASE
+                    WHEN l.song_id IS NOT NULL THEN 'id:' || l.song_id
+                    ELSE 'del:' || COALESCE(l.song_title, '') || '|' || COALESCE(l.song_artist, '')
+                END AS song_key,
+                MAX(s.id) AS id,
+                COALESCE(MAX(s.title), NULLIF(MAX(l.song_title), ''), 'Deleted Song') AS title,
+                COALESCE(MAX(s.artist), NULLIF(MAX(l.song_artist), ''), 'Unknown') AS artist,
+                COALESCE(MAX(s.album_art), '') AS album_art,
+                COALESCE(SUM(l.seconds_listened), 0) AS total_listened
+            FROM listening_logs l
+            LEFT JOIN songs s ON l.song_id = s.id
+            WHERE l.user_id = ? AND l.timestamp >= ? AND l.timestamp <= ?
+            GROUP BY month_num, song_key
+        ''', (local_modifier, current_user.id, start_str, end_str)).fetchall()
+
+        top_song_rank_key = {}
+        for row in monthly_listen_rows:
+            secs = row['total_listened'] or 0
+            skey = row['song_key']
+            agg = listen_by_key.get(skey)
+            if agg is None:
+                listen_by_key[skey] = {
+                    'id': row['id'],
+                    'title': row['title'],
+                    'artist': row['artist'],
+                    'album_art': row['album_art'],
+                    'total_listened': secs,
+                }
+            else:
+                agg['total_listened'] += secs
+                if agg['id'] is None and row['id'] is not None:
+                    agg['id'] = row['id']
+                if not agg['album_art'] and row['album_art']:
+                    agg['album_art'] = row['album_art']
+
+            m = row['month_num']
+            if m is not None and 1 <= m <= 12:
+                mstat = monthly_stats.setdefault(m, {
+                    'total_seconds': 0,
+                    'unique_songs': 0,
+                    'total_plays': 0,
+                })
+                mstat['total_seconds'] += secs
+                mstat['unique_songs'] += 1
+                prev = top_song_rank_key.get(m)
+                if prev is None or secs > prev[0] or (secs == prev[0] and skey < prev[1]):
+                    top_song_rank_key[m] = (secs, skey)
+                    top_song_by_month[m] = {
+                        'title': row['title'],
+                        'artist': row['artist'],
+                        'album_art': row['album_art'],
+                        'total_listened': secs,
+                    }
+
+        monthly_play_rows = db.execute('''
+            SELECT
+                CAST(strftime('%m', datetime(pe.timestamp, ?)) AS INTEGER) AS month_num,
+                CASE
+                    WHEN pe.song_id IS NOT NULL THEN 'id:' || pe.song_id
+                    ELSE 'del:' || COALESCE(pe.song_title, '') || '|' || COALESCE(pe.song_artist, '')
+                END AS song_key,
+                MAX(s.id) AS id,
+                COALESCE(MAX(s.title), NULLIF(MAX(pe.song_title), ''), 'Deleted Song') AS title,
+                COALESCE(MAX(s.artist), NULLIF(MAX(pe.song_artist), ''), 'Unknown') AS artist,
+                COALESCE(MAX(s.album_art), '') AS album_art,
+                COUNT(pe.id) AS play_count
+            FROM play_events pe
+            LEFT JOIN songs s ON pe.song_id = s.id
+            WHERE pe.user_id = ? AND pe.timestamp >= ? AND pe.timestamp <= ?
+            GROUP BY month_num, song_key
+        ''', (local_modifier, current_user.id, start_str, end_str)).fetchall()
+
+        for row in monthly_play_rows:
+            pcount = row['play_count'] or 0
+            skey = row['song_key']
+            agg = play_by_key.get(skey)
+            if agg is None:
+                play_by_key[skey] = {
+                    'id': row['id'],
+                    'title': row['title'],
+                    'artist': row['artist'],
+                    'album_art': row['album_art'],
+                    'play_count': pcount,
+                }
+            else:
+                agg['play_count'] += pcount
+                if agg['id'] is None and row['id'] is not None:
+                    agg['id'] = row['id']
+                if not agg['album_art'] and row['album_art']:
+                    agg['album_art'] = row['album_art']
+
+            m = row['month_num']
+            if m is not None and 1 <= m <= 12:
+                mstat = monthly_stats.setdefault(m, {
+                    'total_seconds': 0,
+                    'unique_songs': 0,
+                    'total_plays': 0,
+                })
+                mstat['total_plays'] += pcount
+
+        month_names = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        for m in sorted(monthly_stats):
+            monthly_breakdown.append({
+                'month': month_names[m],
+                'month_num': m,
+                'total_seconds': monthly_stats[m]['total_seconds'],
+                'unique_songs': monthly_stats[m]['unique_songs'],
+                'total_plays': monthly_stats[m]['total_plays'],
+                'top_song': top_song_by_month.get(m),
+            })
+    else:
+        listen_rows = db.execute('''
+            SELECT
+                CASE
+                    WHEN l.song_id IS NOT NULL THEN 'id:' || l.song_id
+                    ELSE 'del:' || COALESCE(l.song_title, '') || '|' || COALESCE(l.song_artist, '')
+                END AS song_key,
+                MAX(s.id) AS id,
+                COALESCE(MAX(s.title), NULLIF(MAX(l.song_title), ''), 'Deleted Song') AS title,
+                COALESCE(MAX(s.artist), NULLIF(MAX(l.song_artist), ''), 'Unknown') AS artist,
+                COALESCE(MAX(s.album_art), '') AS album_art,
+                COALESCE(SUM(l.seconds_listened), 0) AS total_listened
+            FROM listening_logs l
+            LEFT JOIN songs s ON l.song_id = s.id
+            WHERE l.user_id = ? AND l.timestamp >= ? AND l.timestamp <= ?
+            GROUP BY song_key
+        ''', (current_user.id, start_str, end_str)).fetchall()
+
+        for row in listen_rows:
+            listen_by_key[row['song_key']] = {
+                'id': row['id'],
+                'title': row['title'],
+                'artist': row['artist'],
+                'album_art': row['album_art'],
+                'total_listened': row['total_listened'] or 0,
+            }
+
+        play_rows = db.execute('''
+            SELECT
+                CASE
+                    WHEN pe.song_id IS NOT NULL THEN 'id:' || pe.song_id
+                    ELSE 'del:' || COALESCE(pe.song_title, '') || '|' || COALESCE(pe.song_artist, '')
+                END AS song_key,
+                MAX(s.id) AS id,
+                COALESCE(MAX(s.title), NULLIF(MAX(pe.song_title), ''), 'Deleted Song') AS title,
+                COALESCE(MAX(s.artist), NULLIF(MAX(pe.song_artist), ''), 'Unknown') AS artist,
+                COALESCE(MAX(s.album_art), '') AS album_art,
+                COUNT(pe.id) AS play_count
+            FROM play_events pe
+            LEFT JOIN songs s ON pe.song_id = s.id
+            WHERE pe.user_id = ? AND pe.timestamp >= ? AND pe.timestamp <= ?
+            GROUP BY song_key
+        ''', (current_user.id, start_str, end_str)).fetchall()
+
+        for row in play_rows:
+            play_by_key[row['song_key']] = {
+                'id': row['id'],
+                'title': row['title'],
+                'artist': row['artist'],
+                'album_art': row['album_art'],
+                'play_count': row['play_count'] or 0,
+            }
 
     peak_hour_row = db.execute('''
         SELECT CAST(strftime('%H', datetime(timestamp, ?)) AS INTEGER) as hour,
@@ -410,121 +514,43 @@ def get_recap():
         LIMIT 1
     ''', (local_modifier, current_user.id, start_str, end_str)).fetchone()
 
-    stats_row = db.execute('''
-        SELECT 
-            COALESCE(SUM(seconds_listened), 0) as total_seconds,
-            COUNT(DISTINCT CASE
-                WHEN song_id IS NOT NULL THEN 'id:' || song_id
-                ELSE 'del:' || COALESCE(song_title, '') || '|' || COALESCE(song_artist, '')
-            END) as unique_songs
-        FROM listening_logs
-        WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
-    ''', (current_user.id, start_str, end_str)).fetchone()
-
-    plays_row = db.execute('''
-        SELECT COUNT(id) as total_plays
-        FROM play_events
-        WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
-    ''', (current_user.id, start_str, end_str)).fetchone()
-
-    monthly_breakdown = []
-    if period == 'year':
-        monthly_listening_rows = db.execute('''
-            SELECT
-                CAST(strftime('%m', datetime(timestamp, ?)) AS INTEGER) as month_num,
-                COALESCE(SUM(seconds_listened), 0) as total_seconds,
-                COUNT(DISTINCT CASE
-                    WHEN song_id IS NOT NULL THEN 'id:' || song_id
-                    ELSE 'del:' || COALESCE(song_title, '') || '|' || COALESCE(song_artist, '')
-                END) as unique_songs
-            FROM listening_logs
-            WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
-            GROUP BY month_num
-            ORDER BY month_num
-        ''', (local_modifier, current_user.id, start_str, end_str)).fetchall()
-        monthly_play_rows = db.execute('''
-            SELECT
-                CAST(strftime('%m', datetime(timestamp, ?)) AS INTEGER) as month_num,
-                COUNT(id) as total_plays
-            FROM play_events
-            WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
-            GROUP BY month_num
-            ORDER BY month_num
-        ''', (local_modifier, current_user.id, start_str, end_str)).fetchall()
-
-        monthly_stats = {
-            row['month_num']: {
-                'total_seconds': row['total_seconds'],
-                'unique_songs': row['unique_songs'],
-                'total_plays': 0,
+    top_played = sorted(
+        (
+            {
+                'id': p['id'],
+                'title': p['title'],
+                'artist': p['artist'],
+                'album_art': p['album_art'],
+                'play_count': p['play_count'],
+                'total_listened': listen_by_key[skey]['total_listened'] if skey in listen_by_key else 0,
             }
-            for row in monthly_listening_rows
-        }
-        for row in monthly_play_rows:
-            monthly_stats.setdefault(row['month_num'], {
-                'total_seconds': 0,
-                'unique_songs': 0,
-                'total_plays': 0,
-            })
-            monthly_stats[row['month_num']]['total_plays'] = row['total_plays']
+            for skey, p in play_by_key.items()
+        ),
+        key=lambda item: (item['play_count'], item['total_listened']),
+        reverse=True,
+    )[:10]
 
-        month_names = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                       'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-        monthly_top_song_rows = db.execute('''
-            WITH monthly_song_totals AS (
-                SELECT
-                    CAST(strftime('%m', datetime(l.timestamp, ?)) AS INTEGER) AS month_num,
-                    CASE
-                        WHEN l.song_id IS NOT NULL THEN 'id:' || l.song_id
-                        ELSE 'del:' || COALESCE(l.song_title, '') || '|' || COALESCE(l.song_artist, '')
-                    END AS song_key,
-                    COALESCE(MAX(s.title), NULLIF(MAX(l.song_title), ''), 'Deleted Song') AS title,
-                    COALESCE(MAX(s.artist), NULLIF(MAX(l.song_artist), ''), 'Unknown') AS artist,
-                    COALESCE(MAX(s.album_art), '') AS album_art,
-                    SUM(l.seconds_listened) AS total_listened
-                FROM listening_logs l
-                LEFT JOIN songs s ON l.song_id = s.id
-                WHERE l.user_id = ? AND l.timestamp >= ? AND l.timestamp <= ?
-                GROUP BY month_num, song_key
-            ),
-            ranked AS (
-                SELECT
-                    month_num,
-                    title,
-                    artist,
-                    album_art,
-                    total_listened,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY month_num
-                        ORDER BY total_listened DESC, song_key ASC
-                    ) AS rn
-                FROM monthly_song_totals
-            )
-            SELECT month_num, title, artist, album_art, total_listened
-            FROM ranked
-            WHERE rn = 1
-        ''', (local_modifier, current_user.id, start_str, end_str)).fetchall()
-        top_song_by_month = {
-            row['month_num']: {
-                'title': row['title'],
-                'artist': row['artist'],
-                'album_art': row['album_art'],
-                'total_listened': row['total_listened'],
+    top_listened = sorted(
+        (
+            {
+                'id': l['id'],
+                'title': l['title'],
+                'artist': l['artist'],
+                'album_art': l['album_art'],
+                'total_listened': l['total_listened'],
+                'play_count': play_by_key[skey]['play_count'] if skey in play_by_key else 0,
             }
-            for row in monthly_top_song_rows
-        }
-        for m in sorted(monthly_stats):
-            monthly_breakdown.append({
-                'month': month_names[m],
-                'month_num': m,
-                'total_seconds': monthly_stats[m]['total_seconds'],
-                'unique_songs': monthly_stats[m]['unique_songs'],
-                'total_plays': monthly_stats[m]['total_plays'],
-                'top_song': top_song_by_month.get(m)
-            })
+            for skey, l in listen_by_key.items()
+        ),
+        key=lambda item: (item['total_listened'], item['play_count']),
+        reverse=True,
+    )[:10]
 
-    stats = dict(stats_row) if stats_row else {"total_seconds": 0, "unique_songs": 0}
-    stats["total_plays"] = plays_row["total_plays"] if plays_row else 0
+    stats = {
+        'total_seconds': sum(item['total_listened'] for item in listen_by_key.values()),
+        'unique_songs': len(listen_by_key),
+        'total_plays': sum(item['play_count'] for item in play_by_key.values()),
+    }
 
     result = {
         "period": {
@@ -533,8 +559,8 @@ def get_recap():
             "end": end_date.isoformat(),
             "label": label
         },
-        "top_played": [dict(r) for r in top_played_rows],
-        "top_listened": [dict(r) for r in top_listened_rows],
+        "top_played": top_played,
+        "top_listened": top_listened,
         "peak_hour": dict(peak_hour_row) if peak_hour_row else None,
         "stats": stats
     }
