@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const source = fs.readFileSync(new URL('../../static/js/main.js', import.meta.url), 'utf8');
+const queueSource = fs.readFileSync(new URL('../../static/js/queue.js', import.meta.url), 'utf8');
+const playerSource = fs.readFileSync(new URL('../../static/js/player.js', import.meta.url), 'utf8');
 const songs = [1, 2, 3].map(id => ({ id }));
 const played = [];
 const state = { currentPlaylistSongs: songs, currentPlaylistId: 1, currentSongIndex: 0,
@@ -12,15 +13,15 @@ const context = vm.createContext({ state, el: { audio: { pause() { state.shouldB
     playSong(list, index) { played.push(list[index].id); state.currentSongIndex = index; context.buildQueue(); },
     playLibrarySong(song) { played.push(song.id); },
 });
-function load(start, end) {
-    const from = source.indexOf(start);
-    const to = source.indexOf(end, from);
+function load(src, start, end) {
+    const from = src.indexOf(start);
+    const to = src.indexOf(end, from);
     assert.ok(from >= 0 && to > from);
-    vm.runInContext(source.slice(from, to), context);
+    vm.runInContext(src.slice(from, to), context);
 }
-load('    function rebuildShuffleOrder()', '    function updateQueueUI()');
-load('    function enqueueSong(', "    document.getElementById('queue-clear-btn')");
-load('    function playNext(', '    function playPrev(');
+load(queueSource, '    function rebuildShuffleOrder()', '    function updateQueueUI()');
+load(queueSource, '    function enqueueSong(', "    document.getElementById('queue-clear-btn')");
+load(playerSource, '    function playNext(', '    function playPrev(');
 context.buildQueue();
 assert.deepEqual(Array.from(state.playQueue, song => song.id), [2, 3]);
 context.playNext(true);
@@ -52,9 +53,9 @@ const offlineContext = vm.createContext({
     isUsableAudioResponse: async () => true,
     resumeCurrentSong() {},
 });
-const loadSongAudioStart = source.indexOf('    async function loadSongAudio(');
-const loadSongAudioEnd = source.indexOf('    function playLibrarySong(', loadSongAudioStart);
-vm.runInContext(source.slice(loadSongAudioStart, loadSongAudioEnd), offlineContext);
+const loadSongAudioStart = playerSource.indexOf('    async function loadSongAudio(');
+const loadSongAudioEnd = playerSource.indexOf('    function playLibrarySong(', loadSongAudioStart);
+vm.runInContext(playerSource.slice(loadSongAudioStart, loadSongAudioEnd), offlineContext);
 await offlineContext.loadSongAudio({ filename: 'stale.mp3' }, 1);
 assert.deepEqual(revokedUrls, ['blob:stale'], 'A stale offline load only revokes its own URL');
 

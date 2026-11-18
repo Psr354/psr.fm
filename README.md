@@ -182,6 +182,8 @@ Data tersebut disimpan di folder proyek melalui bind mount (`./data:/app/data`) 
 
 Untuk akses melalui internet, gunakan HTTPS, reverse proxy, dan atur `PSR_FM_COOKIE_SECURE=1` pada `.env`. Untuk pengembangan lokal dengan bind-mount source code, jalankan `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`.
 
+> **Catatan deployment Gunicorn:** Pertahankan `--workers 1` (seperti pada `Dockerfile`). Antrean download, rate limiter in-memory, cache storage, dan sesi Socket.IO berjalan di dalam satu proses; menaikkan jumlah worker tanpa store eksternal (seperti Redis) akan menyebabkan job download diproses ganda dan state tidak konsisten.
+
 ## Struktur Folder
 
 ```text

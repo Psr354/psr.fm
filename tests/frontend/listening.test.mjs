@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const source = fs.readFileSync(new URL('../../static/js/main.js', import.meta.url), 'utf8');
+const source = fs.readFileSync(new URL('../../static/js/player.js', import.meta.url), 'utf8');
 const listeners = {};
 const sessions = new Map();
 const errors = [];

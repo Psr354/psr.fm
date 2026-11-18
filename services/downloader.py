@@ -74,6 +74,11 @@ class PersistentDownloadQueue(queue.Queue):
 download_queue = PersistentDownloadQueue()
 socketio_instance = None
 MAX_DOWNLOAD_DURATION_SECONDS = 600
+GENERIC_DOWNLOAD_ERROR = 'Download failed. Please check the URL or try again later.'
+
+
+class DownloadUserError(Exception):
+    """Exception whose message is safe to surface directly to end users."""
 YOUTUBE_HTTP_HEADERS = {
     'User-Agent': (
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -154,7 +159,7 @@ def _spotify_track_metadata(url):
         re.DOTALL,
     )
     if not match:
-        raise Exception('Could not read Spotify track metadata')
+        raise DownloadUserError('Could not read Spotify track metadata')
 
     payload = json.loads(html.unescape(match.group(1)))
     entity = payload['props']['pageProps']['state']['data']['entity']
@@ -219,7 +224,8 @@ def download_worker(db_path, download_dir, album_art_dir, sio):
                 except Exception:
                     pass
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"[ERROR] Download failed for {task.get('url')}: {e}")
+            client_error = str(e) if isinstance(e, DownloadUserError) else GENERIC_DOWNLOAD_ERROR
             if job_id and db_path and os.path.exists(db_path):
                 try:
                     conn = get_db_connection(db_path)
@@ -229,7 +235,7 @@ def download_worker(db_path, download_dir, album_art_dir, sio):
                 except Exception:
                     pass
             if socketio_instance:
-                socketio_instance.emit('download_error', {'url': task['url'], 'error': str(e)}, room=f"user_{task['user_id']}")
+                socketio_instance.emit('download_error', {'url': task['url'], 'error': client_error}, room=f"user_{task['user_id']}")
         finally:
             download_queue.task_done()
 
@@ -363,6 +369,9 @@ def _dispatch_lyrics_lookup(db_path, song_id, title, artist, duration_seconds):
         ).start()
 
 
+dispatch_lyrics_lookup = _dispatch_lyrics_lookup
+
+
 def _reuse_existing_song_by_source_id(db_path, library_dir, user_id, source_id, source_url, playlist_ids):
     """Reuse an existing song row (same user or global cross-account) if already on disk."""
     if not source_id:
@@ -438,7 +447,7 @@ def process_download(task, db_path, download_dir, album_art_dir):
 
     is_valid, validation_error = validate_song_url(url)
     if not is_valid:
-        raise Exception(validation_error)
+        raise DownloadUserError(validation_error)
 
     library_dir = os.path.join(download_dir, 'library')
     requested_source_id = extract_song_source_id(url)
@@ -480,7 +489,7 @@ def process_download(task, db_path, download_dir, album_art_dir):
             spotify_metadata['duration'] if spotify_metadata else 0,
         )
         if not info:
-            raise Exception('No matching audio source was found')
+            raise DownloadUserError('No matching audio source was found')
         title = spotify_metadata['title'] if spotify_metadata else info.get('title', 'Unknown')
         artist = spotify_metadata['artist'] if spotify_metadata else info.get('uploader', 'Unknown')
         thumbnail_url = spotify_metadata['thumbnail'] if spotify_metadata else info.get('thumbnail', '')
@@ -490,7 +499,7 @@ def process_download(task, db_path, download_dir, album_art_dir):
         download_url = info.get('webpage_url') or info.get('url') or extraction_url
 
     if duration and duration > MAX_DOWNLOAD_DURATION_SECONDS:
-        raise Exception('Video exceeds the 10 minute limit')
+        raise DownloadUserError('Video exceeds the 10 minute limit')
 
     # Recheck after yt-dlp resolves the canonical video ID. This covers queued
     # requests whose initial URL lookup happened before another download ended,

@@ -16,7 +16,7 @@ REQUEST_INTERVAL_SECONDS = 1.0
 USER_AGENT = 'psr.fm v1.0 (https://github.com/psr354/psr.fm)'
 
 _request_lock = threading.Lock()
-_last_request_time = 0.0
+_next_request_time = 0.0
 
 
 _BRACKETED_SUFFIX_RE = re.compile(r'\s*[\[(](?:official|video|lyrics?|audio|mv|clean|explicit|visualizer|hd|4k)[^\])]*[\])]', re.IGNORECASE)
@@ -31,23 +31,27 @@ _ARTIST_SPLIT_RE = re.compile(r'\s*(?:/|,|&|\bx\b|\bvs\.?\b|\bfeat\.?\b|\bft\.?\
 
 
 def _throttled_request(method, url, **kwargs):
-    global _last_request_time
+    global _next_request_time
+    # Reserve the next rate-limit slot under the lock, then release before
+    # sleeping and executing network I/O so slow upstream responses do not
+    # serialize all other callers behind the global lock.
     with _request_lock:
-        elapsed = time.monotonic() - _last_request_time
-        if elapsed < REQUEST_INTERVAL_SECONDS:
-            time.sleep(REQUEST_INTERVAL_SECONDS - elapsed)
-        response = requests.request(
-            method,
-            url,
-            timeout=kwargs.pop('timeout', REQUEST_TIMEOUT_SECONDS),
-            headers={
-                'User-Agent': USER_AGENT,
-                **kwargs.pop('headers', {}),
-            },
-            **kwargs,
-        )
-        _last_request_time = time.monotonic()
-        return response
+        now = time.monotonic()
+        scheduled_at = max(now, _next_request_time)
+        _next_request_time = scheduled_at + REQUEST_INTERVAL_SECONDS
+    wait_seconds = scheduled_at - now
+    if wait_seconds > 0:
+        time.sleep(wait_seconds)
+    return requests.request(
+        method,
+        url,
+        timeout=kwargs.pop('timeout', REQUEST_TIMEOUT_SECONDS),
+        headers={
+            'User-Agent': USER_AGENT,
+            **kwargs.pop('headers', {}),
+        },
+        **kwargs,
+    )
 
 
 def clean_text(text):

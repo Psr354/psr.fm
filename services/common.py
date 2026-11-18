@@ -31,6 +31,13 @@ LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5
 _login_rate_limit_lock = Lock()
 _login_rate_limit_state = {}
 
+PASSWORD_CHANGE_RATE_LIMIT_WINDOW_SECONDS = 300
+PASSWORD_CHANGE_RATE_LIMIT_MAX_ATTEMPTS = 5
+_password_change_rate_limit_lock = Lock()
+_password_change_rate_limit_state = {}
+
+MAX_PASSWORD_LENGTH = 128
+
 _file_cleanup_queue = queue.Queue()
 
 
@@ -133,13 +140,24 @@ def add_global_song_to_playlists(db, source_song, playlist_ids):
         song_id = existing_song['id']
         created = False
     else:
+        copy_public_lyrics = (source_song['lyrics_status'] or 'none') == 'found'
+        copied_lyrics = (source_song['lyrics'] or '') if copy_public_lyrics else ''
+        copied_synced = (source_song['synced_lyrics'] or '') if copy_public_lyrics else ''
+        copied_word_synced = (
+            (source_song['word_synced_lyrics'] or '')
+            if copy_public_lyrics and 'word_synced_lyrics' in source_song.keys()
+            else ''
+        )
+        copied_status = 'found' if copy_public_lyrics else 'none'
+        copied_updated_at = source_song['lyrics_updated_at'] if copy_public_lyrics else None
         cursor = db.execute(
             '''
             INSERT INTO songs (
                 title, artist, filename, album_art, duration_seconds,
-                source_url, source_id, lyrics, synced_lyrics, lyrics_status, lyrics_updated_at, user_id
+                source_url, source_id, lyrics, synced_lyrics, word_synced_lyrics,
+                lyrics_status, lyrics_updated_at, user_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
             (
                 source_song['title'],
@@ -149,10 +167,11 @@ def add_global_song_to_playlists(db, source_song, playlist_ids):
                 source_song['duration_seconds'],
                 source_song['source_url'],
                 source_song['source_id'],
-                '',
-                '',
-                'none',
-                None,
+                copied_lyrics,
+                copied_synced,
+                copied_word_synced,
+                copied_status,
+                copied_updated_at,
                 current_user.id,
             )
         )
@@ -266,11 +285,45 @@ def clear_login_rate_limit(username):
         _prune_expired_login_limits(time.monotonic())
 
 
+def check_password_change_rate_limit(user_id):
+    now = time.monotonic()
+    key = f"pw:{user_id}"
+    with _password_change_rate_limit_lock:
+        timestamps = [
+            ts for ts in _password_change_rate_limit_state.get(key, [])
+            if now - ts < PASSWORD_CHANGE_RATE_LIMIT_WINDOW_SECONDS
+        ]
+        if len(timestamps) >= PASSWORD_CHANGE_RATE_LIMIT_MAX_ATTEMPTS:
+            _password_change_rate_limit_state[key] = timestamps
+            return False, int(PASSWORD_CHANGE_RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0]))
+        return True, None
+
+
+def record_failed_password_change(user_id):
+    now = time.monotonic()
+    key = f"pw:{user_id}"
+    with _password_change_rate_limit_lock:
+        timestamps = [
+            ts for ts in _password_change_rate_limit_state.get(key, [])
+            if now - ts < PASSWORD_CHANGE_RATE_LIMIT_WINDOW_SECONDS
+        ]
+        timestamps.append(now)
+        _password_change_rate_limit_state[key] = timestamps
+
+
+def clear_password_change_rate_limit(user_id):
+    key = f"pw:{user_id}"
+    with _password_change_rate_limit_lock:
+        _password_change_rate_limit_state.pop(key, None)
+
+
 def reset_rate_limits():
     with _login_rate_limit_lock:
         _login_rate_limit_state.clear()
     with _lyrics_rate_limit_lock:
         _lyrics_rate_limit_state.clear()
+    with _password_change_rate_limit_lock:
+        _password_change_rate_limit_state.clear()
 
 
 

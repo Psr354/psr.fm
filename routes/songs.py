@@ -8,17 +8,45 @@ from PIL import Image
 from werkzeug.utils import secure_filename
 
 from services.common import (
-    get_db, get_owned_playlist, get_owned_song, get_global_song,
+    get_db, get_database_path, get_owned_playlist, get_owned_song, get_global_song,
     add_global_song_to_playlists, get_json_object, audio_mimetype,
     queue_file_deletion
 )
-from services.downloader import download_queue, validate_song_url
+from services.downloader import download_queue, validate_song_url, dispatch_lyrics_lookup
 from services.database import extract_song_source_id
 
 songs_bp = Blueprint('songs', __name__)
 
 MAX_EMBEDDED_ART_BYTES = 5 * 1024 * 1024
 ALLOWED_ART_FORMATS = {'JPEG': '.jpg', 'PNG': '.png', 'WEBP': '.webp'}
+
+
+def _library_audio_exists(filename):
+    if not filename:
+        return False
+    library_dir = current_app.config.get('LIBRARY_DIR', '')
+    if not library_dir:
+        return False
+    safe_name = secure_filename(filename)
+    if not safe_name:
+        return False
+    return os.path.isfile(os.path.join(library_dir, safe_name))
+
+
+def _maybe_dispatch_cloned_lyrics(source_song, song_id, created):
+    if not created:
+        return
+    if (source_song['lyrics_status'] or 'none') == 'found':
+        return
+    if os.environ.get('PSR_FM_DISABLE_WORKER') == '1':
+        return
+    dispatch_lyrics_lookup(
+        get_database_path(),
+        song_id,
+        source_song['title'],
+        source_song['artist'],
+        source_song['duration_seconds'] or 0,
+    )
 
 
 def _extract_embedded_artwork(file_path):
@@ -93,10 +121,11 @@ def download_song():
 
     source_id = extract_song_source_id(url)
     if source_id:
-        source_song = db.execute(
-            'SELECT * FROM songs WHERE source_id = ? ORDER BY created_at ASC, id ASC LIMIT 1',
+        candidate_songs = db.execute(
+            'SELECT * FROM songs WHERE source_id = ? ORDER BY created_at ASC, id ASC',
             (source_id,)
-        ).fetchone()
+        ).fetchall()
+        source_song = next((row for row in candidate_songs if _library_audio_exists(row['filename'])), None)
         if source_song:
             song_id, created, added_playlist_ids, skipped_playlist_ids = add_global_song_to_playlists(
                 db,
@@ -104,6 +133,7 @@ def download_song():
                 owned_playlist_ids,
             )
             db.commit()
+            _maybe_dispatch_cloned_lyrics(source_song, song_id, created)
             return jsonify({
                 'status': 'added_from_library',
                 'song_id': song_id,
@@ -376,16 +406,16 @@ def check_library_song_url():
         return jsonify({'matched': False})
 
     db = get_db()
-    song = db.execute(
+    candidates = db.execute(
         '''
         SELECT id, title, artist, filename, album_art, duration_seconds, source_url, source_id
         FROM songs
         WHERE source_id = ?
         ORDER BY created_at ASC, id ASC
-        LIMIT 1
         ''',
         (source_id,)
-    ).fetchone()
+    ).fetchall()
+    song = next((row for row in candidates if _library_audio_exists(row['filename'])), None)
     if not song:
         return jsonify({'matched': False, 'source_id': source_id})
 
@@ -420,6 +450,8 @@ def add_library_song(song_id):
     source_song = get_global_song(db, song_id)
     if not source_song:
         return jsonify({'error': 'Library song not found'}), 404
+    if not _library_audio_exists(source_song['filename']):
+        return jsonify({'error': 'Audio file not found on server'}), 404
 
     new_song_id, created, added_playlist_ids, skipped_playlist_ids = add_global_song_to_playlists(
         db,
@@ -427,6 +459,7 @@ def add_library_song(song_id):
         owned_playlist_ids,
     )
     db.commit()
+    _maybe_dispatch_cloned_lyrics(source_song, new_song_id, created)
     return jsonify({
         'status': 'success',
         'song_id': new_song_id,

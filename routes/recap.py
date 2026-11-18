@@ -9,7 +9,7 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
 
 from services.common import (
-    get_db, get_owned_song, get_json_object, playback_timestamp, valid_playback_id
+    get_db, get_owned_song, get_json_object, playback_timestamp, valid_playback_id, is_admin
 )
 
 recap_bp = Blueprint('recap', __name__)
@@ -152,6 +152,44 @@ def _get_storage_used(download_dir, album_art_dir, ttl_seconds=30):
     return total_size
 
 
+def _get_user_storage_used(db, user_id, library_dir, album_art_dir):
+    total_size = 0
+    if library_dir and os.path.exists(library_dir):
+        song_files = {
+            row['filename']
+            for row in db.execute(
+                "SELECT DISTINCT filename FROM songs WHERE user_id = ? AND filename IS NOT NULL AND filename != ''",
+                (user_id,),
+            ).fetchall()
+        }
+        for fname in song_files:
+            fpath = os.path.join(library_dir, fname)
+            if os.path.isfile(fpath):
+                total_size += os.path.getsize(fpath)
+
+    if album_art_dir and os.path.exists(album_art_dir):
+        art_files = {
+            row['album_art']
+            for row in db.execute(
+                "SELECT DISTINCT album_art FROM songs WHERE user_id = ? AND album_art IS NOT NULL AND album_art != ''",
+                (user_id,),
+            ).fetchall()
+        }
+        art_files.update(
+            row['cover_art']
+            for row in db.execute(
+                "SELECT DISTINCT cover_art FROM playlists WHERE user_id = ? AND cover_art IS NOT NULL AND cover_art != ''",
+                (user_id,),
+            ).fetchall()
+        )
+        for fname in art_files:
+            fpath = os.path.join(album_art_dir, fname)
+            if os.path.isfile(fpath):
+                total_size += os.path.getsize(fpath)
+
+    return total_size
+
+
 @recap_bp.route('/api/dashboard')
 @login_required
 def dashboard():
@@ -165,22 +203,29 @@ def dashboard():
     total_listened = cursor.fetchone()['total_listened'] or 0
 
     download_dir = current_app.config.get('DOWNLOAD_DIR', '')
+    library_dir = current_app.config.get('LIBRARY_DIR', '') or (os.path.join(download_dir, 'library') if download_dir else '')
     album_art_dir = current_app.config.get('ALBUM_ART_DIR', '')
 
-    total_size = _get_storage_used(download_dir, album_art_dir)
-
-    storage_usage = shutil.disk_usage(download_dir) if download_dir and os.path.exists(download_dir) else (0, 0, 0)
-    free_space = storage_usage.free if hasattr(storage_usage, 'free') else 0
-    total_space = storage_usage.total if hasattr(storage_usage, 'total') else 0
-
-    return jsonify({
+    payload = {
         'total_playlists': total_playlists,
         'total_songs': total_songs,
         'total_listened': int(total_listened),
-        'storage_used': total_size,
-        'storage_free': free_space,
-        'storage_total': total_space
-    })
+    }
+
+    if is_admin():
+        total_size = _get_storage_used(download_dir, album_art_dir)
+        storage_usage = shutil.disk_usage(download_dir) if download_dir and os.path.exists(download_dir) else (0, 0, 0)
+        free_space = storage_usage.free if hasattr(storage_usage, 'free') else 0
+        total_space = storage_usage.total if hasattr(storage_usage, 'total') else 0
+        payload.update({
+            'storage_used': total_size,
+            'storage_free': free_space,
+            'storage_total': total_space,
+        })
+    else:
+        payload['storage_used'] = _get_user_storage_used(db, current_user.id, library_dir, album_art_dir)
+
+    return jsonify(payload)
 
 
 @recap_bp.route('/api/top-songs')
@@ -345,22 +390,54 @@ def get_recap():
 
         month_names = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        monthly_top_song_rows = db.execute('''
+            WITH monthly_song_totals AS (
+                SELECT
+                    CAST(strftime('%m', datetime(l.timestamp, ?)) AS INTEGER) AS month_num,
+                    s.id AS song_id,
+                    s.title,
+                    s.artist,
+                    s.album_art,
+                    SUM(l.seconds_listened) AS total_listened
+                FROM listening_logs l
+                JOIN songs s ON l.song_id = s.id
+                WHERE l.user_id = ? AND l.timestamp >= ? AND l.timestamp <= ?
+                GROUP BY month_num, s.id
+            ),
+            ranked AS (
+                SELECT
+                    month_num,
+                    title,
+                    artist,
+                    album_art,
+                    total_listened,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY month_num
+                        ORDER BY total_listened DESC, song_id ASC
+                    ) AS rn
+                FROM monthly_song_totals
+            )
+            SELECT month_num, title, artist, album_art, total_listened
+            FROM ranked
+            WHERE rn = 1
+        ''', (local_modifier, current_user.id, start_str, end_str)).fetchall()
+        top_song_by_month = {
+            row['month_num']: {
+                'title': row['title'],
+                'artist': row['artist'],
+                'album_art': row['album_art'],
+                'total_listened': row['total_listened'],
+            }
+            for row in monthly_top_song_rows
+        }
         for m in sorted(monthly_stats):
-            top_song = db.execute('''
-                SELECT s.title, s.artist, s.album_art,
-                       SUM(l.seconds_listened) as total_listened
-                FROM listening_logs l JOIN songs s ON l.song_id = s.id
-                WHERE l.user_id = ? AND strftime('%m', datetime(l.timestamp, ?)) = ?
-                    AND l.timestamp >= ? AND l.timestamp <= ?
-                GROUP BY s.id ORDER BY total_listened DESC LIMIT 1
-            ''', (current_user.id, local_modifier, f'{m:02d}', start_str, end_str)).fetchone()
             monthly_breakdown.append({
                 'month': month_names[m],
                 'month_num': m,
                 'total_seconds': monthly_stats[m]['total_seconds'],
                 'unique_songs': monthly_stats[m]['unique_songs'],
                 'total_plays': monthly_stats[m]['total_plays'],
-                'top_song': dict(top_song) if top_song else None
+                'top_song': top_song_by_month.get(m)
             })
 
     stats = dict(stats_row) if stats_row else {"total_seconds": 0, "unique_songs": 0}

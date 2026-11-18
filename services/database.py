@@ -566,7 +566,13 @@ def get_user_files(database_path, user_id):
 
 
 def delete_user_cascade(database_path, user_id):
-    """Delete user and all related data (playlists, songs, logs)"""
+    """Delete user and all related data (playlists, songs, logs).
+
+    Returns:
+        'deleted' if user existed and was removed,
+        'not_found' if user_id does not exist,
+        'error' on unexpected database failure.
+    """
     conn = get_db_connection(database_path)
     try:
         cursor = conn.cursor()
@@ -579,12 +585,15 @@ def delete_user_cascade(database_path, user_id):
         cursor.execute('DELETE FROM playlists WHERE user_id = ?', (user_id,))
         cursor.execute('DELETE FROM songs WHERE user_id = ?', (user_id,))
         cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+        if cursor.rowcount == 0:
+            conn.rollback()
+            return 'not_found'
         conn.commit()
-        return True
+        return 'deleted'
     except Exception as e:
         conn.rollback()
         print(f"[ERROR] delete_user_cascade: {e}")
-        return False
+        return 'error'
     finally:
         conn.close()
 

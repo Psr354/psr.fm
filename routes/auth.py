@@ -1,7 +1,7 @@
 import os
 from flask import Blueprint, jsonify, render_template, redirect, url_for, current_app
 from flask_login import login_user, login_required, logout_user, current_user
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from services.database import (
     get_db_connection, get_user_by_id, get_user_by_username, create_user,
@@ -11,10 +11,13 @@ from services.database import (
 )
 from services.common import (
     User, get_json_object, get_database_path, is_admin,
-    check_login_rate_limit, record_failed_login, clear_login_rate_limit
+    check_login_rate_limit, record_failed_login, clear_login_rate_limit,
+    check_password_change_rate_limit, record_failed_password_change, clear_password_change_rate_limit,
+    MAX_PASSWORD_LENGTH
 )
 
 auth_bp = Blueprint('auth', __name__)
+_DUMMY_PASSWORD_HASH = generate_password_hash('psr-fm-dummy-timing-guard', method='pbkdf2:sha256', salt_length=16)
 
 
 @auth_bp.route('/login')
@@ -51,6 +54,8 @@ def setup_account():
         return jsonify({'error': 'Username and password required'}), 400
     if len(password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters'}), 400
+    if len(password) > MAX_PASSWORD_LENGTH:
+        return jsonify({'error': f'Password must be at most {MAX_PASSWORD_LENGTH} characters'}), 400
     if len(username) < 3:
         return jsonify({'error': 'Username must be at least 3 characters'}), 400
 
@@ -93,7 +98,12 @@ def login():
 
     db_path = get_database_path()
     user_row = get_user_by_username(db_path, username)
-    if not user_row or not check_password_hash(user_row['password_hash'], password):
+    if len(password) > MAX_PASSWORD_LENGTH:
+        record_failed_login(username)
+        return jsonify({'error': 'Invalid username or password'}), 401
+    password_hash = user_row['password_hash'] if user_row else _DUMMY_PASSWORD_HASH
+    password_ok = check_password_hash(password_hash, password)
+    if not user_row or not password_ok:
         record_failed_login(username)
         return jsonify({'error': 'Invalid username or password'}), 401
 
@@ -145,6 +155,8 @@ def create_new_user():
         return jsonify({'error': 'Username and password required'}), 400
     if len(password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters'}), 400
+    if len(password) > MAX_PASSWORD_LENGTH:
+        return jsonify({'error': f'Password must be at most {MAX_PASSWORD_LENGTH} characters'}), 400
     if len(username) < 3:
         return jsonify({'error': 'Username must be at least 3 characters'}), 400
 
@@ -184,56 +196,60 @@ def delete_user(user_id):
 
     db_path = get_database_path()
     user_files = get_user_files(db_path, user_id)
-    success = delete_user_cascade(db_path, user_id)
-    if not success:
+    delete_status = delete_user_cascade(db_path, user_id)
+    if delete_status == 'not_found':
+        return jsonify({'error': 'User not found'}), 404
+    if delete_status != 'deleted':
         return jsonify({'error': 'Failed to delete user'}), 500
 
     library_dir = current_app.config.get('LIBRARY_DIR', '')
     album_art_dir = current_app.config.get('ALBUM_ART_DIR', '')
     conn = get_db_connection(db_path)
-    for file_info in user_files:
-        try:
-            if file_info.get('filename') and library_dir:
-                filename_count = conn.execute(
-                    'SELECT COUNT(*) AS count FROM songs WHERE filename = ?',
-                    (file_info['filename'],)
-                ).fetchone()['count']
-                if filename_count == 0:
-                    mp3_path = os.path.join(library_dir, file_info['filename'])
-                    if os.path.exists(mp3_path):
-                        os.remove(mp3_path)
+    try:
+        for file_info in user_files:
+            try:
+                if file_info.get('filename') and library_dir:
+                    filename_count = conn.execute(
+                        'SELECT COUNT(*) AS count FROM songs WHERE filename = ?',
+                        (file_info['filename'],)
+                    ).fetchone()['count']
+                    if filename_count == 0:
+                        mp3_path = os.path.join(library_dir, file_info['filename'])
+                        if os.path.exists(mp3_path):
+                            os.remove(mp3_path)
 
-            if file_info.get('album_art') and album_art_dir:
-                album_art_count = conn.execute(
-                    'SELECT COUNT(*) AS count FROM songs WHERE album_art = ?',
-                    (file_info['album_art'],)
-                ).fetchone()['count']
-                playlist_art_count = conn.execute(
-                    'SELECT COUNT(*) AS count FROM playlists WHERE cover_art = ?',
-                    (file_info['album_art'],)
-                ).fetchone()['count']
-                if album_art_count == 0 and playlist_art_count == 0:
-                    art_path = os.path.join(album_art_dir, file_info['album_art'])
-                    if os.path.exists(art_path):
-                        os.remove(art_path)
+                if file_info.get('album_art') and album_art_dir:
+                    album_art_count = conn.execute(
+                        'SELECT COUNT(*) AS count FROM songs WHERE album_art = ?',
+                        (file_info['album_art'],)
+                    ).fetchone()['count']
+                    playlist_art_count = conn.execute(
+                        'SELECT COUNT(*) AS count FROM playlists WHERE cover_art = ?',
+                        (file_info['album_art'],)
+                    ).fetchone()['count']
+                    if album_art_count == 0 and playlist_art_count == 0:
+                        art_path = os.path.join(album_art_dir, file_info['album_art'])
+                        if os.path.exists(art_path):
+                            os.remove(art_path)
 
-            if file_info.get('cover_art') and album_art_dir:
-                cover_art_count = conn.execute(
-                    'SELECT COUNT(*) AS count FROM playlists WHERE cover_art = ?',
-                    (file_info['cover_art'],)
-                ).fetchone()['count']
-                song_art_count = conn.execute(
-                    'SELECT COUNT(*) AS count FROM songs WHERE album_art = ?',
-                    (file_info['cover_art'],)
-                ).fetchone()['count']
-                if cover_art_count == 0 and song_art_count == 0:
-                    cover_path = os.path.join(album_art_dir, file_info['cover_art'])
-                    if os.path.exists(cover_path):
-                        os.remove(cover_path)
-        except Exception as e:
-            target = file_info.get('filename') or file_info.get('album_art') or file_info.get('cover_art') or 'unknown file'
-            print(f"[WARN] Failed to delete {target}: {e}")
-    conn.close()
+                if file_info.get('cover_art') and album_art_dir:
+                    cover_art_count = conn.execute(
+                        'SELECT COUNT(*) AS count FROM playlists WHERE cover_art = ?',
+                        (file_info['cover_art'],)
+                    ).fetchone()['count']
+                    song_art_count = conn.execute(
+                        'SELECT COUNT(*) AS count FROM songs WHERE album_art = ?',
+                        (file_info['cover_art'],)
+                    ).fetchone()['count']
+                    if cover_art_count == 0 and song_art_count == 0:
+                        cover_path = os.path.join(album_art_dir, file_info['cover_art'])
+                        if os.path.exists(cover_path):
+                            os.remove(cover_path)
+            except Exception as e:
+                target = file_info.get('filename') or file_info.get('album_art') or file_info.get('cover_art') or 'unknown file'
+                print(f"[WARN] Failed to delete {target}: {e}")
+    finally:
+        conn.close()
 
     return jsonify({'status': 'success', 'message': 'User and all data deleted'})
 
@@ -242,6 +258,13 @@ def delete_user(user_id):
 @login_required
 def change_password():
     """Change current user's password."""
+    allowed, retry_after = check_password_change_rate_limit(current_user.id)
+    if not allowed:
+        return jsonify({
+            'error': 'Too many password change attempts. Please try again later.',
+            'retry_after': retry_after,
+        }), 429
+
     data = get_json_object()
     if data is None:
         return jsonify({'error': 'JSON object required'}), 400
@@ -254,16 +277,20 @@ def change_password():
 
     if len(new_password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters'}), 400
+    if len(new_password) > MAX_PASSWORD_LENGTH or len(current_password) > MAX_PASSWORD_LENGTH:
+        return jsonify({'error': f'Password must be at most {MAX_PASSWORD_LENGTH} characters'}), 400
 
     db_path = get_database_path()
     conn = get_db_connection(db_path)
     try:
         user = conn.execute('SELECT password_hash FROM users WHERE id = ?', (current_user.id,)).fetchone()
         if not user or not check_password_hash(user['password_hash'], current_password):
+            record_failed_password_change(current_user.id)
             return jsonify({'error': 'Current password is incorrect'}), 400
     finally:
         conn.close()
 
+    clear_password_change_rate_limit(current_user.id)
     success = update_user_password(db_path, current_user.id, new_password)
     if not success:
         return jsonify({'error': 'Failed to update password'}), 500
@@ -300,6 +327,8 @@ def reset_user_password(user_id):
 
     if len(new_password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters'}), 400
+    if len(new_password) > MAX_PASSWORD_LENGTH:
+        return jsonify({'error': f'Password must be at most {MAX_PASSWORD_LENGTH} characters'}), 400
 
     db_path = get_database_path()
     success = update_user_password(db_path, user_id, new_password)

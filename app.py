@@ -98,6 +98,20 @@ def maintenance_check():
         return render_template('maintenance.html'), 503
 
 
+CSP_REPORT_ONLY_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self' https://cdnjs.cloudflare.com; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
+    "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:; "
+    "img-src 'self' data: blob:; "
+    "media-src 'self' blob: data:; "
+    "connect-src 'self' ws: wss: https://cdnjs.cloudflare.com; "
+    "object-src 'none'; "
+    "base-uri 'self'; "
+    "frame-ancestors 'self'"
+)
+
+
 @app.after_request
 def set_csrf_cookie(response):
     response.headers.setdefault('X-Content-Type-Options', 'nosniff')
@@ -106,6 +120,7 @@ def set_csrf_cookie(response):
 
     is_static_path = request.path.startswith('/static/')
     if not is_static_path:
+        response.headers.setdefault('Content-Security-Policy-Report-Only', CSP_REPORT_ONLY_POLICY)
         token = generate_csrf()
         response.set_cookie(
             'csrf_token',

@@ -18,6 +18,14 @@ def _get_search_lyrics():
 
 
 
+def _fetch_lyrics_updated_at(db, song_id, user_id):
+    row = db.execute(
+        'SELECT lyrics_updated_at FROM songs WHERE id = ? AND user_id = ?',
+        (song_id, user_id),
+    ).fetchone()
+    return row['lyrics_updated_at'] if row else None
+
+
 @lyrics_bp.route('/api/songs/<int:song_id>/lyrics', methods=['GET'])
 @login_required
 def get_song_lyrics(song_id):
@@ -78,7 +86,7 @@ def refresh_song_lyrics(song_id):
             'synced_lyrics': '',
             'word_synced_lyrics': '',
             'lyrics_status': 'not_found',
-            'lyrics_updated_at': None,
+            'lyrics_updated_at': _fetch_lyrics_updated_at(db, song_id, current_user.id),
         }), 404
 
     db.execute(
@@ -102,7 +110,7 @@ def refresh_song_lyrics(song_id):
         'synced_lyrics': lyrics_data.get('synced_lyrics', ''),
         'word_synced_lyrics': lyrics_data.get('word_synced_lyrics', ''),
         'lyrics_status': 'found',
-        'lyrics_updated_at': None,
+        'lyrics_updated_at': _fetch_lyrics_updated_at(db, song_id, current_user.id),
     })
 
 
@@ -135,5 +143,5 @@ def save_song_lyrics(song_id):
         'lyrics': lyrics,
         'synced_lyrics': synced_lyrics,
         'lyrics_status': status,
-        'lyrics_updated_at': None,
+        'lyrics_updated_at': _fetch_lyrics_updated_at(db, song_id, current_user.id),
     })

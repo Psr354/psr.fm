@@ -25,5 +25,7 @@ USER appuser
 # Expose port 5000
 EXPOSE 5000
 
-# Run the application with production WSGI server
+# Run the application with production WSGI server.
+# IMPORTANT: Keep --workers 1 because download_queue, in-memory rate limiters,
+# storage cache, and Flask-SocketIO rooms live in-process.
 CMD ["gunicorn", "--worker-class", "gthread", "--threads", "100", "--workers", "1", "--bind", "0.0.0.0:5000", "app:app"]
