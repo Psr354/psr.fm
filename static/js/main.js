@@ -458,15 +458,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 ${action}
             </div>
         `;
-        if (typeof window.ensureCapsuleShareElements === 'function') {
-            window.ensureCapsuleShareElements();
-        }
-        if (el.capsuleContent && typeof window.openShareCapsuleModal === 'function') {
-            const heroShareBtn = el.capsuleContent.querySelector('.capsule-hero-share-btn');
-            if (heroShareBtn) {
-                heroShareBtn.onclick = window.openShareCapsuleModal;
-            }
-        }
     }
 
     // ==========================================
@@ -736,12 +727,116 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function clearCachedAppShell() {
+        try {
+            navigator.serviceWorker?.controller?.postMessage({ type: 'CLEAR_APP_SHELL' });
+        } catch (_) {}
+        if ('caches' in window) {
+            try {
+                const cacheKeys = await caches.keys();
+                await Promise.all(
+                    cacheKeys
+                        .filter((key) => key.startsWith('psr354-shell-'))
+                        .map((key) => caches.open(key).then((cache) => cache.delete('/?offline-app-shell=1')))
+                );
+            } catch (_) {}
+        }
+    }
+
     const logoutBtn = document.getElementById('logout-btn');
     if (logoutBtn) {
         logoutBtn.addEventListener('click', async () => {
             if (confirm('Are you sure you want to sign out?')) {
-                await fetch('/api/logout', { method: 'POST' });
-                window.location.href = '/login';
+                try {
+                    await fetch('/api/logout', { method: 'POST' });
+                } finally {
+                    await clearCachedAppShell();
+                    window.location.href = '/login';
+                }
+            }
+        });
+    }
+
+    const changePasswordBtn = document.getElementById('change-password-btn');
+    const changePasswordModal = document.getElementById('change-password-modal');
+    const currentPasswordInput = document.getElementById('current-password-input');
+    const newPasswordInput = document.getElementById('new-password-input');
+    const confirmNewPasswordInput = document.getElementById('confirm-new-password-input');
+    const changePasswordError = document.getElementById('change-password-error');
+    const changePasswordCancelBtn = document.getElementById('change-password-cancel-btn');
+    const changePasswordSaveBtn = document.getElementById('change-password-save-btn');
+
+    function closeChangePasswordModal() {
+        if (changePasswordModal) changePasswordModal.style.display = 'none';
+        if (currentPasswordInput) currentPasswordInput.value = '';
+        if (newPasswordInput) newPasswordInput.value = '';
+        if (confirmNewPasswordInput) confirmNewPasswordInput.value = '';
+        if (changePasswordError) {
+            changePasswordError.textContent = '';
+            changePasswordError.style.display = 'none';
+        }
+    }
+
+    if (changePasswordBtn && changePasswordModal) {
+        changePasswordBtn.addEventListener('click', () => {
+            if (window.innerWidth <= 768) setMobileMenu(false);
+            closeChangePasswordModal();
+            changePasswordModal.style.display = 'flex';
+            currentPasswordInput?.focus();
+        });
+    }
+    if (changePasswordCancelBtn) {
+        changePasswordCancelBtn.addEventListener('click', closeChangePasswordModal);
+    }
+    if (changePasswordSaveBtn) {
+        changePasswordSaveBtn.addEventListener('click', async () => {
+            const currentPassword = currentPasswordInput?.value || '';
+            const newPassword = newPasswordInput?.value || '';
+            const confirmPassword = confirmNewPasswordInput?.value || '';
+            const showFormError = (msg) => {
+                if (changePasswordError) {
+                    changePasswordError.textContent = msg;
+                    changePasswordError.style.display = 'block';
+                } else {
+                    showToast(msg, 'error');
+                }
+            };
+
+            if (!currentPassword || !newPassword) {
+                showFormError('Current password and new password are required.');
+                return;
+            }
+            if (newPassword.length < 6) {
+                showFormError('New password must be at least 6 characters.');
+                return;
+            }
+            if (newPassword !== confirmPassword) {
+                showFormError('New password confirmation does not match.');
+                return;
+            }
+
+            if (changePasswordError) changePasswordError.style.display = 'none';
+            changePasswordSaveBtn.disabled = true;
+            try {
+                const response = await fetch('/api/user/change-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        current_password: currentPassword,
+                        new_password: newPassword
+                    })
+                });
+                const result = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    showFormError(result.error || 'Failed to update password.');
+                    return;
+                }
+                closeChangePasswordModal();
+                showToast(result.message || 'Password changed successfully', 'success');
+            } catch (err) {
+                showFormError(err.message || 'Network error while updating password.');
+            } finally {
+                changePasswordSaveBtn.disabled = false;
             }
         });
     }
@@ -1382,7 +1477,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // ==========================================
     // PLAYBACK PERSISTENCE & CROSS-DEVICE SYNC (JAM / MULTI-ROOM)
     // ==========================================
-    const PLAYBACK_STATE_KEY = 'psr_playback_state';
+    const playbackUserId = String(document.body?.dataset?.userId || '').trim();
+    const PLAYBACK_STATE_KEY = playbackUserId ? `psr_playback_state_${playbackUserId}` : 'psr_playback_state';
     let lastSavePlaybackTime = 0;
     let cachedPlaybackPayload = null;
     let lastServerSyncTime = 0;
@@ -1401,10 +1497,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (typeof showToast === 'function') {
             showToast(
                 isRemote
-                    ? 'Sedang diputar di perangkat lain. Ketuk layar untuk ikut mendengarkan barengan.'
-                    : 'Ketuk layar untuk melanjutkan pemutaran.',
-                'info',
-                7000
+                    ? 'Playing on another device. Tap the screen to listen along.'
+                    : 'Tap the screen to resume playback.',
+                'info'
             );
         }
 
@@ -2493,21 +2588,30 @@ function resumePlaybackAfterBackground() {
         if (el.playlistCoverImg) el.playlistCoverImg.src = coverSrc;
 
         showView('playlist');
-        loadPlaylists();
+        const playlistListEl = document.getElementById('playlist-list');
+        if (playlistListEl) {
+            playlistListEl.querySelectorAll('.playlist-item').forEach((item) => {
+                item.classList.toggle('active', item.getAttribute('data-id') === String(playlist.id));
+            });
+        }
 
         const deleteBtn = document.getElementById('delete-playlist-btn');
         if (deleteBtn) {
             deleteBtn.onclick = async () => {
                 if (confirm(`Delete playlist "${playlist.name}"? Songs not used by another playlist will also be deleted permanently.`)) {
-                    const response = await fetch(`/api/playlists/${playlist.id}`, {method: 'DELETE'});
-                    if (!response.ok) {
-                        const data = await response.json().catch(() => ({}));
-                        throw new Error(data.error || 'Failed to delete playlist');
+                    try {
+                        const response = await fetch(`/api/playlists/${playlist.id}`, {method: 'DELETE'});
+                        if (!response.ok) {
+                            const data = await response.json().catch(() => ({}));
+                            throw new Error(data.error || 'Failed to delete playlist');
+                        }
+                        state.currentPlaylistId = null;
+                        loadPlaylists();
+                        showView('dashboard');
+                        showToast('Playlist deleted');
+                    } catch (error) {
+                        showToast(error.message || 'Failed to delete playlist', 'error');
                     }
-                    state.currentPlaylistId = null;
-                    loadPlaylists();
-                    showView('dashboard');
-                    showToast('Playlist deleted');
                 }
             };
         }
@@ -2668,9 +2772,24 @@ function resumePlaybackAfterBackground() {
 
     async function loadDashboard() {
         try {
-            const statsResponse = await fetchWithTimeout('/api/dashboard');
+            const [statsResponse, recentResponse, topSongsResponse, topDurationResponse] = await Promise.all([
+                fetchWithTimeout('/api/dashboard'),
+                fetchWithTimeout('/api/songs?limit=5'),
+                fetchWithTimeout('/api/top-songs'),
+                fetchWithTimeout('/api/top-songs-duration')
+            ]);
             if (!statsResponse.ok) throw new Error('Dashboard request failed');
-            const stats = await statsResponse.json();
+            if (!recentResponse.ok) throw new Error('Recent songs request failed');
+            if (!topSongsResponse.ok) throw new Error('Top songs request failed');
+            if (!topDurationResponse.ok) throw new Error('Top songs duration request failed');
+
+            const [stats, recentSongs, topSongs, topSongsDuration] = await Promise.all([
+                statsResponse.json(),
+                recentResponse.json(),
+                topSongsResponse.json(),
+                topDurationResponse.json()
+            ]);
+
             const statsGrid = document.getElementById('stats-grid');
             if (statsGrid) {
                 statsGrid.innerHTML = `
@@ -2681,19 +2800,8 @@ function resumePlaybackAfterBackground() {
                 `;
             }
 
-            const recentResponse = await fetchWithTimeout('/api/songs?limit=5');
-            if (!recentResponse.ok) throw new Error('Recent songs request failed');
-            const recentSongs = await recentResponse.json();
             renderSongs(recentSongs.slice(0, 5), 'recent-songs-list', true);
-
-            const topSongsResponse = await fetchWithTimeout('/api/top-songs');
-            if (!topSongsResponse.ok) throw new Error('Top songs request failed');
-            const topSongs = await topSongsResponse.json();
             renderTopSongs(topSongs.slice(0, 5), 'top-songs-list');
-
-            const topDurationResponse = await fetchWithTimeout('/api/top-songs-duration');
-            if (!topDurationResponse.ok) throw new Error('Top songs duration request failed');
-            const topSongsDuration = await topDurationResponse.json();
             renderTopSongs(topSongsDuration.slice(0, 5), 'top-songs-duration-list');
         } catch (error) {
             console.warn('Dashboard unavailable; showing offline fallback.', error);
@@ -2882,9 +2990,18 @@ function resumePlaybackAfterBackground() {
             btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
                 if (confirm('Delete this song completely from all playlists and storage?')) {
-                    await fetch(`/api/songs/${e.currentTarget.getAttribute('data-id')}`, {method: 'DELETE'});
-                    showToast('Song deleted permanently');
-                    loadDashboard();
+                    try {
+                        const response = await fetch(`/api/songs/${e.currentTarget.getAttribute('data-id')}`, {method: 'DELETE'});
+                        const result = await response.json().catch(() => ({}));
+                        if (!response.ok) {
+                            showToast(result.error || 'Failed to delete song', 'error');
+                            return;
+                        }
+                        showToast('Song deleted permanently', 'success');
+                        loadDashboard();
+                    } catch (err) {
+                        showToast(err.message || 'Failed to delete song', 'error');
+                    }
                 }
             });
         });
@@ -2981,7 +3098,8 @@ function resumePlaybackAfterBackground() {
                 resumeCurrentSong(requestId);
                 return;
             }
-            const cache = await caches.open(OFFLINE_MEDIA_CACHE);
+            const mediaCacheName = window.OFFLINE_MEDIA_CACHE || 'psr354-media-v3';
+            const cache = await caches.open(mediaCacheName);
             await cache.delete(audioUrl, { ignoreSearch: true });
             throw new Error('Offline audio is incomplete or corrupted');
         }
@@ -3211,12 +3329,5 @@ function resumePlaybackAfterBackground() {
     });
     restorePlaybackState();
 
-            // ==========================================
-    // THEME CUSTOMIZATION ENGINE (COHESIVE & HARMONIZED)
-    // ==========================================
-    // Theme Customization Engine has been modularized into static/js/theme.js
-    if (typeof window.initThemeManager === 'function') {
-        try { window.initThemeManager(); } catch (e) { console.warn('initThemeManager failed:', e); }
-    }
-
+    // Theme Customization Engine is initialized by static/js/theme.js
 });

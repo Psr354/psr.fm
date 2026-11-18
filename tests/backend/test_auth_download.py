@@ -1659,6 +1659,190 @@ class AuthAndDownloadTests(unittest.TestCase):
             row = conn.execute('SELECT album_art FROM songs ORDER BY id DESC LIMIT 1').fetchone()
         self.assertEqual(row['album_art'], '')
 
+    def test_security_headers_and_no_csrf_cookie_on_static_assets(self):
+        client = self.app_module.app.test_client()
+
+        page_resp = client.get('/setup')
+        self.assertEqual(page_resp.status_code, 200)
+        self.assertEqual(page_resp.headers.get('X-Content-Type-Options'), 'nosniff')
+        self.assertEqual(page_resp.headers.get('X-Frame-Options'), 'SAMEORIGIN')
+        self.assertEqual(page_resp.headers.get('Referrer-Policy'), 'strict-origin-when-cross-origin')
+        self.assertTrue(
+            any('csrf_token=' in h for h in page_resp.headers.getlist('Set-Cookie')),
+            'HTML/API responses must still set csrf_token cookie',
+        )
+
+        for static_path in ('/static/css/style.css', '/static/img/psrfm.png'):
+            static_client = self.app_module.app.test_client()
+            static_resp = static_client.get(static_path)
+            try:
+                self.assertEqual(static_resp.status_code, 200)
+                self.assertEqual(static_resp.headers.get('X-Content-Type-Options'), 'nosniff')
+                self.assertEqual(static_resp.headers.getlist('Set-Cookie'), [], f'{static_path} must not emit Set-Cookie')
+            finally:
+                static_resp.close()
+
+    def test_downloader_noplaylist_and_thumbnail_validation(self):
+        from PIL import Image
+        from services import downloader
+
+        opts = downloader.build_ytdlp_options()
+        self.assertTrue(opts.get('noplaylist'))
+
+        class FakeResp:
+            def __init__(self, payload, status_code=200):
+                self.status_code = status_code
+                self._payload = payload
+
+            def iter_content(self, chunk_size=65536):
+                for i in range(0, len(self._payload), chunk_size):
+                    yield self._payload[i:i + chunk_size]
+
+            def close(self):
+                pass
+
+        # Non-image payload rejected
+        with patch.object(downloader.requests, 'get', return_value=FakeResp(b'<svg><script>alert(1)</script></svg>')):
+            self.assertEqual(
+                downloader._download_and_save_thumbnail('https://example.com/bad.jpg', self.app_module.ALBUM_ART_DIR, 'bad1'),
+                '',
+            )
+
+        # Oversized payload rejected (> 5 MB)
+        oversized = b'A' * (downloader.MAX_THUMBNAIL_BYTES + 1024)
+        with patch.object(downloader.requests, 'get', return_value=FakeResp(oversized)):
+            self.assertEqual(
+                downloader._download_and_save_thumbnail('https://example.com/big.jpg', self.app_module.ALBUM_ART_DIR, 'big1'),
+                '',
+            )
+
+        # Valid PNG re-encoded and saved
+        buf = io.BytesIO()
+        Image.new('RGBA', (20, 20), color=(10, 200, 120, 255)).save(buf, format='PNG')
+        with patch.object(downloader.requests, 'get', return_value=FakeResp(buf.getvalue())):
+            saved_name = downloader._download_and_save_thumbnail('https://example.com/ok.png', self.app_module.ALBUM_ART_DIR, 'ok1')
+        self.assertEqual(saved_name, 'ok1.png')
+        self.assertTrue(os.path.exists(os.path.join(self.app_module.ALBUM_ART_DIR, saved_name)))
+
+    def test_process_download_global_deduplication_reuses_existing_file(self):
+        from services import downloader
+
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+        user2_res = client.post(
+            '/api/users',
+            headers={'X-CSRF-Token': csrf},
+            json={'username': 'user2', 'password': 'password123'},
+        )
+        user2_id = user2_res.get_json()['user_id']
+
+        library_dir = os.path.join(self.app_module.DOWNLOAD_DIR, 'library')
+        os.makedirs(library_dir, exist_ok=True)
+        existing_audio = 'shared-track.mp3'
+        with open(os.path.join(library_dir, existing_audio), 'wb') as f:
+            f.write(b'ID3shared-audio-bytes')
+
+        user1_pl = self._create_playlist(user_id=1, name='Admin PL')
+        user2_pl = self._create_playlist(user_id=user2_id, name='User2 PL')
+
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                '''INSERT INTO songs (user_id, title, artist, filename, album_art, duration_seconds, source_url, source_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                (1, 'Shared Song', 'Shared Artist', existing_audio, '', 185, 'https://www.youtube.com/watch?v=dedup123456', 'dedup123456'),
+            )
+            cur.execute('INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, 0)', (user1_pl, cur.lastrowid))
+            conn.commit()
+
+        with patch.object(downloader.yt_dlp, 'YoutubeDL', side_effect=AssertionError('yt-dlp should not be called on global dedup')), \
+             patch.object(downloader, 'search_lyrics', return_value=None):
+            downloader.process_download(
+                {
+                    'url': 'https://www.youtube.com/watch?v=dedup123456',
+                    'playlist_ids': [user2_pl],
+                    'user_id': user2_id,
+                },
+                self.app_module.DATABASE_PATH,
+                self.app_module.DOWNLOAD_DIR,
+                self.app_module.ALBUM_ART_DIR,
+            )
+
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            conn.row_factory = sqlite3.Row
+            cloned = conn.execute(
+                'SELECT * FROM songs WHERE user_id = ? AND source_id = ?',
+                (user2_id, 'dedup123456'),
+            ).fetchone()
+            link = conn.execute(
+                'SELECT 1 FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
+                (user2_pl, cloned['id']),
+            ).fetchone()
+        self.assertIsNotNone(cloned)
+        self.assertEqual(cloned['filename'], existing_audio)
+        self.assertEqual(cloned['title'], 'Shared Song')
+        self.assertIsNotNone(link)
+
+    def test_delete_playlist_preserves_song_art_referenced_by_other_playlist_cover_and_role_update(self):
+        from services.common import _file_cleanup_queue
+
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+
+        library_dir = os.path.join(self.app_module.DOWNLOAD_DIR, 'library')
+        os.makedirs(library_dir, exist_ok=True)
+        os.makedirs(self.app_module.ALBUM_ART_DIR, exist_ok=True)
+        shared_art = 'shared_cover_art.jpg'
+        shared_art_path = os.path.join(self.app_module.ALBUM_ART_DIR, shared_art)
+        with open(shared_art_path, 'wb') as f:
+            f.write(b'shared-art-bytes')
+        audio_path = os.path.join(library_dir, 'orphan_song.mp3')
+        with open(audio_path, 'wb') as f:
+            f.write(b'audio-bytes')
+
+        pl_to_delete = self._create_playlist(user_id=1, name='Delete Me')
+        self._create_playlist(user_id=1, name='Keeps Cover', cover_art=shared_art)
+
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                'INSERT INTO songs (user_id, title, artist, filename, album_art, duration_seconds) VALUES (?, ?, ?, ?, ?, ?)',
+                (1, 'Orphan', 'Artist', 'orphan_song.mp3', shared_art, 120),
+            )
+            cur.execute('INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, 0)', (pl_to_delete, cur.lastrowid))
+            conn.commit()
+
+        del_res = client.delete(f'/api/playlists/{pl_to_delete}', headers={'X-CSRF-Token': csrf})
+        self.assertEqual(del_res.status_code, 200)
+        _file_cleanup_queue.join()
+        self.assertFalse(os.path.exists(audio_path))
+        self.assertTrue(os.path.exists(shared_art_path), 'Art still referenced by playlists.cover_art must not be deleted')
+
+        # Verify role update endpoint via update_user_role
+        user2_res = client.post(
+            '/api/users',
+            headers={'X-CSRF-Token': csrf},
+            json={'username': 'member1', 'password': 'password123'},
+        )
+        user2_id = user2_res.get_json()['user_id']
+        role_res = client.put(
+            f'/api/admin/users/{user2_id}/role',
+            headers={'X-CSRF-Token': csrf},
+            json={'role': 'admin'},
+        )
+        self.assertEqual(role_res.status_code, 200)
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            role_row = conn.execute('SELECT role FROM users WHERE id = ?', (user2_id,)).fetchone()
+        self.assertEqual(role_row[0], 'admin')
+
 
 if __name__ == '__main__':
     unittest.main()

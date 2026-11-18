@@ -100,14 +100,20 @@ def maintenance_check():
 
 @app.after_request
 def set_csrf_cookie(response):
-    token = generate_csrf()
-    response.set_cookie(
-        'csrf_token',
-        token,
-        httponly=False,
-        samesite='Lax',
-        secure=COOKIE_SECURE,
-    )
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+
+    is_static_path = request.path.startswith('/static/')
+    if not is_static_path:
+        token = generate_csrf()
+        response.set_cookie(
+            'csrf_token',
+            token,
+            httponly=False,
+            samesite='Lax',
+            secure=COOKIE_SECURE,
+        )
     if response.status_code == 200:
         if request.path.startswith('/static/album_art/'):
             response.cache_control.max_age = 31536000

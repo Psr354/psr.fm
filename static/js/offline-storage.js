@@ -283,6 +283,7 @@
     }
 
     // Export to window
+    window.OFFLINE_MEDIA_CACHE = OFFLINE_MEDIA_CACHE;
     window.offlineDb = offlineDb;
     window.offlinePlaylistAssets = offlinePlaylistAssets;
     window.isUsableOfflineAudio = isUsableOfflineAudio;

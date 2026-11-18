@@ -1,3 +1,4 @@
+import io
 import os
 import uuid
 import queue
@@ -8,6 +9,7 @@ import re
 from urllib.parse import urlparse
 import yt_dlp
 import requests
+from PIL import Image
 from services.metadata import extract_duration
 from services.database import extract_song_source_id, get_db_connection, update_song_lyrics
 from services.lyrics import search_lyrics
@@ -97,6 +99,7 @@ YTDLP_NETWORK_OPTIONS = {
 def build_ytdlp_options(extra_options=None):
     options = {
         **YTDLP_NETWORK_OPTIONS,
+        'noplaylist': True,
         **(extra_options or {}),
     }
     cookiefile = os.environ.get('PSR_FM_YTDLP_COOKIEFILE')
@@ -265,6 +268,169 @@ def emit_song_added(song, playlist_ids):
         'source_id': song['source_id'],
     }, room=f"user_{song['user_id']}")
 
+MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024
+ALLOWED_THUMBNAIL_FORMATS = {'JPEG': '.jpg', 'PNG': '.png', 'WEBP': '.webp'}
+
+
+def _download_and_save_thumbnail(thumbnail_url, album_art_dir, file_uuid):
+    """Download, verify, and re-encode a remote thumbnail via Pillow."""
+    if not thumbnail_url or not album_art_dir:
+        return ""
+    try:
+        resp = requests.get(
+            thumbnail_url,
+            timeout=10,
+            headers=YOUTUBE_HTTP_HEADERS,
+            stream=True,
+        )
+        try:
+            if resp.status_code != 200:
+                return ""
+            chunks = []
+            total = 0
+            if hasattr(resp, 'iter_content'):
+                for chunk in resp.iter_content(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > MAX_THUMBNAIL_BYTES:
+                        return ""
+                    chunks.append(chunk)
+                raw_bytes = b''.join(chunks)
+            else:
+                raw_bytes = resp.content or b''
+                if len(raw_bytes) > MAX_THUMBNAIL_BYTES:
+                    return ""
+        finally:
+            if hasattr(resp, 'close'):
+                resp.close()
+
+        if not raw_bytes:
+            return ""
+        img = Image.open(io.BytesIO(raw_bytes))
+        img.verify()
+        img = Image.open(io.BytesIO(raw_bytes))
+        if img.format not in ALLOWED_THUMBNAIL_FORMATS:
+            return ""
+        width, height = img.size
+        if width * height > 25_000_000 or width > 8000 or height > 8000:
+            return ""
+        save_format = img.format
+        ext = ALLOWED_THUMBNAIL_FORMATS[save_format]
+        if save_format == 'JPEG' and img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+        candidate_art = f"{file_uuid}{ext}"
+        img.save(os.path.join(album_art_dir, candidate_art), format=save_format)
+        return candidate_art
+    except Exception as e:
+        print(f"[WARN] Failed to download thumbnail: {e}")
+        return ""
+
+
+def _populate_song_lyrics(db_path, song_id, title, artist, duration_seconds):
+    try:
+        lyrics_data = search_lyrics(title, artist, duration_seconds)
+        if lyrics_data:
+            update_song_lyrics(
+                db_path,
+                song_id,
+                lyrics_data.get('lyrics', ''),
+                lyrics_data.get('synced_lyrics', ''),
+                word_synced_lyrics=lyrics_data.get('word_synced_lyrics', ''),
+                status='found',
+            )
+        else:
+            update_song_lyrics(
+                db_path,
+                song_id,
+                '',
+                '',
+                word_synced_lyrics='',
+                status='not_found',
+            )
+    except Exception as exc:
+        print(f"[WARN] lyrics lookup failed for {song_id}: {exc}")
+
+
+def _dispatch_lyrics_lookup(db_path, song_id, title, artist, duration_seconds):
+    if os.environ.get('PSR_FM_DISABLE_WORKER') == '1':
+        _populate_song_lyrics(db_path, song_id, title, artist, duration_seconds)
+    else:
+        threading.Thread(
+            target=_populate_song_lyrics,
+            args=(db_path, song_id, title, artist, duration_seconds),
+            daemon=True,
+        ).start()
+
+
+def _reuse_existing_song_by_source_id(db_path, library_dir, user_id, source_id, source_url, playlist_ids):
+    """Reuse an existing song row (same user or global cross-account) if already on disk."""
+    if not source_id:
+        return False
+    conn = get_db_connection(db_path)
+    try:
+        conn.execute('BEGIN IMMEDIATE')
+        existing_song = conn.execute(
+            'SELECT * FROM songs WHERE user_id = ? AND source_id = ? ORDER BY id LIMIT 1',
+            (user_id, source_id),
+        ).fetchone()
+        if existing_song:
+            add_song_to_playlists(conn.cursor(), existing_song['id'], playlist_ids)
+            conn.commit()
+            emit_song_added(existing_song, playlist_ids)
+            return True
+
+        global_song = conn.execute(
+            'SELECT * FROM songs WHERE source_id = ? ORDER BY id LIMIT 1',
+            (source_id,),
+        ).fetchone()
+        if global_song and global_song['filename'] and os.path.exists(os.path.join(library_dir, global_song['filename'])):
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                INSERT INTO songs (title, artist, filename, album_art, duration_seconds, source_url, source_id, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    global_song['title'],
+                    global_song['artist'],
+                    global_song['filename'],
+                    global_song['album_art'],
+                    global_song['duration_seconds'],
+                    global_song['source_url'] or source_url,
+                    source_id,
+                    user_id,
+                ),
+            )
+            cloned_id = cursor.lastrowid
+            add_song_to_playlists(cursor, cloned_id, playlist_ids)
+            conn.commit()
+            cloned_payload = {
+                'id': cloned_id,
+                'playlist_ids': playlist_ids,
+                'title': global_song['title'],
+                'artist': global_song['artist'],
+                'filename': global_song['filename'],
+                'album_art': global_song['album_art'],
+                'duration_seconds': global_song['duration_seconds'],
+                'source_url': global_song['source_url'] or source_url,
+                'source_id': source_id,
+                'user_id': user_id,
+            }
+            emit_song_added(cloned_payload, playlist_ids)
+            _dispatch_lyrics_lookup(
+                db_path, cloned_id, global_song['title'], global_song['artist'], global_song['duration_seconds']
+            )
+            return True
+        conn.rollback()
+        return False
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def process_download(task, db_path, download_dir, album_art_dir):
     url = task['url']
     playlist_ids = task['playlist_ids']
@@ -273,6 +439,13 @@ def process_download(task, db_path, download_dir, album_art_dir):
     is_valid, validation_error = validate_song_url(url)
     if not is_valid:
         raise Exception(validation_error)
+
+    library_dir = os.path.join(download_dir, 'library')
+    requested_source_id = extract_song_source_id(url)
+    if requested_source_id and _reuse_existing_song_by_source_id(
+        db_path, library_dir, user_id, requested_source_id, url, playlist_ids
+    ):
+        return
     
     def progress_hook(d):
         if socketio_instance:
@@ -296,7 +469,6 @@ def process_download(task, db_path, download_dir, album_art_dir):
         'no_warnings': True,
         'extract_flat': False,
     })
-    requested_source_id = extract_song_source_id(url)
     spotify_metadata = _spotify_track_metadata(url) if requested_source_id.startswith('spotify:') else None
     extraction_url = (
         f"ytsearch5:{spotify_metadata['title']} {spotify_metadata['artist']} official audio"
@@ -321,23 +493,12 @@ def process_download(task, db_path, download_dir, album_art_dir):
         raise Exception('Video exceeds the 10 minute limit')
 
     # Recheck after yt-dlp resolves the canonical video ID. This covers queued
-    # requests whose initial URL lookup happened before another download ended.
-    if source_id:
-        conn = get_db_connection(db_path)
-        existing_song = conn.execute(
-            'SELECT * FROM songs WHERE user_id = ? AND source_id = ? ORDER BY id LIMIT 1',
-            (user_id, source_id),
-        ).fetchone()
-        if existing_song:
-            add_song_to_playlists(conn.cursor(), existing_song['id'], playlist_ids)
-            conn.commit()
-            conn.close()
-            emit_song_added(existing_song, playlist_ids)
-            return
-        conn.close()
+    # requests whose initial URL lookup happened before another download ended,
+    # and reuses audio files already downloaded by another account.
+    if _reuse_existing_song_by_source_id(db_path, library_dir, user_id, source_id, source_url, playlist_ids):
+        return
         
     file_uuid = str(uuid.uuid4())
-    library_dir = os.path.join(download_dir, 'library')
     
     ydl_opts_download = build_ytdlp_options({
         'format': 'bestaudio/best',
@@ -359,24 +520,7 @@ def process_download(task, db_path, download_dir, album_art_dir):
     if duration_seconds == 0 and duration > 0:
         duration_seconds = int(duration)
 
-    album_art_filename = ""
-    if thumbnail_url:
-        art_ext = os.path.splitext(thumbnail_url)[-1].split('?')[0]
-        if art_ext not in ['.jpg', '.jpeg', '.png', '.webp']:
-            art_ext = '.jpg'
-        candidate_art = f"{file_uuid}{art_ext}"
-        try:
-            r = requests.get(
-                thumbnail_url,
-                timeout=10,
-                headers=YOUTUBE_HTTP_HEADERS,
-            )
-            if r.status_code == 200 and r.content:
-                with open(os.path.join(album_art_dir, candidate_art), 'wb') as f:
-                    f.write(r.content)
-                album_art_filename = candidate_art
-        except Exception as e:
-            print(f"[WARN] Failed to download thumbnail: {e}")
+    album_art_filename = _download_and_save_thumbnail(thumbnail_url, album_art_dir, file_uuid)
             
     conn = get_db_connection(db_path)
     try:
@@ -433,29 +577,6 @@ def process_download(task, db_path, download_dir, album_art_dir):
         emit_song_added(existing_song, playlist_ids)
         return
 
-    try:
-        lyrics_data = search_lyrics(title, artist, duration_seconds)
-        if lyrics_data:
-            update_song_lyrics(
-                db_path,
-                song_id,
-                lyrics_data.get('lyrics', ''),
-                lyrics_data.get('synced_lyrics', ''),
-                word_synced_lyrics=lyrics_data.get('word_synced_lyrics', ''),
-                status='found',
-            )
-        else:
-            update_song_lyrics(
-                db_path,
-                song_id,
-                '',
-                '',
-                word_synced_lyrics='',
-                status='not_found',
-            )
-    except Exception as exc:
-        print(f"[WARN] lyrics lookup failed for {song_id}: {exc}")
-
     emit_song_added({
         'id': song_id,
         'playlist_ids': playlist_ids,
@@ -468,6 +589,8 @@ def process_download(task, db_path, download_dir, album_art_dir):
         'source_id': source_id,
         'user_id': user_id,
     }, playlist_ids)
+
+    _dispatch_lyrics_lookup(db_path, song_id, title, artist, duration_seconds)
 
 def start_worker(db_path, download_dir, album_art_dir, sio):
     download_queue.init_db(db_path)

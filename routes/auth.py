@@ -6,7 +6,8 @@ from werkzeug.security import check_password_hash
 from services.database import (
     get_db_connection, get_user_by_id, get_user_by_username, create_user,
     create_initial_admin, has_any_user,
-    get_all_users, get_user_files, delete_user_cascade, update_user_password
+    get_all_users, get_user_files, delete_user_cascade, update_user_password,
+    update_user_role
 )
 from services.common import (
     User, get_json_object, get_database_path, is_admin,
@@ -327,15 +328,6 @@ def change_user_role(user_id):
         return jsonify({'error': 'Invalid role. Must be user or admin'}), 400
 
     db_path = get_database_path()
-    conn = get_db_connection(db_path)
-    try:
-        cursor = conn.cursor()
-        cursor.execute('UPDATE users SET role = ? WHERE id = ?', (new_role, user_id))
-        conn.commit()
-
-        if cursor.rowcount == 0:
-            return jsonify({'error': 'User not found'}), 404
-
-        return jsonify({'status': 'success', 'message': f'Role updated to {new_role}'})
-    finally:
-        conn.close()
+    if not update_user_role(db_path, user_id, new_role):
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify({'status': 'success', 'message': f'Role updated to {new_role}'})

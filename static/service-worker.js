@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'psr354-shell-v53';
+const SHELL_CACHE = 'psr354-shell-v54';
 const MEDIA_CACHE = 'psr354-media-v3';
 const RUNTIME_CACHE = 'psr354-runtime-v2';
 const APP_SHELL_KEY = '/?offline-app-shell=1';
@@ -58,6 +58,14 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'CACHE_APP_SHELL') {
     event.waitUntil(cacheAuthenticatedAppShell());
+  } else if (event.data?.type === 'CLEAR_APP_SHELL') {
+    event.waitUntil(
+      caches.keys().then((keys) => Promise.all(
+        keys
+          .filter((key) => key.startsWith('psr354-shell-'))
+          .map((key) => caches.open(key).then((cache) => cache.delete(APP_SHELL_KEY)))
+      ))
+    );
   }
 });
 

@@ -1,5 +1,6 @@
     (function () {
-        const THEME_STORAGE_KEY = 'psr_theme_v2';
+        const themeUserId = String(document.body?.dataset?.userId || '').trim();
+        const THEME_STORAGE_KEY = themeUserId ? `psr_theme_v2_${themeUserId}` : 'psr_theme_v2';
         const LEGACY_KEY = 'psr_theme_v1';
 
         const BG_CONFIGS = {
@@ -263,8 +264,11 @@
         }
 
         // Wire Modal and Interactive Logic
+        let themeManagerInitialized = false;
         const initThemeManager = () => {
             window.initThemeManager = initThemeManager;
+            if (themeManagerInitialized) return;
+            themeManagerInitialized = true;
             const modalEl           = document.getElementById('theme-settings-modal');
             const openBtn           = document.getElementById('theme-settings-btn');
             const quickBtn          = document.getElementById('theme-quick-btn');

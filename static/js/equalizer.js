@@ -20,7 +20,8 @@ document.addEventListener('DOMContentLoaded', () => {
         electronic: [5,4,3,1,0,1,2,3,3,2,0,1,2,3,5,6],
         acoustic:   [3,2,1,0,1,2,3,2,1,0,1,2,2,3,2,1],
     };
-    const EQ_STORAGE_KEY = 'psr_eq_state_v1';
+    const eqUserId = String(document.body?.dataset?.userId || '').trim();
+    const EQ_STORAGE_KEY = eqUserId ? `psr_eq_state_v1_${eqUserId}` : 'psr_eq_state_v1';
 
     // Extend state for EQ
     state.eqEnabled = false;
