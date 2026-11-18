@@ -222,4 +222,178 @@ rejectListen = true;
 await context.logListen('1', 5);
 assert.equal(errors.length, 1, 'HTTP rejection must be reported');
 assert.match(errors[0][1].message, /409/);
-console.log('Listening checks passed: full repeats, early pause, slow session, seek event ordering, HTTP rejection.');
+
+// Reload mid-song must restore playbackSessionId & playEventLogged instead of logging +1 duplicate play.
+rejectListen = false;
+const syncSource = fs.readFileSync(new URL('../../static/js/playback-sync.js', import.meta.url), 'utf8');
+const localStore = new Map();
+const syncFetches = [];
+const syncAudio = {
+    currentTime: 90, duration: 338, paused: false, volume: 0.8, muted: false, src: '',
+    listeners: {},
+    getAttribute() { return this.src; },
+    addEventListener(name, fn) { this.listeners[name] = fn; },
+    removeEventListener(name, fn) { if (this.listeners[name] === fn) delete this.listeners[name]; },
+    play() { this.paused = false; return Promise.resolve(); },
+    pause() { this.paused = true; },
+};
+const syncWindow = {
+    location: { origin: 'http://localhost' },
+    addEventListener: () => {},
+    removeEventListener: () => {},
+};
+const syncContext = vm.createContext({
+    window: syncWindow,
+    document: {
+        body: { dataset: { userId: '1' } },
+        visibilityState: 'visible',
+        getElementById: () => null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+    },
+    navigator: { onLine: true },
+    localStorage: {
+        getItem: (k) => localStore.get(k) ?? null,
+        setItem: (k, v) => localStore.set(k, String(v)),
+    },
+    URL,
+    setTimeout,
+    clearTimeout,
+    fetch: (url, opts) => {
+        syncFetches.push({ url, opts });
+        return Promise.resolve({ ok: true, json: async () => ({}) });
+    },
+});
+vm.runInContext(syncSource, syncContext);
+
+const beforeReloadSession = seekSession;
+const tab1State = {
+    deviceId: 'dev-1',
+    isPrimarySyncLeader: true,
+    isApplyingRemoteSync: false,
+    lastRemoteSyncAppliedAt: 0,
+    currentSongMeta: { id: 1, title: 'Song 1', artist: 'Artist', album_art: '', filename: 'song1.mp3', duration_seconds: 338 },
+    currentPlayingSongId: '1',
+    currentPlaylistId: 1,
+    currentPlaylistSongs: [{ id: 1, title: 'Song 1', artist: 'Artist', album_art: '', filename: 'song1.mp3', duration_seconds: 338 }],
+    currentSongIndex: 0,
+    repeatMode: 0,
+    isShuffle: false,
+    userVolume: 0.8,
+    userMuted: false,
+    playbackSessionId: beforeReloadSession,
+    playEventLogged: true,
+    pendingPlaySeconds: 0,
+};
+const noopApp = (st) => ({
+    state: st,
+    el: { audio: syncAudio },
+    showToast() {},
+    mediaUrlName: (v) => v,
+    albumArtUrl: (v) => v || '',
+    formatTime: (v) => String(v),
+    updatePlayPauseIcon() {},
+    updateSyncedLyrics() {},
+    updateMediaSession() {},
+    buildQueue() {},
+    loadLyrics() {},
+    highlightPlayingSong() {},
+    flushListenLog() {},
+    setAppVolume() {},
+    cancelPlaybackRecovery() {},
+    cancelTrackTransitionRecovery() {},
+    resumeCurrentSong() {},
+});
+const syncMod1 = syncWindow.createPlaybackSyncModule(noopApp(tab1State));
+syncMod1.savePlaybackState(true, true);
+const persisted = JSON.parse(localStore.get('psr_playback_state_1'));
+assert.equal(persisted.playbackSessionId, beforeReloadSession);
+assert.equal(persisted.playEventLogged, true);
+
+// Simulate fresh page reload applying saved state.
+const tab2State = {
+    deviceId: 'dev-1',
+    isPrimarySyncLeader: true,
+    isApplyingRemoteSync: false,
+    lastRemoteSyncAppliedAt: 0,
+    currentPlayingSongId: null,
+    playEventLogged: false,
+    pendingPlaySeconds: 0,
+    playbackSessionId: null,
+    playbackSessionPromise: null,
+    playbackRequestId: 0,
+    lastLoggedTime: 0,
+};
+const syncMod2 = syncWindow.createPlaybackSyncModule(noopApp(tab2State));
+syncMod2.applySavedPlaybackState(persisted, false, false);
+assert.equal(tab2State.playEventLogged, true, 'Reload must restore playEventLogged');
+assert.equal(tab2State.playbackSessionId, beforeReloadSession, 'Reload must restore playbackSessionId');
+syncAudio.listeners.loadedmetadata?.();
+assert.equal(tab2State.lastLoggedTime, 90, 'Reload must anchor lastLoggedTime to restored position');
+
+// Continuing playback after reload must reuse beforeReloadSession without firing a new /play.
+const sessionsBeforeReloadContinue = nextSession;
+const secondsBeforeReloadContinue = sessions.get(beforeReloadSession);
+state.playEventLogged = tab2State.playEventLogged;
+state.playbackSessionId = tab2State.playbackSessionId;
+state.playbackSessionPromise = tab2State.playbackSessionPromise;
+state.pendingPlaySeconds = 0;
+state.lastLoggedTime = 90;
+state.playbackStatisticsSongId = '1';
+audio.currentTime = 90;
+audio.paused = false;
+listeners.play();
+listeners.playing();
+audio.currentTime = 95;
+listeners.timeupdate();
+await settle();
+assert.equal(nextSession, sessionsBeforeReloadContinue, 'Reload mid-song must NOT log a duplicate play');
+assert.equal(sessions.get(beforeReloadSession), secondsBeforeReloadContinue + 5, 'Reload mid-song must continue logging seconds on the same session');
+
+// Changing volume on a follower device must NOT promote it to primary sync leader or log duplicate plays.
+const followerSaveCalls = [];
+const followerState = {
+    isPrimarySyncLeader: false,
+    userVolume: 0.8,
+    userMuted: false,
+    lastNonZeroVolume: 0.8,
+};
+const followerAudio = { volume: 0.8, muted: false };
+const followerCtx = vm.createContext({
+    window: {},
+    state: followerState,
+    el: { audio: followerAudio },
+    document: {
+        getElementById: () => null,
+        querySelectorAll: () => [],
+    },
+    updateVolumeIcon() {},
+    savePlaybackState(force, isUserAction) { followerSaveCalls.push({ force, isUserAction }); },
+});
+const setAppVolStart = source.indexOf('    function setAppVolume(');
+const setAppVolEnd = source.indexOf('    window.setAppVolume = setAppVolume;', setAppVolStart);
+assert.ok(setAppVolStart >= 0 && setAppVolEnd > setAppVolStart);
+vm.runInContext(source.slice(setAppVolStart, setAppVolEnd), followerCtx);
+followerCtx.setAppVolume(0.4, false, true);
+assert.equal(followerState.isPrimarySyncLeader, false, 'Follower volume change must NOT claim sync leadership');
+assert.equal(followerAudio.volume, 0.4, 'Follower local volume must still update');
+assert.deepEqual(followerSaveCalls, [{ force: false, isUserAction: false }], 'Follower volume change must not force server sync');
+
+// Follower timeupdate after volume change must still not log a play.
+const sessionsBeforeFollower = nextSession;
+state.isPrimarySyncLeader = false;
+state.playEventLogged = false;
+state.pendingPlaySeconds = 0;
+state.playbackSessionId = null;
+state.playbackSessionPromise = null;
+state.playbackRequestId++;
+audio.currentTime = 0;
+audio.paused = false;
+listeners.play();
+listeners.playing();
+audio.currentTime = 5;
+listeners.timeupdate();
+await settle();
+assert.equal(nextSession, sessionsBeforeFollower, 'Follower must not log plays while not sync leader');
+
+console.log('Listening checks passed: full repeats, early pause, slow session, seek event ordering, HTTP rejection, reload session continuity, follower volume.');

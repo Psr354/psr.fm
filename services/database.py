@@ -266,6 +266,19 @@ def _init_playlists_and_songs_tables(cursor):
                 )
 
 
+def _table_needs_song_set_null_migration(cursor, table_name):
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    cols = [col[1] for col in cursor.fetchall()]
+    if 'song_title' not in cols or 'song_artist' not in cols:
+        return True
+    cursor.execute(f"PRAGMA foreign_key_list({table_name})")
+    for fk in cursor.fetchall():
+        # PRAGMA foreign_key_list columns: id, seq, table, from, to, on_update, on_delete, match
+        if fk[2] == 'songs' and str(fk[6] or '').upper() != 'SET NULL':
+            return True
+    return False
+
+
 def _init_listening_tables(cursor):
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS listening_logs (
@@ -274,7 +287,9 @@ def _init_listening_tables(cursor):
             user_id INTEGER,
             seconds_listened REAL,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE CASCADE,
+            song_title TEXT DEFAULT '',
+            song_artist TEXT DEFAULT '',
+            FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE SET NULL,
             FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )
     ''')
@@ -284,6 +299,34 @@ def _init_listening_tables(cursor):
     if 'user_id' not in log_cols:
         cursor.execute("ALTER TABLE listening_logs ADD COLUMN user_id INTEGER DEFAULT 1")
         cursor.execute("UPDATE listening_logs SET user_id = 1 WHERE user_id IS NULL")
+
+    if _table_needs_song_set_null_migration(cursor, 'listening_logs'):
+        has_title = 'song_title' in log_cols
+        has_artist = 'song_artist' in log_cols
+        title_expr = "COALESCE(NULLIF(l.song_title, ''), s.title, '')" if has_title else "COALESCE(s.title, '')"
+        artist_expr = "COALESCE(NULLIF(l.song_artist, ''), s.artist, '')" if has_artist else "COALESCE(s.artist, '')"
+        cursor.execute('''
+            CREATE TABLE listening_logs_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                song_id INTEGER,
+                user_id INTEGER,
+                seconds_listened REAL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                song_title TEXT DEFAULT '',
+                song_artist TEXT DEFAULT '',
+                FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE SET NULL,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            )
+        ''')
+        cursor.execute(f'''
+            INSERT INTO listening_logs_new (id, song_id, user_id, seconds_listened, timestamp, song_title, song_artist)
+            SELECT l.id, l.song_id, l.user_id, l.seconds_listened, l.timestamp, {title_expr}, {artist_expr}
+            FROM listening_logs l
+            LEFT JOIN songs s ON l.song_id = s.id
+        ''')
+        cursor.execute('DROP TABLE listening_logs')
+        cursor.execute('ALTER TABLE listening_logs_new RENAME TO listening_logs')
+
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_listening_logs_user_timestamp
         ON listening_logs (user_id, timestamp)
@@ -296,13 +339,44 @@ def _init_listening_tables(cursor):
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS play_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            song_id INTEGER NOT NULL,
+            song_id INTEGER,
             user_id INTEGER NOT NULL,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE CASCADE,
+            song_title TEXT DEFAULT '',
+            song_artist TEXT DEFAULT '',
+            FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE SET NULL,
             FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )
     ''')
+
+    if _table_needs_song_set_null_migration(cursor, 'play_events'):
+        cursor.execute("PRAGMA table_info(play_events)")
+        pe_cols = [col[1] for col in cursor.fetchall()]
+        has_title = 'song_title' in pe_cols
+        has_artist = 'song_artist' in pe_cols
+        title_expr = "COALESCE(NULLIF(pe.song_title, ''), s.title, '')" if has_title else "COALESCE(s.title, '')"
+        artist_expr = "COALESCE(NULLIF(pe.song_artist, ''), s.artist, '')" if has_artist else "COALESCE(s.artist, '')"
+        cursor.execute('''
+            CREATE TABLE play_events_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                song_id INTEGER,
+                user_id INTEGER NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                song_title TEXT DEFAULT '',
+                song_artist TEXT DEFAULT '',
+                FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE SET NULL,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            )
+        ''')
+        cursor.execute(f'''
+            INSERT INTO play_events_new (id, song_id, user_id, timestamp, song_title, song_artist)
+            SELECT pe.id, pe.song_id, pe.user_id, pe.timestamp, {title_expr}, {artist_expr}
+            FROM play_events pe
+            LEFT JOIN songs s ON pe.song_id = s.id
+        ''')
+        cursor.execute('DROP TABLE play_events')
+        cursor.execute('ALTER TABLE play_events_new RENAME TO play_events')
+
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_play_events_user_timestamp
         ON play_events (user_id, timestamp)
@@ -554,6 +628,7 @@ def delete_user_cascade(database_path, user_id):
         cursor = conn.cursor()
         # Delete in correct order due to foreign keys
         cursor.execute('DELETE FROM listening_logs WHERE user_id = ?', (user_id,))
+        cursor.execute('DELETE FROM play_events WHERE user_id = ?', (user_id,))
         cursor.execute('''
             DELETE FROM playlist_songs 
             WHERE playlist_id IN (SELECT id FROM playlists WHERE user_id = ?)

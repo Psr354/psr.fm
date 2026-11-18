@@ -42,7 +42,7 @@ def find_source_for_song(title, artist):
         return None
 
     entry = entries[0]
-    source_id = entry.get('id') or extract_youtube_video_id(entry.get('url', ''))
+    source_id = entry.get('id') or extract_song_source_id(entry.get('url', ''))
     if not source_id:
         return None
 

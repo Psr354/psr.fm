@@ -410,8 +410,23 @@ class RecapAndSettingsTests(PsrFmTestCase):
                     'isMuted': False,
                     'volume': 0.8,
                     'timestamp': 1700000000000,
+                    'playbackSessionId': 'sess-abc-123',
+                    'playEventLogged': True,
+                    'pendingPlaySeconds': 0,
                 },
             ).status_code, 200)
+        for bad_session_payload in (
+            {'playbackSessionId': 12345},
+            {'playbackSessionId': 'x' * 200},
+            {'playEventLogged': 'yes'},
+            {'pendingPlaySeconds': True},
+            {'pendingPlaySeconds': '1.5'},
+        ):
+            self.assertEqual(client.post(
+                '/api/playback-state',
+                headers={'X-CSRF-Token': csrf},
+                json=bad_session_payload,
+            ).status_code, 400)
 
     def test_dashboard_hides_server_disk_stats_from_non_admin(self):
         import os
@@ -516,6 +531,139 @@ class RecapAndSettingsTests(PsrFmTestCase):
             json={'song_id': song_id, 'playback_session_id': 'cap-session', 'seconds': 10},
         )
         self.assertEqual(over_cap.status_code, 409)
+
+    def test_deleting_song_and_playlist_preserves_listening_history_and_recap(self):
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123',
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+
+        pl1 = client.post('/api/playlists', headers={'X-CSRF-Token': csrf}, json={'name': 'Keep List'}).get_json()['id']
+        pl2 = client.post('/api/playlists', headers={'X-CSRF-Token': csrf}, json={'name': 'Delete List'}).get_json()['id']
+        song1 = self._create_song(user_id=1, title='Deleted Solo Track', artist='Artist One', filename='solo.mp3')
+        song2 = self._create_song(user_id=1, title='Deleted Playlist Track', artist='Artist Two', filename='pl-track.mp3')
+        self._add_song_to_playlist(pl1, song1)
+        self._add_song_to_playlist(pl2, song2)
+
+        started = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+        for sid, sess_id, secs in ((song1, 'sess-del-1', 25), (song2, 'sess-del-2', 30)):
+            play_res = client.post(
+                f'/api/songs/{sid}/play',
+                headers={'X-CSRF-Token': csrf},
+                json={'playback_session_id': sess_id, 'occurred_at': started},
+            )
+            self.assertEqual(play_res.status_code, 200)
+            listen_res = client.post(
+                '/api/listen',
+                headers={'X-CSRF-Token': csrf},
+                json={'song_id': sid, 'playback_session_id': sess_id, 'seconds': secs},
+            )
+            self.assertEqual(listen_res.status_code, 200)
+
+        # Delete song1 directly and delete pl2 (which deletes orphaned song2).
+        self.assertEqual(client.delete(f'/api/songs/{song1}', headers={'X-CSRF-Token': csrf}).status_code, 200)
+        self.assertEqual(client.delete(f'/api/playlists/{pl2}', headers={'X-CSRF-Token': csrf}).status_code, 200)
+
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM songs').fetchone()[0], 0)
+            log_rows = conn.execute(
+                'SELECT song_id, seconds_listened, song_title, song_artist FROM listening_logs ORDER BY id'
+            ).fetchall()
+            play_rows = conn.execute(
+                'SELECT song_id, song_title, song_artist FROM play_events ORDER BY id'
+            ).fetchall()
+
+        self.assertEqual(len(log_rows), 2)
+        self.assertEqual(log_rows[0], (None, 25.0, 'Deleted Solo Track', 'Artist One'))
+        self.assertEqual(log_rows[1], (None, 30.0, 'Deleted Playlist Track', 'Artist Two'))
+        self.assertEqual(len(play_rows), 2)
+        self.assertEqual(play_rows[0], (None, 'Deleted Solo Track', 'Artist One'))
+        self.assertEqual(play_rows[1], (None, 'Deleted Playlist Track', 'Artist Two'))
+
+        dash = client.get('/api/dashboard').get_json()
+        self.assertEqual(dash['total_listened'], 55.0)
+
+        now = datetime.now(timezone.utc)
+        month_recap = client.get(f'/api/recap?period=month&month={now.month}&year={now.year}&tz_offset=0').get_json()
+        self.assertEqual(month_recap['stats']['total_seconds'], 55.0)
+        self.assertEqual(month_recap['stats']['total_plays'], 2)
+        self.assertEqual(month_recap['stats']['unique_songs'], 2)
+        self.assertEqual(month_recap['top_listened'][0]['title'], 'Deleted Playlist Track')
+        self.assertEqual(month_recap['top_listened'][0]['play_count'], 1)
+        self.assertEqual(month_recap['top_played'][0]['title'], 'Deleted Playlist Track')
+        self.assertEqual(month_recap['top_played'][0]['total_listened'], 30.0)
+
+        year_recap = client.get(f'/api/recap?period=year&year={now.year}&tz_offset=0').get_json()
+        self.assertEqual(year_recap['stats']['total_seconds'], 55.0)
+        self.assertEqual(year_recap['monthly_breakdown'][0]['top_song']['title'], 'Deleted Playlist Track')
+
+    def test_init_db_migrates_legacy_cascade_listening_tables_to_set_null(self):
+        from services.database import init_db
+
+        client = self.app_module.app.test_client()
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123',
+        })
+        song_id = self._create_song(user_id=1, title='Legacy Track', artist='Legacy Artist')
+
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            conn.execute('PRAGMA foreign_keys = OFF')
+            conn.execute('DROP TABLE listening_logs')
+            conn.execute('DROP TABLE play_events')
+            conn.execute('''
+                CREATE TABLE listening_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    song_id INTEGER,
+                    user_id INTEGER,
+                    seconds_listened REAL,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+                )
+            ''')
+            conn.execute('''
+                CREATE TABLE play_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    song_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (song_id) REFERENCES songs (id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+                )
+            ''')
+            conn.execute(
+                'INSERT INTO listening_logs (song_id, user_id, seconds_listened) VALUES (?, 1, 42)',
+                (song_id,),
+            )
+            conn.execute(
+                'INSERT INTO play_events (song_id, user_id) VALUES (?, 1)',
+                (song_id,),
+            )
+            conn.commit()
+
+        init_db(self.app_module.DATABASE_PATH)
+
+        with closing(sqlite3.connect(self.app_module.DATABASE_PATH)) as conn:
+            conn.execute('PRAGMA foreign_keys = ON')
+            for table in ('listening_logs', 'play_events'):
+                fks = conn.execute(f'PRAGMA foreign_key_list({table})').fetchall()
+                song_fk = [fk for fk in fks if fk[2] == 'songs' and fk[3] == 'song_id']
+                self.assertEqual(len(song_fk), 1)
+                self.assertEqual(song_fk[0][6].upper(), 'SET NULL')
+
+            # Deleting the song must now SET NULL instead of cascading deletion.
+            conn.execute('DELETE FROM songs WHERE id = ?', (song_id,))
+            conn.commit()
+            log_row = conn.execute(
+                'SELECT song_id, seconds_listened, song_title, song_artist FROM listening_logs'
+            ).fetchone()
+            play_row = conn.execute(
+                'SELECT song_id, song_title, song_artist FROM play_events'
+            ).fetchone()
+
+        self.assertEqual(log_row, (None, 42.0, 'Legacy Track', 'Legacy Artist'))
+        self.assertEqual(play_row, (None, 'Legacy Track', 'Legacy Artist'))
 
 
 if __name__ == '__main__':

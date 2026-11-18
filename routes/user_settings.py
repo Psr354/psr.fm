@@ -32,6 +32,7 @@ ALLOWED_PLAYBACK_KEYS = {
     'songId', 'songMeta', 'playlistId', 'playlistSongs', 'songIndex',
     'duration', 'repeatMode', 'isShuffle', 'currentTime', 'isPlaying',
     'timestamp', 'deviceId', 'volume', 'isMuted',
+    'playbackSessionId', 'playEventLogged', 'pendingPlaySeconds',
 }
 ALLOWED_SONG_META_KEYS = {'id', 'title', 'artist', 'album_art', 'filename', 'duration_seconds'}
 
@@ -105,12 +106,12 @@ def _validate_playback_payload(payload):
         if isinstance(val, bool) or not isinstance(val, int) or val < -1 or val > 100000:
             return None, 'Invalid songIndex'
 
-    for bool_field in ('isPlaying', 'isShuffle', 'isMuted'):
+    for bool_field in ('isPlaying', 'isShuffle', 'isMuted', 'playEventLogged'):
         if bool_field in payload and payload[bool_field] is not None:
             if not isinstance(payload[bool_field], bool):
                 return None, f'Invalid {bool_field}'
 
-    for num_field in ('currentTime', 'duration', 'volume', 'timestamp'):
+    for num_field in ('currentTime', 'duration', 'volume', 'timestamp', 'pendingPlaySeconds'):
         if num_field in payload and payload[num_field] is not None:
             val = payload[num_field]
             if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val):
@@ -121,9 +122,10 @@ def _validate_playback_payload(payload):
         if isinstance(val, bool) or val not in (0, 1, 2):
             return None, 'Invalid repeatMode'
 
-    if 'deviceId' in payload and payload['deviceId'] is not None:
-        if not isinstance(payload['deviceId'], str) or len(payload['deviceId']) > 128:
-            return None, 'Invalid deviceId'
+    for str_field in ('deviceId', 'playbackSessionId'):
+        if str_field in payload and payload[str_field] is not None:
+            if not isinstance(payload[str_field], str) or len(payload[str_field]) > 128:
+                return None, f'Invalid {str_field}'
 
     return payload, None
 

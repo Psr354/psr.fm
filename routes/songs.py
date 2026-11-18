@@ -279,22 +279,17 @@ def upload_song():
 
         added_playlist_ids = []
         for playlist_id in owned_playlist_ids:
-            cursor = db.execute(
-                'SELECT 1 FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
-                (playlist_id, song_id)
-            )
-            if cursor.fetchone():
-                continue
             pos_cursor = db.execute(
                 'SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_songs WHERE playlist_id = ?',
                 (playlist_id,)
             )
             next_position = pos_cursor.fetchone()[0]
-            db.execute(
-                'INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
+            insert_cursor = db.execute(
+                'INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
                 (playlist_id, song_id, next_position)
             )
-            added_playlist_ids.append(playlist_id)
+            if insert_cursor.rowcount == 1:
+                added_playlist_ids.append(playlist_id)
         db.commit()
     except Exception:
         db.rollback()
@@ -547,7 +542,7 @@ def delete_song(song_id):
     cursor = db.cursor()
     try:
         db.execute('BEGIN IMMEDIATE')
-        cursor.execute('SELECT filename, album_art FROM songs WHERE id = ? AND user_id = ?', (song_id, current_user.id))
+        cursor.execute('SELECT title, artist, filename, album_art FROM songs WHERE id = ? AND user_id = ?', (song_id, current_user.id))
         song = cursor.fetchone()
         if not song:
             db.rollback()
@@ -581,8 +576,28 @@ def delete_song(song_id):
                     'remaining_playlist_count': remaining_playlist_count,
                 })
 
+        # Preserve historical listening stats & recap metadata before removing the song
+        song_title = song['title'] or ''
+        song_artist = song['artist'] or 'Unknown'
+        cursor.execute(
+            '''
+            UPDATE listening_logs
+            SET song_title = CASE WHEN COALESCE(song_title, '') = '' THEN ? ELSE song_title END,
+                song_artist = CASE WHEN COALESCE(song_artist, '') = '' THEN ? ELSE song_artist END
+            WHERE song_id = ? AND user_id = ?
+            ''',
+            (song_title, song_artist, song_id, current_user.id),
+        )
+        cursor.execute(
+            '''
+            UPDATE play_events
+            SET song_title = CASE WHEN COALESCE(song_title, '') = '' THEN ? ELSE song_title END,
+                song_artist = CASE WHEN COALESCE(song_artist, '') = '' THEN ? ELSE song_artist END
+            WHERE song_id = ? AND user_id = ?
+            ''',
+            (song_title, song_artist, song_id, current_user.id),
+        )
         cursor.execute('DELETE FROM playlist_songs WHERE song_id = ?', (song_id,))
-        cursor.execute('DELETE FROM listening_logs WHERE song_id = ?', (song_id,))
         cursor.execute('DELETE FROM songs WHERE id = ?', (song_id,))
 
         library_dir = current_app.config.get('LIBRARY_DIR', '')
@@ -628,24 +643,19 @@ def add_owned_song_to_playlists(song_id):
     added_playlist_ids = []
     skipped_playlist_ids = []
     for playlist_id in owned_playlist_ids:
-        existing = db.execute(
-            'SELECT 1 FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
-            (playlist_id, song_id)
-        ).fetchone()
-        if existing:
-            skipped_playlist_ids.append(playlist_id)
-            continue
-
-        cursor = db.execute(
+        pos_cursor = db.execute(
             'SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_songs WHERE playlist_id = ?',
             (playlist_id,)
         )
-        next_position = cursor.fetchone()[0]
-        db.execute(
-            'INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
+        next_position = pos_cursor.fetchone()[0]
+        insert_cursor = db.execute(
+            'INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
             (playlist_id, song_id, next_position)
         )
-        added_playlist_ids.append(playlist_id)
+        if insert_cursor.rowcount == 1:
+            added_playlist_ids.append(playlist_id)
+        else:
+            skipped_playlist_ids.append(playlist_id)
 
     db.commit()
     return jsonify({

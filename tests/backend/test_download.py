@@ -799,6 +799,81 @@ class DownloadAndLibraryTests(PsrFmTestCase):
             val = conn.execute('SELECT source_id FROM songs WHERE id = ?', (sid,)).fetchone()[0]
         self.assertEqual(val, 'spotify:4cOdK2wGLETKBW3PvgPWqT')
 
+    def test_concurrent_playlist_song_insert_has_no_integrity_error(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        setup_client = self.app_module.app.test_client()
+        setup_res = setup_client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(setup_client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        self.assertEqual(setup_res.status_code, 200)
+        csrf = self._csrf_token_from_response(setup_res)
+        u2_id = setup_client.post('/api/users', headers={'X-CSRF-Token': csrf}, json={
+            'username': 'other', 'password': 'password123'
+        }).get_json()['user_id']
+
+        pl_id = self._create_playlist(user_id=1, name='Concurrent PL')
+        source_song_id = self._create_song(
+            user_id=u2_id,
+            title='Concurrent Track',
+            artist='Artist',
+            filename='concurrent-track.mp3',
+            source_id='conc1234567',
+        )
+
+        # Spawn 4 parallel threads adding the exact same global library song to the same playlist
+        barrier = threading.Barrier(4)
+
+        def call_add_library(_):
+            c = self.app_module.app.test_client()
+            login_res = c.post('/api/login', headers={'X-CSRF-Token': self._csrf_token(c)}, json={
+                'username': 'admin', 'password': 'secret123'
+            })
+            token = self._csrf_token_from_response(login_res)
+            barrier.wait(timeout=5)
+            res = c.post(
+                f'/api/library-songs/{source_song_id}/add',
+                headers={'X-CSRF-Token': token},
+                json={'playlist_ids': [pl_id]},
+            )
+            return res.status_code, res.get_json()
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(pool.map(call_add_library, range(4)))
+
+        self.assertEqual([status for status, _ in results], [200] * 4)
+        added_total = sum(len(body['playlist_ids']) for _, body in results)
+        skipped_total = sum(len(body['skipped_playlist_ids']) for _, body in results)
+        self.assertEqual(added_total, 1)
+        self.assertEqual(skipped_total, 3)
+
+        # Also test concurrent POST /api/songs/<id>/playlists on owned song
+        owned_song_id = results[0][1]['song_id']
+        pl2_id = self._create_playlist(user_id=1, name='Concurrent PL 2')
+        barrier2 = threading.Barrier(4)
+
+        def call_add_owned(_):
+            c = self.app_module.app.test_client()
+            login_res = c.post('/api/login', headers={'X-CSRF-Token': self._csrf_token(c)}, json={
+                'username': 'admin', 'password': 'secret123'
+            })
+            token = self._csrf_token_from_response(login_res)
+            barrier2.wait(timeout=5)
+            res = c.post(
+                f'/api/songs/{owned_song_id}/playlists',
+                headers={'X-CSRF-Token': token},
+                json={'playlist_ids': [pl2_id]},
+            )
+            return res.status_code, res.get_json()
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results2 = list(pool.map(call_add_owned, range(4)))
+
+        self.assertEqual([status for status, _ in results2], [200] * 4)
+        self.assertEqual(sum(len(body['playlist_ids']) for _, body in results2), 1)
+        self.assertEqual(sum(len(body['skipped_playlist_ids']) for _, body in results2), 3)
+
 
 if __name__ == '__main__':
     unittest.main()

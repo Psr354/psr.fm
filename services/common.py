@@ -273,6 +273,8 @@ def get_global_song(db, song_id):
 
 
 def add_global_song_to_playlists(db, source_song, playlist_ids):
+    if not db.in_transaction:
+        db.execute('BEGIN IMMEDIATE')
     existing_song = None
     if source_song['source_id']:
         existing_song = db.execute(
@@ -351,23 +353,19 @@ def add_global_song_to_playlists(db, source_song, playlist_ids):
     added_playlist_ids = []
     skipped_playlist_ids = []
     for playlist_id in playlist_ids:
-        cursor = db.execute(
-            'SELECT 1 FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
-            (playlist_id, song_id)
-        )
-        if cursor.fetchone():
-            skipped_playlist_ids.append(playlist_id)
-            continue
-        cursor = db.execute(
+        pos_cursor = db.execute(
             'SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_songs WHERE playlist_id = ?',
             (playlist_id,)
         )
-        next_position = cursor.fetchone()[0]
-        db.execute(
-            'INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
+        next_position = pos_cursor.fetchone()[0]
+        insert_cursor = db.execute(
+            'INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
             (playlist_id, song_id, next_position)
         )
-        added_playlist_ids.append(playlist_id)
+        if insert_cursor.rowcount == 1:
+            added_playlist_ids.append(playlist_id)
+        else:
+            skipped_playlist_ids.append(playlist_id)
 
     return song_id, created, added_playlist_ids, skipped_playlist_ids
 

@@ -41,7 +41,8 @@ def log_listen():
         return jsonify({'error': 'Invalid event ID'}), 400
 
     db = get_db()
-    if not get_owned_song(db, song_id):
+    song = get_owned_song(db, song_id)
+    if not song:
         return jsonify({'error': 'Not found'}), 404
 
     db.execute('BEGIN IMMEDIATE')
@@ -87,8 +88,8 @@ def log_listen():
         return jsonify({'error': 'Listening exceeds elapsed playback time', 'code': 'playback_time_exceeded'}), 409
 
     db.execute(
-        'INSERT INTO listening_logs (song_id, user_id, seconds_listened, timestamp) VALUES (?, ?, ?, ?)',
-        (song_id, current_user.id, seconds, timestamp),
+        'INSERT INTO listening_logs (song_id, user_id, seconds_listened, timestamp, song_title, song_artist) VALUES (?, ?, ?, ?, ?, ?)',
+        (song_id, current_user.id, seconds, timestamp, song['title'] or '', song['artist'] or 'Unknown'),
     )
     if event_id:
         db.execute(
@@ -131,7 +132,10 @@ def log_play(song_id):
         return jsonify({'status': 'ok', 'playback_session_id': session_id, 'duplicate': True})
 
     db.execute('UPDATE songs SET play_count = play_count + 1 WHERE id = ? AND user_id = ?', (song_id, current_user.id))
-    db.execute('INSERT INTO play_events (song_id, user_id, timestamp) VALUES (?, ?, ?)', (song_id, current_user.id, client_timestamp))
+    db.execute(
+        'INSERT INTO play_events (song_id, user_id, timestamp, song_title, song_artist) VALUES (?, ?, ?, ?, ?)',
+        (song_id, current_user.id, client_timestamp, song['title'] or '', song['artist'] or 'Unknown'),
+    )
     db.execute(
         'INSERT INTO playback_sessions (id, song_id, user_id, duration_seconds, started_at) VALUES (?, ?, ?, ?, ?)',
         (session_id, song_id, current_user.id, song['duration_seconds'], client_timestamp),
@@ -326,29 +330,72 @@ def get_recap():
     db = get_db()
 
     top_played_rows = db.execute('''
-        SELECT s.id, s.title, s.artist, s.album_art, COUNT(pe.id) as play_count,
-               COALESCE((SELECT SUM(l.seconds_listened) FROM listening_logs l
-                         WHERE l.song_id = s.id AND l.user_id = pe.user_id
-                           AND l.timestamp >= ? AND l.timestamp <= ?), 0) as total_listened
+        SELECT
+            MAX(s.id) AS id,
+            COALESCE(MAX(s.title), NULLIF(MAX(pe.song_title), ''), 'Deleted Song') AS title,
+            COALESCE(MAX(s.artist), NULLIF(MAX(pe.song_artist), ''), 'Unknown') AS artist,
+            COALESCE(MAX(s.album_art), '') AS album_art,
+            COUNT(pe.id) AS play_count,
+            COALESCE((
+                SELECT SUM(l.seconds_listened)
+                FROM listening_logs l
+                WHERE l.user_id = pe.user_id
+                  AND l.timestamp >= ? AND l.timestamp <= ?
+                  AND (
+                      CASE
+                          WHEN l.song_id IS NOT NULL THEN 'id:' || l.song_id
+                          ELSE 'del:' || COALESCE(l.song_title, '') || '|' || COALESCE(l.song_artist, '')
+                      END
+                  ) = (
+                      CASE
+                          WHEN pe.song_id IS NOT NULL THEN 'id:' || pe.song_id
+                          ELSE 'del:' || COALESCE(pe.song_title, '') || '|' || COALESCE(pe.song_artist, '')
+                      END
+                  )
+            ), 0) AS total_listened
         FROM play_events pe
-        JOIN songs s ON pe.song_id = s.id
+        LEFT JOIN songs s ON pe.song_id = s.id
         WHERE pe.user_id = ? AND pe.timestamp >= ? AND pe.timestamp <= ?
-        GROUP BY s.id
-        ORDER BY play_count DESC
+        GROUP BY CASE
+            WHEN pe.song_id IS NOT NULL THEN 'id:' || pe.song_id
+            ELSE 'del:' || COALESCE(pe.song_title, '') || '|' || COALESCE(pe.song_artist, '')
+        END
+        ORDER BY play_count DESC, total_listened DESC
         LIMIT 10
     ''', (start_str, end_str, current_user.id, start_str, end_str)).fetchall()
 
     top_listened_rows = db.execute('''
-        SELECT s.id, s.title, s.artist, s.album_art,
-               SUM(l.seconds_listened) as total_listened,
-               (SELECT COUNT(pe.id) FROM play_events pe
-                WHERE pe.song_id = s.id AND pe.user_id = l.user_id
-                  AND pe.timestamp >= ? AND pe.timestamp <= ?) as play_count
+        SELECT
+            MAX(s.id) AS id,
+            COALESCE(MAX(s.title), NULLIF(MAX(l.song_title), ''), 'Deleted Song') AS title,
+            COALESCE(MAX(s.artist), NULLIF(MAX(l.song_artist), ''), 'Unknown') AS artist,
+            COALESCE(MAX(s.album_art), '') AS album_art,
+            SUM(l.seconds_listened) AS total_listened,
+            (
+                SELECT COUNT(pe.id)
+                FROM play_events pe
+                WHERE pe.user_id = l.user_id
+                  AND pe.timestamp >= ? AND pe.timestamp <= ?
+                  AND (
+                      CASE
+                          WHEN pe.song_id IS NOT NULL THEN 'id:' || pe.song_id
+                          ELSE 'del:' || COALESCE(pe.song_title, '') || '|' || COALESCE(pe.song_artist, '')
+                      END
+                  ) = (
+                      CASE
+                          WHEN l.song_id IS NOT NULL THEN 'id:' || l.song_id
+                          ELSE 'del:' || COALESCE(l.song_title, '') || '|' || COALESCE(l.song_artist, '')
+                      END
+                  )
+            ) AS play_count
         FROM listening_logs l
-        JOIN songs s ON l.song_id = s.id
+        LEFT JOIN songs s ON l.song_id = s.id
         WHERE l.user_id = ? AND l.timestamp >= ? AND l.timestamp <= ?
-        GROUP BY s.id
-        ORDER BY total_listened DESC
+        GROUP BY CASE
+            WHEN l.song_id IS NOT NULL THEN 'id:' || l.song_id
+            ELSE 'del:' || COALESCE(l.song_title, '') || '|' || COALESCE(l.song_artist, '')
+        END
+        ORDER BY total_listened DESC, play_count DESC
         LIMIT 10
     ''', (start_str, end_str, current_user.id, start_str, end_str)).fetchall()
 
@@ -366,7 +413,10 @@ def get_recap():
     stats_row = db.execute('''
         SELECT 
             COALESCE(SUM(seconds_listened), 0) as total_seconds,
-            COUNT(DISTINCT song_id) as unique_songs
+            COUNT(DISTINCT CASE
+                WHEN song_id IS NOT NULL THEN 'id:' || song_id
+                ELSE 'del:' || COALESCE(song_title, '') || '|' || COALESCE(song_artist, '')
+            END) as unique_songs
         FROM listening_logs
         WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
     ''', (current_user.id, start_str, end_str)).fetchone()
@@ -383,7 +433,10 @@ def get_recap():
             SELECT
                 CAST(strftime('%m', datetime(timestamp, ?)) AS INTEGER) as month_num,
                 COALESCE(SUM(seconds_listened), 0) as total_seconds,
-                COUNT(DISTINCT song_id) as unique_songs
+                COUNT(DISTINCT CASE
+                    WHEN song_id IS NOT NULL THEN 'id:' || song_id
+                    ELSE 'del:' || COALESCE(song_title, '') || '|' || COALESCE(song_artist, '')
+                END) as unique_songs
             FROM listening_logs
             WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
             GROUP BY month_num
@@ -421,15 +474,18 @@ def get_recap():
             WITH monthly_song_totals AS (
                 SELECT
                     CAST(strftime('%m', datetime(l.timestamp, ?)) AS INTEGER) AS month_num,
-                    s.id AS song_id,
-                    s.title,
-                    s.artist,
-                    s.album_art,
+                    CASE
+                        WHEN l.song_id IS NOT NULL THEN 'id:' || l.song_id
+                        ELSE 'del:' || COALESCE(l.song_title, '') || '|' || COALESCE(l.song_artist, '')
+                    END AS song_key,
+                    COALESCE(MAX(s.title), NULLIF(MAX(l.song_title), ''), 'Deleted Song') AS title,
+                    COALESCE(MAX(s.artist), NULLIF(MAX(l.song_artist), ''), 'Unknown') AS artist,
+                    COALESCE(MAX(s.album_art), '') AS album_art,
                     SUM(l.seconds_listened) AS total_listened
                 FROM listening_logs l
-                JOIN songs s ON l.song_id = s.id
+                LEFT JOIN songs s ON l.song_id = s.id
                 WHERE l.user_id = ? AND l.timestamp >= ? AND l.timestamp <= ?
-                GROUP BY month_num, s.id
+                GROUP BY month_num, song_key
             ),
             ranked AS (
                 SELECT
@@ -440,7 +496,7 @@ def get_recap():
                     total_listened,
                     ROW_NUMBER() OVER (
                         PARTITION BY month_num
-                        ORDER BY total_listened DESC, song_id ASC
+                        ORDER BY total_listened DESC, song_key ASC
                     ) AS rn
                 FROM monthly_song_totals
             )

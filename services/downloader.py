@@ -257,19 +257,13 @@ def download_worker(db_path, download_dir, album_art_dir, sio):
 
 def add_song_to_playlists(cursor, song_id, playlist_ids):
     for pid in playlist_ids:
-        existing = cursor.execute(
-            'SELECT 1 FROM playlist_songs WHERE playlist_id = ? AND song_id = ?',
-            (pid, song_id),
-        ).fetchone()
-        if existing:
-            continue
         cursor.execute(
             'SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_songs WHERE playlist_id = ?',
             (pid,),
         )
         next_position = cursor.fetchone()[0]
         cursor.execute(
-            'INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
+            'INSERT OR IGNORE INTO playlist_songs (playlist_id, song_id, position) VALUES (?, ?, ?)',
             (pid, song_id, next_position),
         )
 

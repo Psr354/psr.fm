@@ -137,7 +137,7 @@ def delete_playlist(playlist_id):
 
         playlist_songs = db.execute(
             '''
-            SELECT s.id, s.filename, s.album_art
+            SELECT s.id, s.title, s.artist, s.filename, s.album_art
             FROM songs s
             JOIN playlist_songs ps ON ps.song_id = s.id
             WHERE ps.playlist_id = ? AND s.user_id = ?
@@ -156,8 +156,26 @@ def delete_playlist(playlist_id):
             ).fetchone()
             if not still_in_playlist:
                 orphaned_songs.append(song)
-                db.execute('DELETE FROM listening_logs WHERE song_id = ?', (song['id'],))
-                db.execute('DELETE FROM play_events WHERE song_id = ?', (song['id'],))
+                song_title = song['title'] or ''
+                song_artist = song['artist'] or 'Unknown'
+                db.execute(
+                    '''
+                    UPDATE listening_logs
+                    SET song_title = CASE WHEN COALESCE(song_title, '') = '' THEN ? ELSE song_title END,
+                        song_artist = CASE WHEN COALESCE(song_artist, '') = '' THEN ? ELSE song_artist END
+                    WHERE song_id = ? AND user_id = ?
+                    ''',
+                    (song_title, song_artist, song['id'], current_user.id),
+                )
+                db.execute(
+                    '''
+                    UPDATE play_events
+                    SET song_title = CASE WHEN COALESCE(song_title, '') = '' THEN ? ELSE song_title END,
+                        song_artist = CASE WHEN COALESCE(song_artist, '') = '' THEN ? ELSE song_artist END
+                    WHERE song_id = ? AND user_id = ?
+                    ''',
+                    (song_title, song_artist, song['id'], current_user.id),
+                )
                 db.execute('DELETE FROM songs WHERE id = ? AND user_id = ?', (song['id'], current_user.id))
 
         orphaned_count = len(orphaned_songs)

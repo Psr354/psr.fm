@@ -321,6 +321,9 @@ window.createPlayerModule = function createPlayerModule(app) {
                     && state.playbackRequestId === playbackRequestId
                 ) {
                     state.playbackSessionId = sessionId;
+                    if (sessionId && typeof savePlaybackState === 'function') {
+                        savePlaybackState(true);
+                    }
                 }
             });
             logListenDuration(songId, initialSeconds);
@@ -412,9 +415,6 @@ window.createPlayerModule = function createPlayerModule(app) {
     state.userMuted = false;
 
     function setAppVolume(vol, isMuted = false, shouldSave = true) {
-        if (shouldSave && !state.isApplyingRemoteSync) {
-            state.isPrimarySyncLeader = true;
-        }
         const normalized = Math.max(0, Math.min(1, Number(vol)));
         if (!isMuted && normalized > 0) {
             state.lastNonZeroVolume = normalized;
@@ -458,7 +458,7 @@ window.createPlayerModule = function createPlayerModule(app) {
         });
 
         updateVolumeIcon(effective);
-        if (shouldSave && state.isPrimarySyncLeader) savePlaybackState(true, true);
+        if (shouldSave) savePlaybackState(state.isPrimarySyncLeader, state.isPrimarySyncLeader);
     }
     window.setAppVolume = setAppVolume;
 
@@ -468,7 +468,6 @@ window.createPlayerModule = function createPlayerModule(app) {
 
     el.volumeBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
-        state.isPrimarySyncLeader = true;
         const isMobile = window.innerWidth <= 768;
         if (isMobile) {
             const popover = document.getElementById('volume-popover');
@@ -718,6 +717,7 @@ window.createPlayerModule = function createPlayerModule(app) {
             state.lastLoggedTime = 0;
             el.audio.currentTime = 0;
             state.shouldBePlaying = true;
+            savePlaybackState(true);
             resumeCurrentSong();
             return;
         }

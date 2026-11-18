@@ -147,6 +147,9 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             cachedPlaybackPayload.deviceId = CLIENT_DEVICE_ID;
             cachedPlaybackPayload.volume = typeof state.userVolume === 'number' ? state.userVolume : (el.audio ? el.audio.volume : 1);
             cachedPlaybackPayload.isMuted = Boolean(state.userMuted !== undefined ? state.userMuted : (el.audio ? el.audio.muted : false));
+            cachedPlaybackPayload.playbackSessionId = typeof state.playbackSessionId === 'string' && state.playbackSessionId ? state.playbackSessionId : null;
+            cachedPlaybackPayload.playEventLogged = Boolean(state.playEventLogged && cachedPlaybackPayload.playbackSessionId);
+            cachedPlaybackPayload.pendingPlaySeconds = cachedPlaybackPayload.playEventLogged ? 0 : Math.max(0, Number(state.pendingPlaySeconds || 0));
 
             localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(cachedPlaybackPayload));
 
@@ -194,13 +197,38 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         const targetSongId = String(saved.songId || saved.songMeta.id || '');
         const isSameSong = Boolean(currentPlayingId && targetSongId && currentPlayingId === targetSongId);
 
+        const savedSessionId = (typeof saved.playbackSessionId === 'string' && saved.playbackSessionId.trim())
+            ? saved.playbackSessionId.trim()
+            : null;
+        const hasSavedLoggedSession = Boolean(saved.playEventLogged && savedSessionId);
+        const savedPendingSeconds = (typeof saved.pendingPlaySeconds === 'number' && Number.isFinite(saved.pendingPlaySeconds))
+            ? Math.max(0, Math.min(2.99, saved.pendingPlaySeconds))
+            : 0;
+
         if (!isSameSong) {
             flushListenLog();
-            state.playEventLogged = false;
+            if (hasSavedLoggedSession) {
+                state.playEventLogged = true;
+                state.pendingPlaySeconds = 0;
+                state.playbackSessionId = savedSessionId;
+                state.playbackSessionPromise = Promise.resolve(savedSessionId);
+            } else {
+                state.playEventLogged = false;
+                state.pendingPlaySeconds = savedPendingSeconds;
+                state.playbackSessionId = null;
+                state.playbackSessionPromise = null;
+            }
+            state.playbackRequestId += 1;
+        } else if (hasSavedLoggedSession && (!state.playEventLogged || state.playbackSessionId !== savedSessionId)) {
+            state.playEventLogged = true;
             state.pendingPlaySeconds = 0;
+            state.playbackSessionId = savedSessionId;
+            state.playbackSessionPromise = Promise.resolve(savedSessionId);
+        } else if (isRemoteSync && !hasSavedLoggedSession && targetTime < 3) {
+            state.playEventLogged = false;
+            state.pendingPlaySeconds = savedPendingSeconds;
             state.playbackSessionId = null;
             state.playbackSessionPromise = null;
-            state.playbackRequestId += 1;
         }
 
         state.currentPlaylistId = saved.playlistId || null;
@@ -293,6 +321,7 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                     activeLoadedMetadataHandler = null;
                     state.isSyncSeeking = true;
                     try { el.audio.currentTime = targetTime; } catch (_) {}
+                    state.lastLoggedTime = el.audio.currentTime || targetTime;
                     updateSyncedLyrics(true);
                     triggerPlayback();
                 };
