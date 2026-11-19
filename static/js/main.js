@@ -172,6 +172,7 @@ document.addEventListener('DOMContentLoaded', () => {
         downloadBar: document.getElementById('download-progress-bar'),
         downloadLabel: document.getElementById('download-progress-label'),
         downloadRetryBtn: document.getElementById('download-retry-btn'),
+        downloadCloseBtn: document.getElementById('download-close-btn'),
         loopIndicator: document.getElementById('loop-indicator'),
         loopBtn: document.getElementById('loop-btn'),
         loopPopover: document.getElementById('loop-popover'),
@@ -1103,23 +1104,71 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     // WEBSOCKET EVENTS
     // ==========================================
+    let downloadHideTimer = null;
+    let downloadStallTimer = null;
+
+    function hideDownloadProgress(delay = 0) {
+        if (downloadHideTimer) {
+            clearTimeout(downloadHideTimer);
+            downloadHideTimer = null;
+        }
+        if (downloadStallTimer) {
+            clearTimeout(downloadStallTimer);
+            downloadStallTimer = null;
+        }
+        const doHide = () => {
+            if (el.downloadWrapper) el.downloadWrapper.classList.remove('active');
+            if (el.downloadBar) el.downloadBar.style.width = '0%';
+            if (el.downloadLabel) el.downloadLabel.innerText = '0%';
+            if (el.downloadRetryBtn) el.downloadRetryBtn.hidden = true;
+        };
+        if (delay > 0) {
+            downloadHideTimer = setTimeout(doHide, delay);
+        } else {
+            doHide();
+        }
+    }
+
+    function resetDownloadStallTimer() {
+        if (downloadStallTimer) clearTimeout(downloadStallTimer);
+        downloadStallTimer = setTimeout(() => {
+            if (el.downloadWrapper && el.downloadWrapper.classList.contains('active')) {
+                hideDownloadProgress(0);
+            }
+        }, 60000);
+    }
+
+    function cancelDownloadHide() {
+        if (downloadHideTimer) {
+            clearTimeout(downloadHideTimer);
+            downloadHideTimer = null;
+        }
+    }
+
+    el.downloadCloseBtn?.addEventListener('click', () => {
+        hideDownloadProgress(0);
+    });
+
+    window.hideDownloadProgress = hideDownloadProgress;
+    window.resetDownloadStallTimer = resetDownloadStallTimer;
+    window.cancelDownloadHide = cancelDownloadHide;
+
     socket.on('download_progress', (data) => {
+        cancelDownloadHide();
+        resetDownloadStallTimer();
         if (el.downloadRetryBtn) el.downloadRetryBtn.hidden = true;
         if (el.downloadWrapper && el.downloadBar) {
             el.downloadWrapper.classList.add('active');
             el.downloadBar.style.width = `${data.percent}%`;
             if (el.downloadLabel) el.downloadLabel.innerText = `${Math.round(data.percent)}%`;
             if (data.percent >= 100) {
-                setTimeout(() => {
-                    el.downloadWrapper.classList.remove('active');
-                    el.downloadBar.style.width = '0%';
-                    if (el.downloadLabel) el.downloadLabel.innerText = '0%';
-                }, 1000);
+                hideDownloadProgress(1000);
             }
         }
     });
 
     socket.on('song_added', (song) => {
+        hideDownloadProgress(1000);
         showToast(`Added: ${song.title}`, 'success');
         if (song.playlist_ids && song.playlist_ids.includes(state.currentPlaylistId)) {
             if (state.currentPlaylist) {
@@ -1136,6 +1185,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (el.downloadWrapper) el.downloadWrapper.classList.add('active');
         if (el.downloadRetryBtn && state.lastDownloadRequest) el.downloadRetryBtn.hidden = false;
         if (el.downloadLabel) el.downloadLabel.innerText = '0%';
+        hideDownloadProgress(8000);
     });
 
     // ==========================================

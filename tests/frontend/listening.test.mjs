@@ -396,4 +396,95 @@ listeners.timeupdate();
 await settle();
 assert.equal(nextSession, sessionsBeforeFollower, 'Follower must not log plays while not sync leader');
 
-console.log('Listening checks passed: full repeats, early pause, slow session, seek event ordering, HTTP rejection, reload session continuity, follower volume.');
+// Verification: Download progress notification dismiss, close button, and stall timer.
+const mainSource = fs.readFileSync(new URL('../../static/js/main.js', import.meta.url), 'utf8');
+const dlWrapper = {
+    classList: {
+        _classes: new Set(['active']),
+        contains(c) { return this._classes.has(c); },
+        add(c) { this._classes.add(c); },
+        remove(c) { this._classes.delete(c); },
+    },
+};
+const dlBar = { style: { width: '45%' } };
+const dlLabel = { innerText: '45%' };
+const dlRetryBtn = { hidden: false };
+let dlCloseHandler = null;
+const dlCloseBtn = {
+    addEventListener(evt, fn) { if (evt === 'click') dlCloseHandler = fn; }
+};
+const dlSocketHandlers = {};
+const dlWindow = {};
+const dlCtx = vm.createContext({
+    window: dlWindow,
+    el: {
+        downloadWrapper: dlWrapper,
+        downloadBar: dlBar,
+        downloadLabel: dlLabel,
+        downloadRetryBtn: dlRetryBtn,
+        downloadCloseBtn: dlCloseBtn,
+    },
+    socket: {
+        on(event, handler) { dlSocketHandlers[event] = handler; }
+    },
+    state: {},
+    showToast() {},
+    loadDashboard() {},
+    loadPlaylists() {},
+    loadLibrarySongs() {},
+    openPlaylist() {},
+    setTimeout,
+    clearTimeout,
+});
+const dlWsStart = mainSource.indexOf('    // WEBSOCKET EVENTS');
+const dlWsEnd = mainSource.indexOf('    // CROSS-DEVICE PLAYBACK SYNC', dlWsStart);
+assert.ok(dlWsStart >= 0 && dlWsEnd > dlWsStart);
+vm.runInContext(mainSource.slice(dlWsStart, dlWsEnd), dlCtx);
+
+assert.ok(typeof dlCloseHandler === 'function', 'Close button click handler must be registered');
+dlCloseHandler();
+assert.equal(dlWrapper.classList.contains('active'), false, 'Clicking close button must remove active class');
+assert.equal(dlBar.style.width, '0%', 'Progress bar must reset to 0%');
+assert.equal(dlLabel.innerText, '0%', 'Progress label must reset to 0%');
+assert.equal(dlRetryBtn.hidden, true, 'Retry button must be hidden');
+
+// Verify song_added hides download progress
+dlWrapper.classList.add('active');
+dlSocketHandlers.song_added?.({ title: 'Song', playlist_ids: [] });
+await new Promise(r => setTimeout(r, 1100));
+assert.equal(dlWrapper.classList.contains('active'), false, 'song_added must auto-dismiss download progress');
+
+// Verify showSyncAutoplayPrompt timeout resets syncPromptActive so future events are not blocked
+let promptToastCalls = [];
+const syncState = { deviceId: 'dev-sync-test', isPrimarySyncLeader: false, isSyncSeeking: false };
+const syncEl = { audio: { play: () => Promise.reject(new Error('Blocked')), pause() {}, currentTime: 0 } };
+const syncApp = {
+    state: syncState,
+    el: syncEl,
+    showToast(msg, type) { promptToastCalls.push({ msg, type }); },
+    mediaUrlName: f => f,
+    albumArtUrl: a => a,
+    formatTime: t => String(t),
+    updatePlayPauseIcon() {},
+    updateSyncedLyrics() {},
+    updateMediaSession() {},
+    buildQueue() {},
+    loadLyrics() {},
+    highlightPlayingSong() {},
+    flushListenLog() {},
+    setAppVolume() {},
+    cancelPlaybackRecovery() {},
+    cancelTrackTransitionRecovery() {},
+    resumeCurrentSong() {},
+};
+const syncModTest = syncWindow.createPlaybackSyncModule(syncApp);
+syncModTest.showSyncAutoplayPrompt(10, true);
+assert.equal(promptToastCalls.length, 1, 'First prompt must trigger toast');
+syncModTest.showSyncAutoplayPrompt(10, true);
+assert.equal(promptToastCalls.length, 1, 'Prompt must not duplicate while active');
+// After 5s timeout, prompt must be unlocked and able to trigger again
+await new Promise(r => setTimeout(r, 5100));
+syncModTest.showSyncAutoplayPrompt(15, true);
+assert.equal(promptToastCalls.length, 2, 'After timeout, subsequent prompt must not be permanently blocked');
+
+console.log('Listening checks passed: full repeats, early pause, slow session, seek event ordering, HTTP rejection, reload session continuity, follower volume, download dismiss & sync unlock.');

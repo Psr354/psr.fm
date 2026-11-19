@@ -347,7 +347,10 @@
     <div id="download-progress-wrapper" class="download-progress-wrapper">
         <div class="download-progress-meta">
             <span><i class="fas fa-cloud-download-alt"></i> Downloading audio</span>
-            <span id="download-progress-label">0%</span>
+            <div class="download-progress-meta-right">
+                <span id="download-progress-label">0%</span>
+                <button id="download-close-btn" class="download-close-btn" type="button" aria-label="Close notification" title="Close">&times;</button>
+            </div>
         </div>
         <div class="download-progress-track"><div id="download-progress-bar" class="download-progress-bar"></div></div>
         <button id="download-retry-btn" class="download-retry-btn" type="button" hidden><i class="fas fa-rotate-right"></i> Retry download</button>

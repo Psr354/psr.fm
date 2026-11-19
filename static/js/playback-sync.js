@@ -29,11 +29,13 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
     let serverSyncTimer = null;
     let remoteSyncTimeout = null;
     let syncPromptActive = false;
+    let syncPromptTimeout = null;
     let activeLoadedMetadataHandler = null;
 
     function showSyncAutoplayPrompt(targetTime, isRemote = true) {
         if (syncPromptActive) return;
         syncPromptActive = true;
+        const promptStartTime = Date.now();
         showToast(
             isRemote
                 ? 'Playing on another device. Tap the screen to listen along.'
@@ -42,6 +44,10 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         );
 
         const unlockAudio = () => {
+            if (syncPromptTimeout) {
+                clearTimeout(syncPromptTimeout);
+                syncPromptTimeout = null;
+            }
             document.removeEventListener('click', unlockAudio);
             document.removeEventListener('touchend', unlockAudio);
             syncPromptActive = false;
@@ -50,9 +56,13 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             }
             if (state.shouldBePlaying && el.audio) {
                 try {
-                    if (typeof targetTime === 'number' && targetTime > 0) {
+                    const elapsed = Math.max(0, (Date.now() - promptStartTime) / 1000);
+                    const effectiveTarget = typeof targetTime === 'number' && targetTime > 0
+                        ? targetTime + (isRemote ? elapsed : 0)
+                        : null;
+                    if (typeof effectiveTarget === 'number' && effectiveTarget > 0) {
                         state.isSyncSeeking = true;
-                        el.audio.currentTime = targetTime;
+                        el.audio.currentTime = effectiveTarget;
                     }
                     resumeEqContext();
                     el.audio.play().catch(() => {});
@@ -61,6 +71,15 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                 } catch (_) {}
             }
         };
+
+        if (syncPromptTimeout) clearTimeout(syncPromptTimeout);
+        syncPromptTimeout = setTimeout(() => {
+            syncPromptTimeout = null;
+            document.removeEventListener('click', unlockAudio);
+            document.removeEventListener('touchend', unlockAudio);
+            syncPromptActive = false;
+        }, 5000);
+
         document.addEventListener('click', unlockAudio, { once: true });
         document.addEventListener('touchend', unlockAudio, { once: true });
     }
@@ -297,10 +316,8 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                 resumeEqContext();
                 const p = el.audio.play();
                 if (p !== undefined) {
-                    p.catch((err) => {
-                        if (err?.name === 'NotAllowedError') {
-                            showSyncAutoplayPrompt(targetTime, isRemoteSync);
-                        }
+                    p.catch(() => {
+                        showSyncAutoplayPrompt(targetTime, isRemoteSync);
                     });
                 }
             } else {
@@ -356,10 +373,16 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                 try { localTime = JSON.parse(localRaw).timestamp || 0; } catch (_) {}
             }
 
-            if ((serverState.timestamp || 0) >= localTime) {
-                const now = Date.now();
-                const isSameDevice = Boolean(serverState.deviceId && serverState.deviceId === CLIENT_DEVICE_ID);
-                const isActivelyPlaying = Boolean(serverState.isPlaying && (now - (serverState.timestamp || 0) < 20000));
+            const now = Date.now();
+            const isActivelyPlaying = Boolean(
+                serverState.isPlaying &&
+                (Math.abs(now - (serverState.timestamp || 0)) < 60000)
+            );
+            const isSameDevice = Boolean(serverState.deviceId && serverState.deviceId === CLIENT_DEVICE_ID);
+            const isNewerState = (serverState.timestamp || 0) >= localTime;
+            const isDifferentDevicePlaying = !isSameDevice && isActivelyPlaying;
+
+            if (isNewerState || isDifferentDevicePlaying) {
                 if (isSameDevice && isActivelyPlaying) {
                     state.isPrimarySyncLeader = true;
                 }

@@ -133,6 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (el.downloadRetryBtn && state.lastDownloadRequest) {
                 el.downloadRetryBtn.hidden = false;
                 el.downloadWrapper?.classList.add('active');
+                window.hideDownloadProgress?.(8000);
             }
             return;
         } finally {
@@ -162,12 +163,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         showToast('Downloading to selected playlists!', 'success');
-        if (el.downloadWrapper) el.downloadWrapper.classList.add('active');
+        if (el.downloadWrapper) {
+            el.downloadWrapper.classList.add('active');
+            window.cancelDownloadHide?.();
+            window.resetDownloadStallTimer?.();
+        }
     }
 
     async function retryLastDownload() {
         const request = state.lastDownloadRequest;
         if (!request) return;
+        window.cancelDownloadHide?.();
+        window.resetDownloadStallTimer?.();
         if (el.downloadRetryBtn) {
             el.downloadRetryBtn.disabled = true;
             el.downloadRetryBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Retrying...';
@@ -181,10 +188,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || 'Download request failed');
             if (el.downloadRetryBtn) el.downloadRetryBtn.hidden = true;
-            if (el.downloadWrapper) el.downloadWrapper.classList.add('active');
+            if (el.downloadWrapper) {
+                el.downloadWrapper.classList.add('active');
+                window.cancelDownloadHide?.();
+                window.resetDownloadStallTimer?.();
+            }
             showToast('Download retried successfully', 'success');
         } catch (error) {
             showToast(error.message || 'Retry failed', 'error');
+            window.hideDownloadProgress?.(8000);
         } finally {
             if (el.downloadRetryBtn) {
                 el.downloadRetryBtn.disabled = false;
