@@ -60,14 +60,28 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                     const effectiveTarget = typeof targetTime === 'number' && targetTime > 0
                         ? targetTime + (isRemote ? elapsed : 0)
                         : null;
-                    if (typeof effectiveTarget === 'number' && effectiveTarget > 0) {
-                        state.isSyncSeeking = true;
-                        el.audio.currentTime = effectiveTarget;
-                    }
+
                     resumeEqContext();
-                    el.audio.play().catch(() => {});
+                    const playPromise = el.audio.play();
+                    if (playPromise !== undefined) {
+                        playPromise.catch(() => {});
+                    }
                     updatePlayPauseIcon(true);
-                    updateSyncedLyrics(true);
+
+                    const applySeek = () => {
+                        if (typeof effectiveTarget === 'number' && effectiveTarget > 0) {
+                            state.isSyncSeeking = true;
+                            try { el.audio.currentTime = effectiveTarget; } catch (_) {}
+                            state.lastLoggedTime = el.audio.currentTime || effectiveTarget;
+                        }
+                        updateSyncedLyrics(true);
+                    };
+
+                    if (el.audio.readyState >= 1) {
+                        applySeek();
+                    } else {
+                        el.audio.addEventListener('loadedmetadata', applySeek, { once: true });
+                    }
                 } catch (_) {}
             }
         };
@@ -334,16 +348,17 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             }
             if (isDifferentSrc || !isSameSong) {
                 el.audio.src = audioSrc;
+                try { el.audio.load(); } catch (_) {}
                 const onLoaded = () => {
                     activeLoadedMetadataHandler = null;
                     state.isSyncSeeking = true;
                     try { el.audio.currentTime = targetTime; } catch (_) {}
                     state.lastLoggedTime = el.audio.currentTime || targetTime;
                     updateSyncedLyrics(true);
-                    triggerPlayback();
                 };
                 activeLoadedMetadataHandler = onLoaded;
                 el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
+                triggerPlayback();
             } else {
                 const drift = Math.abs((el.audio.currentTime || 0) - targetTime);
                 if (drift > 1.8) {
@@ -365,7 +380,7 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             const serverState = data.playback_state;
             if (!serverState || !serverState.songMeta) return;
 
-            if (el.audio && !el.audio.paused) return;
+            if (state.isPrimarySyncLeader && el.audio && !el.audio.paused) return;
 
             const localRaw = localStorage.getItem(PLAYBACK_STATE_KEY);
             let localTime = 0;
@@ -374,12 +389,14 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             }
 
             const now = Date.now();
+            const serverNow = typeof data.server_time === 'number' ? data.server_time : now;
+            const stateTimestamp = Number(serverState.timestamp || 0);
             const isActivelyPlaying = Boolean(
                 serverState.isPlaying &&
-                (Math.abs(now - (serverState.timestamp || 0)) < 60000)
+                (Math.abs(serverNow - stateTimestamp) < 120000 || Math.abs(now - stateTimestamp) < 120000)
             );
             const isSameDevice = Boolean(serverState.deviceId && serverState.deviceId === CLIENT_DEVICE_ID);
-            const isNewerState = (serverState.timestamp || 0) >= localTime;
+            const isNewerState = stateTimestamp >= localTime;
             const isDifferentDevicePlaying = !isSameDevice && isActivelyPlaying;
 
             if (isNewerState || isDifferentDevicePlaying) {
@@ -429,6 +446,8 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             resumePlaybackAfterBackground();
             if (!state.isPrimarySyncLeader) {
                 updateSyncedLyrics(true);
+                syncPlaybackStateFromServer();
+                app.connectRealtime?.();
             }
         }
     });
@@ -439,6 +458,8 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         resumePlaybackAfterBackground();
         if (!state.isPrimarySyncLeader) {
             updateSyncedLyrics(true);
+            syncPlaybackStateFromServer();
+            app.connectRealtime?.();
         }
     });
     window.addEventListener('pagehide', () => {

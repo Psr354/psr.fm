@@ -22,6 +22,7 @@ window.createPlayerModule = function createPlayerModule(app) {
     const loadLyrics = (...args) => app.loadLyrics(...args);
     const savePlaybackState = (...args) => app.savePlaybackState(...args);
     const buildQueue = (...args) => app.buildQueue(...args);
+    const updateQueueUI = (...args) => app.updateQueueUI(...args);
     const playQueuedSong = (...args) => app.playQueuedSong(...args);
     const highlightPlayingSong = (...args) => app.highlightPlayingSong(...args);
 
@@ -722,6 +723,12 @@ window.createPlayerModule = function createPlayerModule(app) {
             return;
         }
 
+        if (state.currentSongMeta) {
+            if (!state.playbackHistory) state.playbackHistory = [];
+            state.playbackHistory.push(state.currentSongMeta);
+            if (state.playbackHistory.length > 50) state.playbackHistory.shift();
+        }
+
         if (state.playQueue.length > 0) {
             const nextSong = state.playQueue.shift();
             playQueuedSong(nextSong);
@@ -732,13 +739,13 @@ window.createPlayerModule = function createPlayerModule(app) {
 
         // Queue is empty: the whole playlist has played through once.
         if (state.isShuffle) {
-            if (state.repeatMode === 0) {
+            if (state.repeatMode === 0 && isFromSongEnded) {
                 state.shouldBePlaying = false;
                 el.audio.pause();
                 updatePlayPauseIcon(false);
                 return;
             }
-            // Repeat All: start a fresh shuffle so the next loop has a new order.
+            // Repeat All or manual Next click: start a fresh shuffle so the next loop has a new order.
             state.shuffleOrder = [];
             playSong(state.currentPlaylistSongs, Math.floor(Math.random() * state.currentPlaylistSongs.length));
             return;
@@ -756,12 +763,71 @@ window.createPlayerModule = function createPlayerModule(app) {
     }
 
     function playPrev() {
-        if (state.currentPlaylistSongs.length === 0) return;
-        if (el.audio.currentTime > 3) {
+        if (!state.currentPlaylistSongs || state.currentPlaylistSongs.length === 0) return;
+        if (el.audio && el.audio.currentTime > 3) {
             seekAudio(0);
             return;
         }
-        playSong(state.currentPlaylistSongs, (state.currentSongIndex - 1 + state.currentPlaylistSongs.length) % state.currentPlaylistSongs.length);
+
+        if (state.isShuffle) {
+            if (state.playbackHistory && state.playbackHistory.length > 0) {
+                const prevSong = state.playbackHistory.pop();
+                if (state.currentSongMeta) {
+                    state.playQueue.unshift(state.currentSongMeta);
+                }
+                playQueuedSong(prevSong);
+                return;
+            }
+
+            if (state.shuffleOrder && state.shuffleOrder.length > 0) {
+                const currentId = String(state.currentPlayingSongId || state.currentSongMeta?.id || '');
+                const pos = state.shuffleOrder.findIndex(s => String(s.id) === currentId);
+                if (pos > 0) {
+                    const prevSong = state.shuffleOrder[pos - 1];
+                    if (state.currentSongMeta) {
+                        state.playQueue.unshift(state.currentSongMeta);
+                    }
+                    playQueuedSong(prevSong);
+                    return;
+                }
+                if (pos === 0) {
+                    if (state.repeatMode === 1) {
+                        const prevSong = state.shuffleOrder[state.shuffleOrder.length - 1];
+                        if (state.currentSongMeta) {
+                            state.playQueue.unshift(state.currentSongMeta);
+                        }
+                        playQueuedSong(prevSong);
+                        return;
+                    }
+                    seekAudio(0);
+                    return;
+                }
+            }
+
+            seekAudio(0);
+            return;
+        }
+
+        // Sequential (non-shuffle) mode
+        if (state.playbackHistory && state.playbackHistory.length > 0) {
+            const prevSong = state.playbackHistory.pop();
+            if (state.currentSongMeta) {
+                state.playQueue.unshift(state.currentSongMeta);
+            }
+            playQueuedSong(prevSong);
+            return;
+        }
+
+        let prevIndex = state.currentSongIndex - 1;
+        if (prevIndex < 0) {
+            if (state.repeatMode === 1) {
+                prevIndex = state.currentPlaylistSongs.length - 1;
+            } else {
+                seekAudio(0);
+                return;
+            }
+        }
+        playSong(state.currentPlaylistSongs, prevIndex);
     }
 
     return {

@@ -40,7 +40,11 @@ window.createQueueModule = function createQueueModule(app) {
         if (state.isShuffle) {
             // Only reshuffle when the playlist changed or shuffle was just turned
             // on; otherwise reuse the existing order so songs don't repeat.
-            const currentSong = state.currentPlaylistSongs[state.currentSongIndex];
+            const currentSong = state.currentSongMeta || state.currentPlaylistSongs[state.currentSongIndex];
+            if (!currentSong) {
+                updateQueueUI();
+                return;
+            }
             const hasCurrent = state.shuffleOrder?.some(s => s.id === currentSong.id);
             if (!state.shuffleOrder?.length || state.shuffleKey !== state.currentPlaylistId || !hasCurrent) {
                 rebuildShuffleOrder();
@@ -78,6 +82,11 @@ window.createQueueModule = function createQueueModule(app) {
                 <button class="queue-remove-btn" type="button" aria-label="Remove ${escapeHtml(song.title)}" title="Remove"><i class="fas fa-xmark"></i></button>
             `;
             div.addEventListener('click', () => {
+                if (state.currentSongMeta) {
+                    if (!state.playbackHistory) state.playbackHistory = [];
+                    state.playbackHistory.push(state.currentSongMeta);
+                    if (state.playbackHistory.length > 50) state.playbackHistory.shift();
+                }
                 state.playQueue.splice(index, 1);
                 playQueuedSong(song);
                 setQueueOpen(false);

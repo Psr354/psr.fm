@@ -76,6 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
         capsuleShareTagline: 'My Listening Journey',
         capsuleShareRenderPromise: null,
         playQueue: [],
+        playbackHistory: [],
         currentPlaylistId: null,
         currentPlaylistSongs: [],
         currentSongIndex: -1,
@@ -290,19 +291,33 @@ document.addEventListener('DOMContentLoaded', () => {
         if (liveSocket || !navigator.onLine) return;
         const attach = () => {
             if (liveSocket || typeof window.io !== 'function') return;
-            liveSocket = window.io();
-            pendingSocketHandlers.forEach(([eventName, handler]) => liveSocket.on(eventName, handler));
+            try {
+                liveSocket = window.io();
+                pendingSocketHandlers.forEach(([eventName, handler]) => liveSocket.on(eventName, handler));
+            } catch (err) {
+                console.warn('Realtime connection failed:', err);
+            }
         };
         if (typeof window.io === 'function') return attach();
         if (document.querySelector('script[data-realtime-client]')) return;
         const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js';
-        script.integrity = 'sha384-ijk2QwnixVP19l5ENflXHY2/BMo9ANUiTqH6MiVk6i7wp68I6wjNQFOcyayHgClg';
-        script.crossOrigin = 'anonymous';
+        script.src = '/static/js/socket.io.min.js';
         script.async = true;
         script.dataset.realtimeClient = 'true';
         script.onload = attach;
-        script.onerror = () => script.remove();
+        script.onerror = () => {
+            script.remove();
+            if (document.querySelector('script[data-realtime-client]')) return;
+            const cdnScript = document.createElement('script');
+            cdnScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js';
+            cdnScript.integrity = 'sha384-ijk2QwnixVP19l5ENflXHY2/BMo9ANUiTqH6MiVk6i7wp68I6wjNQFOcyayHgClg';
+            cdnScript.crossOrigin = 'anonymous';
+            cdnScript.async = true;
+            cdnScript.dataset.realtimeClient = 'true';
+            cdnScript.onload = attach;
+            cdnScript.onerror = () => cdnScript.remove();
+            document.head.appendChild(cdnScript);
+        };
         document.head.appendChild(script);
     }
 
@@ -1015,6 +1030,7 @@ document.addEventListener('DOMContentLoaded', () => {
         stopLyricAnimation,
         updateSyncedLyrics,
         loadLyrics,
+        connectRealtime,
     };
 
     const queueMod = window.createQueueModule(app);

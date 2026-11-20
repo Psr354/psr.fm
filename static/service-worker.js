@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'psr354-shell-v60';
+const SHELL_CACHE = 'psr354-shell-v61';
 const MEDIA_CACHE = 'psr354-media-v3';
 const RUNTIME_CACHE = 'psr354-runtime-v2';
 const APP_SHELL_KEY = '/?offline-app-shell=1';
@@ -10,6 +10,7 @@ const SHELL_FILES = [
   '/static/js/playback-sync.js',
   '/static/js/playlist-view.js',
   '/static/js/player.js',
+  '/static/js/socket.io.min.js',
   '/static/js/main.js',
   '/static/js/lyrics.js',
   '/static/js/modals.js',

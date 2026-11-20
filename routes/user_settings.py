@@ -1,5 +1,6 @@
 import json
 import math
+import time
 from flask import Blueprint, jsonify, current_app
 from flask_login import login_required, current_user
 
@@ -32,7 +33,7 @@ ALLOWED_PLAYBACK_KEYS = {
     'songId', 'songMeta', 'playlistId', 'playlistSongs', 'songIndex',
     'duration', 'repeatMode', 'isShuffle', 'currentTime', 'isPlaying',
     'timestamp', 'deviceId', 'volume', 'isMuted',
-    'playbackSessionId', 'playEventLogged', 'pendingPlaySeconds',
+    'playbackSessionId', 'playEventLogged', 'pendingPlaySeconds', 'server_time',
 }
 ALLOWED_SONG_META_KEYS = {'id', 'title', 'artist', 'album_art', 'filename', 'duration_seconds'}
 
@@ -111,7 +112,7 @@ def _validate_playback_payload(payload):
             if not isinstance(payload[bool_field], bool):
                 return None, f'Invalid {bool_field}'
 
-    for num_field in ('currentTime', 'duration', 'volume', 'timestamp', 'pendingPlaySeconds'):
+    for num_field in ('currentTime', 'duration', 'volume', 'timestamp', 'pendingPlaySeconds', 'server_time'):
         if num_field in payload and payload[num_field] is not None:
             val = payload[num_field]
             if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val):
@@ -135,7 +136,11 @@ def _validate_playback_payload(payload):
 def get_playback_state_route():
     db_path = get_database_path()
     state = get_user_playback_state(db_path, current_user.id)
-    return jsonify({'status': 'success', 'playback_state': state})
+    return jsonify({
+        'status': 'success',
+        'playback_state': state,
+        'server_time': int(time.time() * 1000)
+    })
 
 
 @user_settings_bp.route('/api/playback-state', methods=['POST'])
@@ -148,6 +153,7 @@ def save_playback_state_route():
     if error:
         return jsonify({'error': error}), 400
     db_path = get_database_path()
+    validated['server_time'] = int(time.time() * 1000)
     save_user_playback_state(db_path, current_user.id, validated)
     sio = getattr(current_app, 'socketio', None)
     if sio:
