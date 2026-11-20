@@ -288,14 +288,40 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function connectRealtime() {
-        if (liveSocket || !navigator.onLine) return;
+        if (!navigator.onLine) return;
+        // Jika sudah ada socket yang masih connected, tidak perlu buat baru.
+        if (liveSocket && liveSocket.connected) return;
+        // Jika ada socket yang disconnected/failed, hapus dulu agar bisa reconnect.
+        if (liveSocket && !liveSocket.connected) {
+            try { liveSocket.disconnect(); } catch (_) {}
+            liveSocket = null;
+        }
         const attach = () => {
             if (liveSocket || typeof window.io !== 'function') return;
             try {
-                liveSocket = window.io();
+                liveSocket = window.io({
+                    reconnection: true,
+                    reconnectionAttempts: Infinity,
+                    reconnectionDelay: 1000,
+                    reconnectionDelayMax: 10000,
+                    timeout: 10000,
+                });
                 pendingSocketHandlers.forEach(([eventName, handler]) => liveSocket.on(eventName, handler));
+                liveSocket.on('disconnect', (reason) => {
+                    // Jika disconnect bukan karena user logout/server kill,
+                    // socket.io akan auto-reconnect. Tapi jika 'io server disconnect',
+                    // kita perlu reconnect manual.
+                    if (reason === 'io server disconnect') {
+                        liveSocket.connect();
+                    }
+                });
+                liveSocket.on('connect_error', () => {
+                    // Jika error connect, biarkan auto-reconnect berjalan.
+                    // Tidak reset liveSocket agar pendingHandlers tetap terdaftar.
+                });
             } catch (err) {
                 console.warn('Realtime connection failed:', err);
+                liveSocket = null;
             }
         };
         if (typeof window.io === 'function') return attach();
