@@ -744,8 +744,8 @@ button { touch-action: manipulation; }
 .download-progress-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--text-secondary); font-size: 13px; font-weight: 700; }
 .download-progress-meta i { color: var(--accent-color); margin-right: 8px; }
 .download-progress-meta-right { display: flex; align-items: center; gap: 8px; }
-.download-close-btn { background: none; border: none; color: var(--text-muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; transition: color 0.2s, background 0.2s; }
-.download-close-btn:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.08); }
+.download-close-btn { background: none; border: none; color: var(--text-secondary); font-size: 20px; line-height: 1; cursor: pointer; padding: 4px 8px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; transition: color 0.2s, background 0.2s; }
+.download-close-btn:hover, .download-close-btn:focus-visible { color: #fff; background: rgba(255, 255, 255, 0.15); outline: none; }
 .download-progress-track { height: 6px; background: #333; border-radius: 99px; overflow: hidden; }
 .download-progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent-color), var(--cyan-accent)); transition: width 0.3s ease; box-shadow: 0 0 10px var(--accent-color); }
 

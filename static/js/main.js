@@ -1151,7 +1151,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (el.downloadWrapper && el.downloadWrapper.classList.contains('active')) {
                 hideDownloadProgress(0);
             }
-        }, 60000);
+        }, 15000);
     }
 
     function cancelDownloadHide() {
@@ -1161,7 +1161,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    el.downloadCloseBtn?.addEventListener('click', () => {
+    el.downloadCloseBtn?.addEventListener('click', (e) => {
+        e?.stopPropagation?.();
         hideDownloadProgress(0);
     });
 

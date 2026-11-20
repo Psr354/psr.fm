@@ -190,7 +190,11 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                 return;
             }
 
-            if (state.isPrimarySyncLeader || isUserAction) {
+            if (isUserAction) {
+                state.isPrimarySyncLeader = true;
+            }
+
+            if (state.isPrimarySyncLeader) {
                 syncPlaybackToServer(cachedPlaybackPayload, force);
             }
         } catch (_) {}

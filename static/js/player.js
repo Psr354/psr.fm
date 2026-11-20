@@ -407,6 +407,8 @@ window.createPlayerModule = function createPlayerModule(app) {
         } catch (_) {}
         state.isSeeking = false;
         if (state.wasPlayingBeforeSeek) el.audio.play().catch(() => {});
+        state.isPrimarySyncLeader = true;
+        savePlaybackState(true, true);
     };
     el.progressBar?.addEventListener('pointerup', finishSeek);
     el.progressBar?.addEventListener('pointercancel', finishSeek);
@@ -697,6 +699,7 @@ window.createPlayerModule = function createPlayerModule(app) {
 
     function togglePlay() {
         if (!el.audio.src) return;
+        state.isPrimarySyncLeader = true;
         if (el.audio.paused) {
             state.shouldBePlaying = true;
             resumeCurrentSong();
@@ -706,6 +709,7 @@ window.createPlayerModule = function createPlayerModule(app) {
             el.audio.pause();
             updatePlayPauseIcon(false);
         }
+        savePlaybackState(true, true);
     }
 
     function playNext(isFromSongEnded = true) {
