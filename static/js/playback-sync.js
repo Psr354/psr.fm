@@ -138,7 +138,7 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             } catch (_) {}
         }
 
-        if (!socketSent || immediate) {
+        if (!socketSent) {
             try {
                 fetch('/api/playback-state', {
                     method: 'POST',
@@ -429,26 +429,28 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                 try { el.audio.playbackRate = 1.0; } catch (_) {}
                 el.audio.src = audioSrc;
 
-                if (targetTime === 0) {
-                    state.isSyncSeeking = false;
-                    state.lastLoggedTime = 0;
+                const startTrackPlayback = (pos) => {
+                    if (pos > 0) {
+                        state.isSyncSeeking = true;
+                        try { el.audio.currentTime = pos; } catch (_) {}
+                        state.lastLoggedTime = el.audio.currentTime || pos;
+                    } else {
+                        state.isSyncSeeking = false;
+                        state.lastLoggedTime = 0;
+                    }
                     updateSyncedLyrics(true);
-                    triggerPlayback(0);
+                    triggerPlayback(pos);
+                };
+
+                if (el.audio.readyState >= 1) {
+                    startTrackPlayback(targetTime);
                 } else {
                     const onLoaded = () => {
                         activeLoadedMetadataHandler = null;
-                        state.isSyncSeeking = true;
-                        try { el.audio.currentTime = targetTime; } catch (_) {}
-                        state.lastLoggedTime = el.audio.currentTime || targetTime;
-                        updateSyncedLyrics(true);
+                        startTrackPlayback(targetTime);
                     };
-                    if (el.audio.readyState >= 1) {
-                        onLoaded();
-                    } else {
-                        activeLoadedMetadataHandler = onLoaded;
-                        el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
-                    }
-                    triggerPlayback(targetTime);
+                    activeLoadedMetadataHandler = onLoaded;
+                    el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
                 }
             } else {
                 const currentPos = el.audio.currentTime || 0;
@@ -458,6 +460,7 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                 if (absDrift > 0.5) {
                     state.isSyncSeeking = true;
                     try { el.audio.currentTime = targetTime; } catch (_) {}
+                    state.lastLoggedTime = el.audio.currentTime || targetTime;
                     try { el.audio.playbackRate = 1.0; } catch (_) {}
                     updateSyncedLyrics(true);
                 } else if (absDrift > 0.15 && shouldPlay && !el.audio.paused) {

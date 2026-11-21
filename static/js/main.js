@@ -1158,6 +1158,7 @@ document.addEventListener('DOMContentLoaded', () => {
     Object.assign(app, playerMod);
     const {
         seekAudio,
+        setAppVolume,
         playLibrarySong,
         playSong,
         togglePlay,

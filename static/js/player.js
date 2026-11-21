@@ -360,6 +360,8 @@ window.createPlayerModule = function createPlayerModule(app) {
         if (!Number.isFinite(position)) return;
         flushListenLog();
         state.isPrimarySyncLeader = true;
+        state.isApplyingRemoteSync = false;
+        state.lastRemoteSyncAppliedAt = 0;
         el.audio.currentTime = position;
         // Reset immediately: pause/timeupdate may arrive before seeked.
         state.lastLoggedTime = el.audio.currentTime;
@@ -387,6 +389,21 @@ window.createPlayerModule = function createPlayerModule(app) {
         }
     });
 
+    el.progressBar?.addEventListener('change', (e) => {
+        state.isSeeking = false;
+        state.isPrimarySyncLeader = true;
+        state.isApplyingRemoteSync = false;
+        state.lastRemoteSyncAppliedAt = 0;
+        if (state.wasPlayingBeforeSeek && el.audio.paused) {
+            el.audio.play().catch(() => {});
+        }
+        if (el.audio?.duration && !isNaN(el.audio.duration)) {
+            seekAudio((Number(e.target.value) / 100) * el.audio.duration, true);
+        } else {
+            savePlaybackState(true, true);
+        }
+    });
+
     el.progressBar?.addEventListener('pointerdown', (event) => {
         flushListenLog();
         state.isSeeking = true;
@@ -404,17 +421,33 @@ window.createPlayerModule = function createPlayerModule(app) {
     const finishSeek = (event) => {
         if (!state.isSeeking) return;
         try {
-            if (el.progressBar.hasPointerCapture?.(event.pointerId)) {
+            if (event && el.progressBar?.hasPointerCapture?.(event.pointerId)) {
                 el.progressBar.releasePointerCapture(event.pointerId);
             }
         } catch (_) {}
         state.isSeeking = false;
-        if (state.wasPlayingBeforeSeek) el.audio.play().catch(() => {});
         state.isPrimarySyncLeader = true;
-        savePlaybackState(true, true);
+        state.isApplyingRemoteSync = false;
+        state.lastRemoteSyncAppliedAt = 0;
+        if (state.wasPlayingBeforeSeek && el.audio.paused) {
+            el.audio.play().catch(() => {});
+        }
+        if (el.audio?.duration && !isNaN(el.audio.duration) && el.progressBar) {
+            seekAudio((Number(el.progressBar.value) / 100) * el.audio.duration, true);
+        } else {
+            savePlaybackState(true, true);
+        }
     };
     el.progressBar?.addEventListener('pointerup', finishSeek);
     el.progressBar?.addEventListener('pointercancel', finishSeek);
+    if (typeof window !== 'undefined') {
+        window.addEventListener('pointerup', (e) => {
+            if (state.isSeeking) finishSeek(e);
+        });
+        window.addEventListener('pointercancel', (e) => {
+            if (state.isSeeking) finishSeek(e);
+        });
+    }
 
     state.lastNonZeroVolume = 1;
     state.userVolume = 1;

@@ -161,17 +161,33 @@ def save_playback_state_route():
     if error:
         return jsonify({'error': error}), 400
     db_path = get_database_path()
-    validated['server_time'] = int(time.time() * 1000)
-    save_user_playback_state(db_path, current_user.id, validated)
+    server_time = int(time.time() * 1000)
+    validated['server_time'] = server_time
+
     sio = getattr(current_app, 'socketio', None)
-    if sio:
-        room = f'user_{current_user.id}'
-        if validated.get('syncAction') == 'volume' and 'volume' in validated:
+    room = f'user_{current_user.id}'
+
+    if validated.get('syncAction') == 'volume':
+        st = get_user_playback_state(db_path, current_user.id) or {}
+        if 'volume' in validated:
+            st['volume'] = validated['volume']
+        if 'isMuted' in validated:
+            st['isMuted'] = bool(validated.get('isMuted', False))
+        if 'deviceId' in validated:
+            st['deviceId'] = validated.get('deviceId')
+        st['server_time'] = server_time
+        save_user_playback_state(db_path, current_user.id, st)
+
+        if sio:
             sio.emit('volume_sync', {
-                'volume': validated['volume'],
-                'isMuted': bool(validated.get('isMuted', False)),
-                'deviceId': validated.get('deviceId')
+                'volume': st.get('volume', 1.0),
+                'isMuted': bool(st.get('isMuted', False)),
+                'deviceId': st.get('deviceId')
             }, room=room)
+        return jsonify({'status': 'success'})
+
+    save_user_playback_state(db_path, current_user.id, validated)
+    if sio:
         current_app.logger.info(
             'Emitting playback_sync to room %s: songId=%s, isPlaying=%s, deviceId=%s',
             room, validated.get('songId'), validated.get('isPlaying'), validated.get('deviceId')
