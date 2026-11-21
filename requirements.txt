@@ -3,7 +3,7 @@ Werkzeug==3.1.9
 requests==2.33.0
 mutagen==1.47.0
 yt-dlp>=2026.7.4
-Flask-SocketIO==5.3.6
+Flask-SocketIO>=5.5.0
 simple-websocket==1.0.0
 Pillow==13.0.0
 PyYAML==6.0.2

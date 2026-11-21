@@ -24,6 +24,22 @@ from routes.lyrics import lyrics_bp
 from routes.recap import recap_bp
 from routes.user_settings import user_settings_bp
 
+# Fix compatibility between Flask 3.1.3+ and Flask-SocketIO:
+# In Flask 3.1.3+, RequestContext.session was refactored into a read-only property without a setter,
+# which causes AttributeError when Flask-SocketIO assigns ctx.session = session_obj.
+try:
+    from flask.ctx import RequestContext
+    _session_prop = getattr(RequestContext, 'session', None)
+    if isinstance(_session_prop, property) and _session_prop.fset is None:
+        RequestContext.session = property(
+            _session_prop.fget,
+            lambda self, val: setattr(self, '_session', val),
+            _session_prop.fdel,
+            _session_prop.__doc__
+        )
+except Exception:
+    pass
+
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 load_dotenv(os.path.join(BASE_DIR, '.env'))
 
@@ -85,12 +101,10 @@ login_manager.login_message = None
 
 def _parse_socketio_origins(raw_value):
     cleaned = (raw_value or '').strip()
-    if not cleaned:
-        return None
-    if cleaned == '*':
+    if not cleaned or cleaned == '*':
         return '*'
     origins = [origin.strip() for origin in cleaned.split(',') if origin.strip()]
-    return origins or None
+    return origins or '*'
 
 
 socketio_origins = _parse_socketio_origins(os.environ.get('PSR_FM_SOCKETIO_ORIGINS', ''))
