@@ -417,6 +417,7 @@ window.createPlayerModule = function createPlayerModule(app) {
     state.userVolume = 1;
     state.userMuted = false;
 
+    let volumeLeaderSaveTimer = null;
     function setAppVolume(vol, isMuted = false, shouldSave = true) {
         const normalized = Math.max(0, Math.min(1, Number(vol)));
         if (!isMuted && normalized > 0) {
@@ -461,9 +462,29 @@ window.createPlayerModule = function createPlayerModule(app) {
         });
 
         updateVolumeIcon(effective);
-        if (shouldSave) savePlaybackState(state.isPrimarySyncLeader, state.isPrimarySyncLeader);
+        if (shouldSave) {
+            if (state.isPrimarySyncLeader) {
+                if (volumeLeaderSaveTimer) clearTimeout(volumeLeaderSaveTimer);
+                volumeLeaderSaveTimer = setTimeout(() => {
+                    volumeLeaderSaveTimer = null;
+                    if (state.isPrimarySyncLeader) savePlaybackState(true, true);
+                }, 150);
+            } else {
+                savePlaybackState(false, false);
+            }
+        }
     }
     window.setAppVolume = setAppVolume;
+
+    const flushVolumeSaveOnRelease = () => {
+        if (volumeLeaderSaveTimer) {
+            clearTimeout(volumeLeaderSaveTimer);
+            volumeLeaderSaveTimer = null;
+            if (state.isPrimarySyncLeader) savePlaybackState(true, true);
+        }
+    };
+    el.volumeBar?.addEventListener('change', flushVolumeSaveOnRelease);
+    document.getElementById('volume-popover-bar')?.addEventListener('change', flushVolumeSaveOnRelease);
 
     el.volumeBar?.addEventListener('input', (e) => {
         setAppVolume(Number(e.target.value) / 100, false);
@@ -713,6 +734,10 @@ window.createPlayerModule = function createPlayerModule(app) {
     }
 
     function playNext(isFromSongEnded = true) {
+        if (!isFromSongEnded) {
+            state.isPrimarySyncLeader = true;
+        }
+        try { if (el.audio) el.audio.playbackRate = 1.0; } catch (_) {}
         if (state.repeatMode === 2 && isFromSongEnded) {
             state.playbackRequestId += 1;
             state.playEventLogged = false;
@@ -767,6 +792,8 @@ window.createPlayerModule = function createPlayerModule(app) {
     }
 
     function playPrev() {
+        state.isPrimarySyncLeader = true;
+        try { if (el.audio) el.audio.playbackRate = 1.0; } catch (_) {}
         if (!state.currentPlaylistSongs || state.currentPlaylistSongs.length === 0) return;
         if (el.audio && el.audio.currentTime > 3) {
             seekAudio(0);

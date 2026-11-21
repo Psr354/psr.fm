@@ -31,6 +31,9 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
     let syncPromptActive = false;
     let syncPromptTimeout = null;
     let activeLoadedMetadataHandler = null;
+    let serverClockOffset = 0;
+    let lastAppliedRemoteVolume = null;
+    let lastAppliedRemoteMuted = null;
 
     function showSyncAutoplayPrompt(targetTime, isRemote = true) {
         if (syncPromptActive) return;
@@ -158,6 +161,17 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                     }))
                     : [];
 
+                const slimShuffle = (state.isShuffle && Array.isArray(state.shuffleOrder))
+                    ? state.shuffleOrder.slice(0, 80).map(s => ({
+                        id: s.id,
+                        title: s.title,
+                        artist: s.artist,
+                        album_art: s.album_art,
+                        filename: s.filename,
+                        duration_seconds: s.duration_seconds
+                    }))
+                    : null;
+
                 cachedPlaybackPayload = {
                     songId: state.currentPlayingSongId,
                     songMeta: {
@@ -170,11 +184,24 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                     },
                     playlistId: state.currentPlaylistId,
                     playlistSongs: slimSongs,
+                    shuffleOrder: slimShuffle,
                     songIndex: state.currentSongIndex,
                     duration: el.audio ? el.audio.duration : 0,
                     repeatMode: state.repeatMode,
                     isShuffle: state.isShuffle
                 };
+            }
+            if (state.isShuffle && Array.isArray(state.shuffleOrder)) {
+                cachedPlaybackPayload.shuffleOrder = state.shuffleOrder.slice(0, 80).map(s => ({
+                    id: s.id,
+                    title: s.title,
+                    artist: s.artist,
+                    album_art: s.album_art,
+                    filename: s.filename,
+                    duration_seconds: s.duration_seconds
+                }));
+            } else {
+                cachedPlaybackPayload.shuffleOrder = null;
             }
             cachedPlaybackPayload.currentTime = currentTime;
             cachedPlaybackPayload.isPlaying = isPlaying;
@@ -224,9 +251,14 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         }
 
         const now = Date.now();
-        const latencySec = (saved.timestamp && now > saved.timestamp)
-            ? Math.min(3, Math.max(0, (now - saved.timestamp) / 1000))
-            : 0;
+        let transitMs = 0;
+        if (typeof saved.server_time === 'number') {
+            const estimatedServerNow = now + serverClockOffset;
+            transitMs = Math.max(0, estimatedServerNow - saved.server_time);
+        } else if (typeof saved.timestamp === 'number') {
+            transitMs = Math.max(0, now - saved.timestamp);
+        }
+        const latencySec = Math.min(1.5, transitMs / 1000);
 
         const shouldPlay = Boolean(startPlaying !== false && (startPlaying === true || saved.isPlaying));
         const targetTime = Math.max(
@@ -281,6 +313,11 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         state.repeatMode = typeof saved.repeatMode === 'number' ? saved.repeatMode : 0;
         state.isShuffle = Boolean(saved.isShuffle);
 
+        if (saved.isShuffle && Array.isArray(saved.shuffleOrder) && saved.shuffleOrder.length > 0) {
+            state.shuffleOrder = saved.shuffleOrder;
+            state.shuffleKey = saved.playlistId || state.currentPlaylistId;
+        }
+
         if (el.playerTitle) el.playerTitle.innerText = saved.songMeta.title || '';
         if (el.playerArtist) el.playerArtist.innerText = saved.songMeta.artist || 'Unknown';
         if (el.playerArt) {
@@ -301,7 +338,13 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
 
         if (typeof saved.volume === 'number') {
             const isMuted = Boolean(saved.isMuted);
-            setAppVolume(saved.volume, isMuted, false);
+            const volumeChanged = lastAppliedRemoteVolume === null || Math.abs(saved.volume - lastAppliedRemoteVolume) > 0.01;
+            const muteChanged = lastAppliedRemoteMuted === null || isMuted !== lastAppliedRemoteMuted;
+            if (!isRemoteSync || volumeChanged || muteChanged) {
+                lastAppliedRemoteVolume = saved.volume;
+                lastAppliedRemoteMuted = isMuted;
+                setAppVolume(saved.volume, isMuted, false);
+            }
         }
 
         const shuffleBtn = document.getElementById('shuffle-btn');
@@ -331,50 +374,79 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         } catch (_) {}
         const isDifferentSrc = !currentPath || currentPath !== audioSrc;
 
-        const triggerPlayback = () => {
-            if (shouldPlay) {
-                state.shouldBePlaying = true;
-                updatePlayPauseIcon(true);
-                resumeEqContext();
-                const p = el.audio.play();
-                if (p !== undefined) {
-                    p.catch(() => {
-                        showSyncAutoplayPrompt(targetTime, isRemoteSync);
-                    });
-                }
-            } else {
-                state.shouldBePlaying = false;
-                el.audio.pause();
-                updatePlayPauseIcon(false);
-            }
-        };
-
         if (el.audio) {
             if (activeLoadedMetadataHandler) {
                 el.audio.removeEventListener('loadedmetadata', activeLoadedMetadataHandler);
                 activeLoadedMetadataHandler = null;
             }
+
+            const triggerPlayback = (playbackPos = targetTime) => {
+                if (shouldPlay) {
+                    state.shouldBePlaying = true;
+                    updatePlayPauseIcon(true);
+                    resumeEqContext();
+                    if (el.audio.paused) {
+                        const p = el.audio.play();
+                        if (p !== undefined) {
+                            p.catch((err) => {
+                                if (err?.name === 'NotAllowedError') {
+                                    showSyncAutoplayPrompt(playbackPos, isRemoteSync);
+                                }
+                            });
+                        }
+                    }
+                } else {
+                    state.shouldBePlaying = false;
+                    el.audio.pause();
+                    updatePlayPauseIcon(false);
+                    try { el.audio.playbackRate = 1.0; } catch (_) {}
+                }
+            };
+
             if (isDifferentSrc || !isSameSong) {
+                try { el.audio.playbackRate = 1.0; } catch (_) {}
                 el.audio.src = audioSrc;
                 try { el.audio.load(); } catch (_) {}
-                const onLoaded = () => {
-                    activeLoadedMetadataHandler = null;
-                    state.isSyncSeeking = true;
-                    try { el.audio.currentTime = targetTime; } catch (_) {}
-                    state.lastLoggedTime = el.audio.currentTime || targetTime;
+
+                if (targetTime < 0.08) {
+                    state.isSyncSeeking = false;
+                    state.lastLoggedTime = 0;
                     updateSyncedLyrics(true);
-                };
-                activeLoadedMetadataHandler = onLoaded;
-                el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
-                triggerPlayback();
-            } else {
-                const drift = Math.abs((el.audio.currentTime || 0) - targetTime);
-                if (drift > 1.8) {
-                    state.isSyncSeeking = true;
-                    try { el.audio.currentTime = targetTime; } catch (_) {}
-                    updateSyncedLyrics(true);
+                    triggerPlayback(0);
+                } else {
+                    const onLoaded = () => {
+                        activeLoadedMetadataHandler = null;
+                        state.isSyncSeeking = true;
+                        try { el.audio.currentTime = targetTime; } catch (_) {}
+                        state.lastLoggedTime = el.audio.currentTime || targetTime;
+                        updateSyncedLyrics(true);
+                        triggerPlayback(targetTime);
+                    };
+                    if (el.audio.readyState >= 1) {
+                        onLoaded();
+                    } else {
+                        activeLoadedMetadataHandler = onLoaded;
+                        el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
+                    }
                 }
-                triggerPlayback();
+            } else {
+                const currentPos = el.audio.currentTime || 0;
+                const diff = currentPos - targetTime;
+                const absDrift = Math.abs(diff);
+
+                if (absDrift > 0.25) {
+                    state.isSyncSeeking = true;
+                    try { el.audio.currentTime = targetTime; } catch (_) {}
+                    try { el.audio.playbackRate = 1.0; } catch (_) {}
+                    updateSyncedLyrics(true);
+                } else if (absDrift > 0.035 && shouldPlay && !el.audio.paused) {
+                    const rate = diff < 0 ? 1.04 : 0.96;
+                    try { el.audio.playbackRate = rate; } catch (_) {}
+                } else {
+                    try { el.audio.playbackRate = 1.0; } catch (_) {}
+                }
+
+                triggerPlayback(targetTime);
             }
         }
     }
@@ -382,9 +454,15 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
     async function syncPlaybackStateFromServer() {
         if (!navigator.onLine) return;
         try {
+            const t0 = Date.now();
             const res = await fetch('/api/playback-state');
             if (!res.ok) return;
+            const t1 = Date.now();
             const data = await res.json();
+            if (typeof data.server_time === 'number') {
+                const rtt = Math.max(0, t1 - t0);
+                serverClockOffset = data.server_time - (t0 + rtt / 2);
+            }
             const serverState = data.playback_state;
             if (!serverState || !serverState.songMeta) return;
 

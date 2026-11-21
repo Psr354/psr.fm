@@ -34,6 +34,7 @@ ALLOWED_PLAYBACK_KEYS = {
     'duration', 'repeatMode', 'isShuffle', 'currentTime', 'isPlaying',
     'timestamp', 'deviceId', 'volume', 'isMuted',
     'playbackSessionId', 'playEventLogged', 'pendingPlaySeconds', 'server_time',
+    'shuffleOrder',
 }
 ALLOWED_SONG_META_KEYS = {'id', 'title', 'artist', 'album_art', 'filename', 'duration_seconds'}
 
@@ -95,6 +96,13 @@ def _validate_playback_payload(payload):
             return None, 'Invalid playlistSongs'
         if not all(_validate_song_meta(item) for item in songs):
             return None, 'Invalid playlistSongs item'
+
+    if 'shuffleOrder' in payload and payload['shuffleOrder'] is not None:
+        songs = payload['shuffleOrder']
+        if not isinstance(songs, list) or len(songs) > MAX_PLAYBACK_QUEUE_ITEMS:
+            return None, 'Invalid shuffleOrder'
+        if not all(_validate_song_meta(item) for item in songs):
+            return None, 'Invalid shuffleOrder item'
 
     for id_field in ('songId', 'playlistId'):
         if id_field in payload and payload[id_field] is not None:
