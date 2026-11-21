@@ -36,6 +36,7 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         if (syncPromptActive) return;
         syncPromptActive = true;
         const promptStartTime = Date.now();
+        console.log('[Sync] Autoplay prompt shown: targetTime =', targetTime, 'isRemote =', isRemote);
         showToast(
             isRemote
                 ? 'Playing on another device. Tap the screen to listen along.'
@@ -61,10 +62,11 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                         ? targetTime + (isRemote ? elapsed : 0)
                         : null;
 
+                    console.log('[Sync] Screen tapped, unlocking audio playback at', effectiveTarget);
                     resumeEqContext();
                     const playPromise = el.audio.play();
                     if (playPromise !== undefined) {
-                        playPromise.catch(() => {});
+                        playPromise.catch((e) => console.warn('[Sync] Play after tap rejected:', e));
                     }
                     updatePlayPauseIcon(true);
 
@@ -142,7 +144,7 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         lastSavePlaybackTime = now;
         try {
             const currentTime = el.audio ? el.audio.currentTime : 0;
-            const isPlaying = el.audio ? !el.audio.paused : false;
+            const isPlaying = el.audio ? (!el.audio.paused || Boolean(state.shouldBePlaying)) : Boolean(state.shouldBePlaying);
 
             if (force || !cachedPlaybackPayload || cachedPlaybackPayload.songId !== state.currentPlayingSongId) {
                 const slimSongs = Array.isArray(state.currentPlaylistSongs)
@@ -186,12 +188,14 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
 
             localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(cachedPlaybackPayload));
 
-            if (state.isApplyingRemoteSync || (now - state.lastRemoteSyncAppliedAt < 2500)) {
-                return;
-            }
-
             if (isUserAction) {
                 state.isPrimarySyncLeader = true;
+                state.isApplyingRemoteSync = false;
+                state.lastRemoteSyncAppliedAt = 0;
+            }
+
+            if (state.isApplyingRemoteSync || (now - state.lastRemoteSyncAppliedAt < 2500)) {
+                return;
             }
 
             if (state.isPrimarySyncLeader) {
@@ -395,9 +399,10 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             const now = Date.now();
             const serverNow = typeof data.server_time === 'number' ? data.server_time : now;
             const stateTimestamp = Number(serverState.timestamp || 0);
+            const stateServerTime = typeof serverState.server_time === 'number' ? serverState.server_time : stateTimestamp;
             const isActivelyPlaying = Boolean(
                 serverState.isPlaying &&
-                (Math.abs(serverNow - stateTimestamp) < 120000 || Math.abs(now - stateTimestamp) < 120000)
+                (Math.abs(serverNow - stateServerTime) < 180000 || Math.abs(now - stateTimestamp) < 180000)
             );
             const isSameDevice = Boolean(serverState.deviceId && serverState.deviceId === CLIENT_DEVICE_ID);
             const isNewerState = stateTimestamp >= localTime;
@@ -407,6 +412,7 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                 if (isSameDevice && isActivelyPlaying) {
                     state.isPrimarySyncLeader = true;
                 }
+                console.log('[Sync] Restoring state from server: song =', serverState.songMeta?.title, 'playing =', isActivelyPlaying, 'differentDevice =', isDifferentDevicePlaying);
                 applySavedPlaybackState(serverState, isActivelyPlaying, isActivelyPlaying && !isSameDevice);
                 localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(serverState));
             }
@@ -491,8 +497,10 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
     function handleRemotePlaybackSync(remoteState) {
         if (!remoteState || !remoteState.songMeta) return;
         if (remoteState.deviceId && remoteState.deviceId === CLIENT_DEVICE_ID) {
+            console.log('[Sync] Remote event ignored: same deviceId (' + CLIENT_DEVICE_ID + ')');
             return;
         }
+        console.log('[Sync] Remote state received from another device:', remoteState.deviceId, 'song:', remoteState.songMeta?.title, 'isPlaying:', remoteState.isPlaying);
         applySavedPlaybackState(remoteState, remoteState.isPlaying, true);
         try {
             localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(remoteState));

@@ -157,7 +157,12 @@ def save_playback_state_route():
     save_user_playback_state(db_path, current_user.id, validated)
     sio = getattr(current_app, 'socketio', None)
     if sio:
-        sio.emit('playback_sync', validated, room=f'user_{current_user.id}')
+        room = f'user_{current_user.id}'
+        current_app.logger.info(
+            'Emitting playback_sync to room %s: songId=%s, isPlaying=%s, deviceId=%s',
+            room, validated.get('songId'), validated.get('isPlaying'), validated.get('deviceId')
+        )
+        sio.emit('playback_sync', validated, room=room)
     return jsonify({'status': 'success'})
 
 

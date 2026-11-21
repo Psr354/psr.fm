@@ -289,13 +289,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function connectRealtime() {
         if (!navigator.onLine) return;
-        // Jika sudah ada socket yang masih connected, tidak perlu buat baru.
-        if (liveSocket && liveSocket.connected) return;
-        // Jika ada socket yang disconnected/failed, hapus dulu agar bisa reconnect.
-        if (liveSocket && !liveSocket.connected) {
-            try { liveSocket.disconnect(); } catch (_) {}
-            liveSocket = null;
+        if (liveSocket) {
+            if (liveSocket.connected) return;
+            // Jika sudah ada instance socket tapi tidak connected dan tidak aktif mencoba reconnect, coba panggil connect()
+            if (!liveSocket.active) {
+                try { liveSocket.connect(); } catch (_) {}
+            }
+            return;
         }
+
         const attach = () => {
             if (liveSocket || typeof window.io !== 'function') return;
             try {
@@ -306,22 +308,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     reconnectionDelayMax: 10000,
                     timeout: 10000,
                 });
-                pendingSocketHandlers.forEach(([eventName, handler]) => liveSocket.on(eventName, handler));
+                window.liveSocket = liveSocket;
+
+                liveSocket.on('connect', () => {
+                    console.log('[Socket] Connected successfully. Socket ID:', liveSocket.id);
+                });
                 liveSocket.on('disconnect', (reason) => {
-                    // Jika disconnect bukan karena user logout/server kill,
-                    // socket.io akan auto-reconnect. Tapi jika 'io server disconnect',
-                    // kita perlu reconnect manual.
+                    console.warn('[Socket] Disconnected:', reason);
                     if (reason === 'io server disconnect') {
                         liveSocket.connect();
                     }
                 });
-                liveSocket.on('connect_error', () => {
-                    // Jika error connect, biarkan auto-reconnect berjalan.
-                    // Tidak reset liveSocket agar pendingHandlers tetap terdaftar.
+                liveSocket.on('connect_error', (err) => {
+                    console.warn('[Socket] Connection error:', err?.message || err);
                 });
+
+                pendingSocketHandlers.forEach(([eventName, handler]) => liveSocket.on(eventName, handler));
             } catch (err) {
-                console.warn('Realtime connection failed:', err);
+                console.warn('[Socket] Initialization failed:', err);
                 liveSocket = null;
+                window.liveSocket = null;
             }
         };
         if (typeof window.io === 'function') return attach();
@@ -1235,6 +1241,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // CROSS-DEVICE PLAYBACK SYNC (Socket.IO)
     // ==========================================
     socket.on('playback_sync', (remoteState) => {
+        console.log('[Socket] playback_sync event received:', remoteState);
         handleRemotePlaybackSync(remoteState);
     });
 

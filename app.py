@@ -202,8 +202,17 @@ def unauthorized():
 @socketio.on('connect')
 def on_socket_connect():
     if not current_user.is_authenticated:
+        app.logger.warning('Socket.IO connection rejected: unauthenticated (sid=%s)', getattr(request, 'sid', None))
         return False
-    join_room(f'user_{current_user.id}')
+    room = f'user_{current_user.id}'
+    join_room(room)
+    app.logger.info('Socket.IO connected: sid=%s, user=%s (room=%s)', getattr(request, 'sid', None), current_user.username, room)
+
+
+@socketio.on('disconnect')
+def on_socket_disconnect():
+    user_desc = current_user.username if current_user.is_authenticated else 'anonymous'
+    app.logger.info('Socket.IO disconnected: sid=%s, user=%s', getattr(request, 'sid', None), user_desc)
 
 
 @app.teardown_appcontext
