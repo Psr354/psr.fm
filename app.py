@@ -1,4 +1,6 @@
+import math
 import os
+import time
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, send_from_directory, render_template, redirect, url_for
 from flask_login import LoginManager, login_required, current_user
@@ -213,6 +215,60 @@ def on_socket_connect():
 def on_socket_disconnect():
     user_desc = current_user.username if current_user.is_authenticated else 'anonymous'
     app.logger.info('Socket.IO disconnected: sid=%s, user=%s', getattr(request, 'sid', None), user_desc)
+
+
+@socketio.on('time_sync')
+def on_socket_time_sync(data):
+    t0 = data.get('t0') if isinstance(data, dict) else None
+    return {'t0': t0, 'server_time': int(time.time() * 1000)}
+
+
+@socketio.on('volume_sync')
+def on_socket_volume_sync(data):
+    if not current_user.is_authenticated or not isinstance(data, dict):
+        return {'status': 'error'}
+    vol = data.get('volume')
+    is_muted = bool(data.get('isMuted', False))
+    device_id = data.get('deviceId')
+    if vol is not None and isinstance(vol, (int, float)) and math.isfinite(vol):
+        vol = max(0.0, min(1.0, float(vol)))
+        room = f'user_{current_user.id}'
+        socketio.emit('volume_sync', {
+            'volume': vol,
+            'isMuted': is_muted,
+            'deviceId': device_id
+        }, room=room, include_self=False)
+        try:
+            from services.database import get_user_playback_state, save_user_playback_state
+            st = get_user_playback_state(DATABASE_PATH, current_user.id)
+            if st and isinstance(st, dict):
+                st['volume'] = vol
+                st['isMuted'] = is_muted
+                save_user_playback_state(DATABASE_PATH, current_user.id, st)
+        except Exception as e:
+            app.logger.warning('Failed to persist volume sync: %s', e)
+        return {'status': 'success'}
+    return {'status': 'error'}
+
+
+@socketio.on('playback_state_sync')
+def on_playback_state_sync(data):
+    if not current_user.is_authenticated or not isinstance(data, dict):
+        return {'status': 'error', 'message': 'Unauthorized'}
+    from routes.user_settings import _validate_playback_payload
+    from services.database import save_user_playback_state
+    validated, error = _validate_playback_payload(data)
+    if error:
+        return {'status': 'error', 'message': error}
+    server_time = int(time.time() * 1000)
+    validated['server_time'] = server_time
+    room = f'user_{current_user.id}'
+    socketio.emit('playback_sync', validated, room=room, include_self=False)
+    try:
+        save_user_playback_state(DATABASE_PATH, current_user.id, validated)
+    except Exception as e:
+        app.logger.warning('Failed to persist playback state from socket: %s', e)
+    return {'status': 'success', 'server_time': server_time}
 
 
 @app.teardown_appcontext

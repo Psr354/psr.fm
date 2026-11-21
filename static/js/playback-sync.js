@@ -113,14 +113,14 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             return;
         }
         const now = Date.now();
-        if (!immediate && now - lastServerSyncTime < 3500) {
+        if (!immediate && now - lastServerSyncTime < 1800) {
             if (!serverSyncTimer) {
                 serverSyncTimer = setTimeout(() => {
                     serverSyncTimer = null;
                     if (state.isPrimarySyncLeader && cachedPlaybackPayload) {
                         syncPlaybackToServer(cachedPlaybackPayload, true);
                     }
-                }, 3500);
+                }, 1800);
             }
             return;
         }
@@ -130,14 +130,24 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         }
         lastServerSyncTime = now;
 
-        try {
-            fetch('/api/playback-state', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-                keepalive: true
-            }).catch(() => {});
-        } catch (_) {}
+        let socketSent = false;
+        if (window.liveSocket && window.liveSocket.connected) {
+            try {
+                window.liveSocket.emit('playback_state_sync', payload);
+                socketSent = true;
+            } catch (_) {}
+        }
+
+        if (!socketSent || immediate) {
+            try {
+                fetch('/api/playback-state', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                    keepalive: true
+                }).catch(() => {});
+            } catch (_) {}
+        }
     }
 
     function savePlaybackState(force = false, isUserAction = false) {
@@ -232,7 +242,14 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
     }
 
     function applySavedPlaybackState(saved, startPlaying = false, isRemoteSync = false) {
-        if (!saved || !saved.songMeta) return;
+        if (!saved) return;
+        if (saved.syncAction === 'volume') {
+            if (typeof saved.volume === 'number') {
+                setAppVolume(saved.volume, Boolean(saved.isMuted), false);
+            }
+            return;
+        }
+        if (!saved.songMeta) return;
 
         if (state.followerTrackEndTimer) {
             clearTimeout(state.followerTrackEndTimer);
@@ -252,23 +269,28 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
 
         const now = Date.now();
         let transitMs = 0;
+        const currentClockOffset = typeof window.serverClockOffset === 'number' ? window.serverClockOffset : serverClockOffset;
         if (typeof saved.server_time === 'number') {
-            const estimatedServerNow = now + serverClockOffset;
-            transitMs = Math.max(0, estimatedServerNow - saved.server_time);
+            const estimatedServerNow = now + currentClockOffset;
+            transitMs = estimatedServerNow - saved.server_time;
         } else if (typeof saved.timestamp === 'number') {
-            transitMs = Math.max(0, now - saved.timestamp);
+            transitMs = now - saved.timestamp;
         }
-        const latencySec = Math.min(1.5, transitMs / 1000);
+        const transitSec = Math.max(0.01, Math.min(0.10, transitMs / 1000));
 
         const shouldPlay = Boolean(startPlaying !== false && (startPlaying === true || saved.isPlaying));
-        const targetTime = Math.max(
-            0,
-            (typeof saved.currentTime === 'number' ? saved.currentTime : 0) + (shouldPlay ? latencySec : 0)
-        );
+        const rawCurrentTime = typeof saved.currentTime === 'number' ? saved.currentTime : 0;
+        const targetTime = rawCurrentTime < 1.0 ? 0 : Math.max(0, rawCurrentTime + (shouldPlay ? transitSec : 0));
 
         const currentPlayingId = state.currentPlayingSongId;
         const targetSongId = String(saved.songId || saved.songMeta.id || '');
         const isSameSong = Boolean(currentPlayingId && targetSongId && currentPlayingId === targetSongId);
+
+        if (!isSameSong && state.currentSongMeta) {
+            if (!state.playbackHistory) state.playbackHistory = [];
+            state.playbackHistory.push(state.currentSongMeta);
+            if (state.playbackHistory.length > 50) state.playbackHistory.shift();
+        }
 
         const savedSessionId = (typeof saved.playbackSessionId === 'string' && saved.playbackSessionId.trim())
             ? saved.playbackSessionId.trim()
@@ -406,9 +428,8 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             if (isDifferentSrc || !isSameSong) {
                 try { el.audio.playbackRate = 1.0; } catch (_) {}
                 el.audio.src = audioSrc;
-                try { el.audio.load(); } catch (_) {}
 
-                if (targetTime < 0.08) {
+                if (targetTime === 0) {
                     state.isSyncSeeking = false;
                     state.lastLoggedTime = 0;
                     updateSyncedLyrics(true);
@@ -420,7 +441,6 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                         try { el.audio.currentTime = targetTime; } catch (_) {}
                         state.lastLoggedTime = el.audio.currentTime || targetTime;
                         updateSyncedLyrics(true);
-                        triggerPlayback(targetTime);
                     };
                     if (el.audio.readyState >= 1) {
                         onLoaded();
@@ -428,19 +448,23 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                         activeLoadedMetadataHandler = onLoaded;
                         el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
                     }
+                    triggerPlayback(targetTime);
                 }
             } else {
                 const currentPos = el.audio.currentTime || 0;
                 const diff = currentPos - targetTime;
                 const absDrift = Math.abs(diff);
 
-                if (absDrift > 0.25) {
+                if (absDrift > 0.5) {
                     state.isSyncSeeking = true;
                     try { el.audio.currentTime = targetTime; } catch (_) {}
                     try { el.audio.playbackRate = 1.0; } catch (_) {}
                     updateSyncedLyrics(true);
-                } else if (absDrift > 0.035 && shouldPlay && !el.audio.paused) {
-                    const rate = diff < 0 ? 1.04 : 0.96;
+                } else if (absDrift > 0.15 && shouldPlay && !el.audio.paused) {
+                    const rate = diff < 0 ? 1.05 : 0.95;
+                    try { el.audio.playbackRate = rate; } catch (_) {}
+                } else if (absDrift > 0.02 && shouldPlay && !el.audio.paused) {
+                    const rate = diff < 0 ? 1.02 : 0.98;
                     try { el.audio.playbackRate = rate; } catch (_) {}
                 } else {
                     try { el.audio.playbackRate = 1.0; } catch (_) {}
@@ -573,11 +597,18 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
     }
 
     function handleRemotePlaybackSync(remoteState) {
-        if (!remoteState || !remoteState.songMeta) return;
+        if (!remoteState) return;
         if (remoteState.deviceId && remoteState.deviceId === CLIENT_DEVICE_ID) {
             console.log('[Sync] Remote event ignored: same deviceId (' + CLIENT_DEVICE_ID + ')');
             return;
         }
+        if (remoteState.syncAction === 'volume') {
+            if (typeof remoteState.volume === 'number') {
+                setAppVolume(remoteState.volume, Boolean(remoteState.isMuted), false);
+            }
+            return;
+        }
+        if (!remoteState.songMeta) return;
         console.log('[Sync] Remote state received from another device:', remoteState.deviceId, 'song:', remoteState.songMeta?.title, 'isPlaying:', remoteState.isPlaying);
         applySavedPlaybackState(remoteState, remoteState.isPlaying, true);
         try {

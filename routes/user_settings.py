@@ -34,7 +34,7 @@ ALLOWED_PLAYBACK_KEYS = {
     'duration', 'repeatMode', 'isShuffle', 'currentTime', 'isPlaying',
     'timestamp', 'deviceId', 'volume', 'isMuted',
     'playbackSessionId', 'playEventLogged', 'pendingPlaySeconds', 'server_time',
-    'shuffleOrder',
+    'shuffleOrder', 'syncAction',
 }
 ALLOWED_SONG_META_KEYS = {'id', 'title', 'artist', 'album_art', 'filename', 'duration_seconds'}
 
@@ -131,7 +131,7 @@ def _validate_playback_payload(payload):
         if isinstance(val, bool) or val not in (0, 1, 2):
             return None, 'Invalid repeatMode'
 
-    for str_field in ('deviceId', 'playbackSessionId'):
+    for str_field in ('deviceId', 'playbackSessionId', 'syncAction'):
         if str_field in payload and payload[str_field] is not None:
             if not isinstance(payload[str_field], str) or len(payload[str_field]) > 128:
                 return None, f'Invalid {str_field}'
@@ -166,6 +166,12 @@ def save_playback_state_route():
     sio = getattr(current_app, 'socketio', None)
     if sio:
         room = f'user_{current_user.id}'
+        if validated.get('syncAction') == 'volume' and 'volume' in validated:
+            sio.emit('volume_sync', {
+                'volume': validated['volume'],
+                'isMuted': bool(validated.get('isMuted', False)),
+                'deviceId': validated.get('deviceId')
+            }, room=room)
         current_app.logger.info(
             'Emitting playback_sync to room %s: songId=%s, isPlaying=%s, deviceId=%s',
             room, validated.get('songId'), validated.get('isPlaying'), validated.get('deviceId')

@@ -356,13 +356,16 @@ window.createPlayerModule = function createPlayerModule(app) {
         }
     }
 
-    function seekAudio(position) {
+    function seekAudio(position, shouldSync = true) {
         if (!Number.isFinite(position)) return;
         flushListenLog();
         state.isPrimarySyncLeader = true;
         el.audio.currentTime = position;
         // Reset immediately: pause/timeupdate may arrive before seeked.
         state.lastLoggedTime = el.audio.currentTime;
+        if (shouldSync) {
+            savePlaybackState(true, true);
+        }
     }
 
     const seekFromPointer = (event) => {
@@ -372,14 +375,14 @@ window.createPlayerModule = function createPlayerModule(app) {
         const percent = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
         const value = percent * 100;
         el.progressBar.value = value;
-        seekAudio(percent * el.audio.duration);
+        seekAudio(percent * el.audio.duration, false);
         if (el.progressFill) el.progressFill.style.width = `${value}%`;
         if (el.currentTime) el.currentTime.innerText = formatTime(el.audio.currentTime);
     };
 
     el.progressBar?.addEventListener('input', (e) => {
         if (el.audio.duration && !isNaN(el.audio.duration)) {
-            seekAudio((e.target.value / 100) * el.audio.duration);
+            seekAudio((e.target.value / 100) * el.audio.duration, false);
             if (el.progressFill) el.progressFill.style.width = `${e.target.value}%`;
         }
     });
@@ -463,12 +466,18 @@ window.createPlayerModule = function createPlayerModule(app) {
 
         updateVolumeIcon(effective);
         if (shouldSave) {
+            if (typeof app !== 'undefined' && typeof app?.syncVolumeToServer === 'function') {
+                app.syncVolumeToServer(state.userVolume, state.userMuted);
+            } else if (typeof window !== 'undefined' && typeof window?.syncVolumeToServer === 'function') {
+                window.syncVolumeToServer(state.userVolume, state.userMuted);
+            }
+
             if (state.isPrimarySyncLeader) {
                 if (volumeLeaderSaveTimer) clearTimeout(volumeLeaderSaveTimer);
                 volumeLeaderSaveTimer = setTimeout(() => {
                     volumeLeaderSaveTimer = null;
                     if (state.isPrimarySyncLeader) savePlaybackState(true, true);
-                }, 150);
+                }, 200);
             } else {
                 savePlaybackState(false, false);
             }

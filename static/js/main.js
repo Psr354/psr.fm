@@ -252,13 +252,64 @@ document.addEventListener('DOMContentLoaded', () => {
     // must initialize immediately even when the CDN cannot be reached.
     const pendingSocketHandlers = [];
     let liveSocket = null;
+    let clockSyncInterval = null;
     const socket = {
         on(eventName, handler) {
             pendingSocketHandlers.push([eventName, handler]);
             if (liveSocket) liveSocket.on(eventName, handler);
+        },
+        emit(eventName, ...args) {
+            if (liveSocket && liveSocket.connected) {
+                liveSocket.emit(eventName, ...args);
+                return true;
+            }
+            return false;
         }
     };
     window.socket = socket;
+
+    function calibrateServerClock(socketInstance = liveSocket) {
+        if (!socketInstance || !socketInstance.connected) return;
+        const t0 = Date.now();
+        socketInstance.emit('time_sync', { t0 }, (ack) => {
+            if (!ack || typeof ack.server_time !== 'number') return;
+            const t1 = Date.now();
+            const rtt = Math.max(0, t1 - (ack.t0 || t0));
+            const offset = (ack.server_time + Math.round(rtt / 2)) - t1;
+            window.serverClockOffset = offset;
+            console.log('[Sync] Clock calibrated via WebSocket: RTT =', rtt, 'ms, offset =', offset, 'ms');
+        });
+    }
+    window.calibrateServerClock = calibrateServerClock;
+
+    let volumeDebounceTimer = null;
+    function syncVolumeToServer(vol, isMuted = false) {
+        if (volumeDebounceTimer) clearTimeout(volumeDebounceTimer);
+        volumeDebounceTimer = setTimeout(() => {
+            volumeDebounceTimer = null;
+            const payload = {
+                volume: typeof vol === 'number' ? vol : 1,
+                isMuted: Boolean(isMuted),
+                deviceId: state.deviceId
+            };
+            if (liveSocket && liveSocket.connected) {
+                liveSocket.emit('volume_sync', payload);
+            } else if (navigator.onLine) {
+                try {
+                    fetch('/api/playback-state', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            ...payload,
+                            syncAction: 'volume'
+                        }),
+                        keepalive: true
+                    }).catch(() => {});
+                } catch (_) {}
+            }
+        }, 60);
+    }
+    window.syncVolumeToServer = syncVolumeToServer;
     window.state = state;
     window.el = el;
     window.showToast = showToast;
@@ -312,7 +363,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 liveSocket.on('connect', () => {
                     console.log('[Socket] Connected successfully. Socket ID:', liveSocket.id);
+                    calibrateServerClock(liveSocket);
                 });
+                if (!clockSyncInterval) {
+                    clockSyncInterval = setInterval(() => {
+                        if (liveSocket && liveSocket.connected) {
+                            calibrateServerClock(liveSocket);
+                        }
+                    }, 30000);
+                }
                 liveSocket.on('disconnect', (reason) => {
                     console.warn('[Socket] Disconnected:', reason);
                     if (reason === 'io server disconnect') {
@@ -1063,6 +1122,8 @@ document.addEventListener('DOMContentLoaded', () => {
         updateSyncedLyrics,
         loadLyrics,
         connectRealtime,
+        syncVolumeToServer,
+        calibrateServerClock,
     };
 
     const queueMod = window.createQueueModule(app);
@@ -1243,6 +1304,14 @@ document.addEventListener('DOMContentLoaded', () => {
     socket.on('playback_sync', (remoteState) => {
         console.log('[Socket] playback_sync event received:', remoteState);
         handleRemotePlaybackSync(remoteState);
+    });
+
+    socket.on('volume_sync', (data) => {
+        if (!data || data.deviceId === state.deviceId) return;
+        console.log('[Socket] volume_sync event received:', data);
+        if (typeof data.volume === 'number') {
+            setAppVolume(data.volume, Boolean(data.isMuted), false);
+        }
     });
 
     // ==========================================
