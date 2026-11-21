@@ -276,11 +276,11 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         } else if (typeof saved.timestamp === 'number') {
             transitMs = now - saved.timestamp;
         }
-        const transitSec = Math.max(0.01, Math.min(0.10, transitMs / 1000));
+        const transitSec = (transitMs > 0 && transitMs < 5000) ? (transitMs / 1000) : 0;
 
         const shouldPlay = Boolean(startPlaying !== false && (startPlaying === true || saved.isPlaying));
         const rawCurrentTime = typeof saved.currentTime === 'number' ? saved.currentTime : 0;
-        const targetTime = rawCurrentTime < 1.0 ? 0 : Math.max(0, rawCurrentTime + (shouldPlay ? transitSec : 0));
+        const targetTime = Math.max(0, rawCurrentTime + (shouldPlay ? transitSec : 0));
 
         const currentPlayingId = state.currentPlayingSongId;
         const targetSongId = String(saved.songId || saved.songMeta.id || '');
@@ -358,15 +358,11 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             }
         }
 
-        if (typeof saved.volume === 'number') {
+        if (typeof saved.volume === 'number' && (!isRemoteSync || saved.syncAction === 'volume')) {
             const isMuted = Boolean(saved.isMuted);
-            const volumeChanged = lastAppliedRemoteVolume === null || Math.abs(saved.volume - lastAppliedRemoteVolume) > 0.01;
-            const muteChanged = lastAppliedRemoteMuted === null || isMuted !== lastAppliedRemoteMuted;
-            if (!isRemoteSync || volumeChanged || muteChanged) {
-                lastAppliedRemoteVolume = saved.volume;
-                lastAppliedRemoteMuted = isMuted;
-                setAppVolume(saved.volume, isMuted, false);
-            }
+            lastAppliedRemoteVolume = saved.volume;
+            lastAppliedRemoteMuted = isMuted;
+            setAppVolume(saved.volume, isMuted, false);
         }
 
         const shuffleBtn = document.getElementById('shuffle-btn');
@@ -428,8 +424,9 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             if (isDifferentSrc || !isSameSong) {
                 try { el.audio.playbackRate = 1.0; } catch (_) {}
                 el.audio.src = audioSrc;
+                try { el.audio.load?.(); } catch (_) {}
 
-                const startTrackPlayback = (pos) => {
+                const applyTargetPosition = (pos) => {
                     if (pos > 0) {
                         state.isSyncSeeking = true;
                         try { el.audio.currentTime = pos; } catch (_) {}
@@ -439,34 +436,65 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                         state.lastLoggedTime = 0;
                     }
                     updateSyncedLyrics(true);
-                    triggerPlayback(pos);
                 };
 
-                if (el.audio.readyState >= 1) {
-                    startTrackPlayback(targetTime);
+                if (shouldPlay) {
+                    state.shouldBePlaying = true;
+                    updatePlayPauseIcon(true);
+                    resumeEqContext();
+
+                    if (targetTime === 0) {
+                        applyTargetPosition(0);
+                        const p = el.audio.play();
+                        if (p !== undefined) {
+                            p.catch((err) => {
+                                if (err?.name === 'NotAllowedError') {
+                                    showSyncAutoplayPrompt(0, isRemoteSync);
+                                }
+                            });
+                        }
+                    } else {
+                        const onLoaded = () => {
+                            activeLoadedMetadataHandler = null;
+                            applyTargetPosition(targetTime);
+                            const p = el.audio.play();
+                            if (p !== undefined) {
+                                p.catch((err) => {
+                                    if (err?.name === 'NotAllowedError') {
+                                        showSyncAutoplayPrompt(targetTime, isRemoteSync);
+                                    }
+                                });
+                            }
+                        };
+                        if (el.audio.readyState >= 1) {
+                            onLoaded();
+                        } else {
+                            activeLoadedMetadataHandler = onLoaded;
+                            el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
+                            el.audio.play().catch(() => {});
+                        }
+                    }
                 } else {
-                    const onLoaded = () => {
-                        activeLoadedMetadataHandler = null;
-                        startTrackPlayback(targetTime);
-                    };
-                    activeLoadedMetadataHandler = onLoaded;
-                    el.audio.addEventListener('loadedmetadata', onLoaded, { once: true });
+                    state.shouldBePlaying = false;
+                    el.audio.pause();
+                    updatePlayPauseIcon(false);
+                    applyTargetPosition(targetTime);
                 }
             } else {
                 const currentPos = el.audio.currentTime || 0;
                 const diff = currentPos - targetTime;
                 const absDrift = Math.abs(diff);
 
-                if (absDrift > 0.5) {
+                if (absDrift > 0.8) {
                     state.isSyncSeeking = true;
                     try { el.audio.currentTime = targetTime; } catch (_) {}
                     state.lastLoggedTime = el.audio.currentTime || targetTime;
                     try { el.audio.playbackRate = 1.0; } catch (_) {}
                     updateSyncedLyrics(true);
-                } else if (absDrift > 0.15 && shouldPlay && !el.audio.paused) {
-                    const rate = diff < 0 ? 1.05 : 0.95;
+                } else if (absDrift > 0.25 && shouldPlay && !el.audio.paused) {
+                    const rate = diff < 0 ? 1.06 : 0.94;
                     try { el.audio.playbackRate = rate; } catch (_) {}
-                } else if (absDrift > 0.02 && shouldPlay && !el.audio.paused) {
+                } else if (absDrift > 0.05 && shouldPlay && !el.audio.paused) {
                     const rate = diff < 0 ? 1.02 : 0.98;
                     try { el.audio.playbackRate = rate; } catch (_) {}
                 } else {
@@ -559,10 +587,10 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             state.playbackRecoveryInProgress = false;
             highlightPlayingSong();
             resumePlaybackAfterBackground();
+            app.connectRealtime?.();
             if (!state.isPrimarySyncLeader) {
                 updateSyncedLyrics(true);
                 syncPlaybackStateFromServer();
-                app.connectRealtime?.();
             }
         }
     });
@@ -571,10 +599,10 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         cancelTrackTransitionRecovery();
         state.playbackRecoveryInProgress = false;
         resumePlaybackAfterBackground();
+        app.connectRealtime?.();
         if (!state.isPrimarySyncLeader) {
             updateSyncedLyrics(true);
             syncPlaybackStateFromServer();
-            app.connectRealtime?.();
         }
     });
     window.addEventListener('pagehide', () => {
