@@ -229,6 +229,7 @@ def _init_playlists_and_songs_tables(cursor):
         cursor.execute("ALTER TABLE songs ADD COLUMN file_size_bytes INTEGER DEFAULT 0")
 
     _init_songs_fts(cursor)
+    _init_tracks_table(cursor)
 
     cursor.execute('''
         SELECT id, source_url FROM songs
@@ -310,6 +311,109 @@ def _init_songs_fts(cursor):
             cursor.execute("INSERT INTO songs_fts(songs_fts) VALUES('rebuild')")
     except Exception:
         pass
+
+
+def _init_tracks_table(cursor):
+    """Initialize canonical tracks catalog table, track_id column, indexes, triggers and backfill."""
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tracks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id TEXT,
+            source_url TEXT,
+            title TEXT NOT NULL,
+            artist TEXT,
+            filename TEXT NOT NULL UNIQUE,
+            album_art TEXT,
+            duration_seconds INTEGER,
+            file_size_bytes INTEGER DEFAULT 0,
+            lyrics TEXT,
+            synced_lyrics TEXT,
+            word_synced_lyrics TEXT,
+            lyrics_status TEXT DEFAULT 'none',
+            lyrics_updated_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_filename ON tracks (filename)')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_tracks_source_id
+        ON tracks (source_id)
+        WHERE source_id IS NOT NULL AND source_id != ''
+    ''')
+
+    cursor.execute("PRAGMA table_info(songs)")
+    song_cols = [col[1] for col in cursor.fetchall()]
+    if 'track_id' not in song_cols:
+        cursor.execute("ALTER TABLE songs ADD COLUMN track_id INTEGER REFERENCES tracks (id)")
+
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_songs_track_id ON songs (track_id)")
+
+    cursor.execute('''
+        CREATE TRIGGER IF NOT EXISTS songs_ai_track AFTER INSERT ON songs
+        WHEN new.track_id IS NULL AND new.filename IS NOT NULL AND new.filename != ''
+        BEGIN
+            INSERT OR IGNORE INTO tracks (
+                source_id, source_url, title, artist, filename,
+                album_art, duration_seconds, file_size_bytes,
+                lyrics, synced_lyrics, word_synced_lyrics,
+                lyrics_status, lyrics_updated_at, created_at
+            ) VALUES (
+                new.source_id, new.source_url, new.title, new.artist, new.filename,
+                new.album_art, new.duration_seconds, COALESCE(new.file_size_bytes, 0),
+                new.lyrics, new.synced_lyrics, new.word_synced_lyrics,
+                new.lyrics_status, new.lyrics_updated_at, new.created_at
+            );
+            UPDATE songs SET track_id = (SELECT id FROM tracks WHERE filename = new.filename)
+            WHERE id = new.id;
+        END
+    ''')
+
+    cursor.execute('''
+        CREATE TRIGGER IF NOT EXISTS songs_ad_track AFTER DELETE ON songs
+        WHEN old.track_id IS NOT NULL
+        BEGIN
+            DELETE FROM tracks
+            WHERE id = old.track_id
+              AND NOT EXISTS (SELECT 1 FROM songs WHERE track_id = old.track_id);
+        END
+    ''')
+
+    cursor.execute('''
+        CREATE TRIGGER IF NOT EXISTS songs_au_track_meta AFTER UPDATE OF title, artist, file_size_bytes, album_art, duration_seconds ON songs
+        WHEN new.track_id IS NOT NULL
+        BEGIN
+            UPDATE tracks
+            SET title = CASE WHEN COALESCE(new.title, '') != '' THEN new.title ELSE tracks.title END,
+                artist = CASE WHEN COALESCE(new.artist, '') != '' THEN new.artist ELSE tracks.artist END,
+                file_size_bytes = CASE WHEN new.file_size_bytes > 0 THEN new.file_size_bytes ELSE tracks.file_size_bytes END,
+                album_art = CASE WHEN COALESCE(new.album_art, '') != '' THEN new.album_art ELSE tracks.album_art END,
+                duration_seconds = CASE WHEN new.duration_seconds > 0 THEN new.duration_seconds ELSE tracks.duration_seconds END
+            WHERE id = new.track_id;
+        END
+    ''')
+
+    cursor.execute('''
+        INSERT OR IGNORE INTO tracks (
+            source_id, source_url, title, artist, filename,
+            album_art, duration_seconds, file_size_bytes,
+            lyrics, synced_lyrics, word_synced_lyrics,
+            lyrics_status, lyrics_updated_at, created_at
+        )
+        SELECT
+            source_id, source_url, title, artist, filename,
+            album_art, duration_seconds, COALESCE(file_size_bytes, 0),
+            lyrics, synced_lyrics, word_synced_lyrics,
+            lyrics_status, lyrics_updated_at, MIN(created_at)
+        FROM songs
+        WHERE filename IS NOT NULL AND filename != ''
+        GROUP BY filename
+    ''')
+
+    cursor.execute('''
+        UPDATE songs
+        SET track_id = (SELECT id FROM tracks WHERE tracks.filename = songs.filename)
+        WHERE track_id IS NULL AND filename IS NOT NULL AND filename != ''
+    ''')
 
 
 def _table_needs_song_set_null_migration(cursor, table_name):
@@ -837,6 +941,27 @@ def update_song_lyrics(database_path, song_id, lyrics, synced_lyrics, word_synce
             ''',
             (lyrics, synced_lyrics, word_synced_lyrics, status, song_id)
         )
+        cursor.execute('SELECT track_id FROM songs WHERE id = ?', (song_id,))
+        trow = cursor.fetchone()
+        if trow and trow['track_id']:
+            track_id = trow['track_id']
+            cursor.execute(
+                '''
+                UPDATE tracks
+                SET lyrics = ?, synced_lyrics = ?, word_synced_lyrics = ?, lyrics_status = ?, lyrics_updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                ''',
+                (lyrics, synced_lyrics, word_synced_lyrics, status, track_id)
+            )
+            if status == 'found':
+                cursor.execute(
+                    '''
+                    UPDATE songs
+                    SET lyrics = ?, synced_lyrics = ?, word_synced_lyrics = ?, lyrics_status = 'found', lyrics_updated_at = CURRENT_TIMESTAMP
+                    WHERE track_id = ? AND id != ? AND lyrics_status != 'manual'
+                    ''',
+                    (lyrics, synced_lyrics, word_synced_lyrics, track_id, song_id)
+                )
         conn.commit()
         return cursor.rowcount > 0
     finally:

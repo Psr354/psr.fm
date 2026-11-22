@@ -34,12 +34,27 @@ def get_song_lyrics(song_id):
     if not song:
         return jsonify({'error': 'Not found'}), 404
 
+    lyrics = song['lyrics'] or ''
+    synced_lyrics = song['synced_lyrics'] or ''
+    word_synced_lyrics = song['word_synced_lyrics'] or ''
+    lyrics_status = song['lyrics_status'] or 'none'
+    lyrics_updated_at = song['lyrics_updated_at']
+
+    if lyrics_status != 'manual' and not (lyrics or synced_lyrics) and 'track_id' in song.keys() and song['track_id']:
+        track = db.execute('SELECT * FROM tracks WHERE id = ?', (song['track_id'],)).fetchone()
+        if track and track['lyrics_status'] == 'found' and (track['lyrics'] or track['synced_lyrics']):
+            lyrics = track['lyrics'] or ''
+            synced_lyrics = track['synced_lyrics'] or ''
+            word_synced_lyrics = track['word_synced_lyrics'] or ''
+            lyrics_status = 'found'
+            lyrics_updated_at = track['lyrics_updated_at']
+
     return jsonify({
-        'lyrics': song['lyrics'] or '',
-        'synced_lyrics': song['synced_lyrics'] or '',
-        'word_synced_lyrics': song['word_synced_lyrics'] or '',
-        'lyrics_status': song['lyrics_status'] or 'none',
-        'lyrics_updated_at': song['lyrics_updated_at'],
+        'lyrics': lyrics,
+        'synced_lyrics': synced_lyrics,
+        'word_synced_lyrics': word_synced_lyrics,
+        'lyrics_status': lyrics_status,
+        'lyrics_updated_at': lyrics_updated_at,
     })
 
 
@@ -103,6 +118,36 @@ def refresh_song_lyrics(song_id):
             current_user.id,
         )
     )
+    track_row = db.execute('SELECT track_id FROM songs WHERE id = ?', (song_id,)).fetchone()
+    if track_row and track_row['track_id']:
+        track_id = track_row['track_id']
+        db.execute(
+            '''
+            UPDATE tracks
+            SET lyrics = ?, synced_lyrics = ?, word_synced_lyrics = ?, lyrics_status = 'found', lyrics_updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            ''',
+            (
+                lyrics_data.get('lyrics', ''),
+                lyrics_data.get('synced_lyrics', ''),
+                lyrics_data.get('word_synced_lyrics', ''),
+                track_id,
+            )
+        )
+        db.execute(
+            '''
+            UPDATE songs
+            SET lyrics = ?, synced_lyrics = ?, word_synced_lyrics = ?, lyrics_status = 'found', lyrics_updated_at = CURRENT_TIMESTAMP
+            WHERE track_id = ? AND id != ? AND lyrics_status != 'manual'
+            ''',
+            (
+                lyrics_data.get('lyrics', ''),
+                lyrics_data.get('synced_lyrics', ''),
+                lyrics_data.get('word_synced_lyrics', ''),
+                track_id,
+                song_id,
+            )
+        )
     db.commit()
 
     return jsonify({

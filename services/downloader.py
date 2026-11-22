@@ -421,17 +421,24 @@ def _reuse_existing_song_by_source_id(db_path, library_dir, user_id, source_id, 
             emit_song_added(existing_song, playlist_ids)
             return True
 
-        global_candidates = conn.execute(
-            'SELECT * FROM songs WHERE source_id = ? ORDER BY id ASC',
+        global_track = conn.execute(
+            'SELECT * FROM tracks WHERE source_id = ? ORDER BY id ASC LIMIT 1',
             (source_id,),
-        ).fetchall()
-        global_song = next(
-            (
-                row for row in global_candidates
-                if row['filename'] and os.path.isfile(os.path.join(library_dir, row['filename']))
-            ),
-            None,
-        )
+        ).fetchone() if source_id else None
+        if global_track and global_track['filename'] and os.path.isfile(os.path.join(library_dir, global_track['filename'])):
+            global_song = global_track
+        else:
+            global_candidates = conn.execute(
+                'SELECT * FROM songs WHERE source_id = ? ORDER BY id ASC',
+                (source_id,),
+            ).fetchall()
+            global_song = next(
+                (
+                    row for row in global_candidates
+                    if row['filename'] and os.path.isfile(os.path.join(library_dir, row['filename']))
+                ),
+                None,
+            )
         if global_song:
             cursor = conn.cursor()
             if existing_song:
