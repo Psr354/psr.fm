@@ -12,6 +12,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const mediaUrlName = window.mediaUrlName || ((s) => s);
     const drawRoundRect = window.drawRoundRect;
     const loadCanvasImage = window.loadCanvasImage;
+    const canvasToBlob = window.canvasToBlob || function(canvas) {
+        return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    };
     const drawRoundedImage = window.drawRoundedImage;
     const drawCoverFallback = window.drawCoverFallback;
     const drawStar = window.drawStar;
@@ -1128,17 +1131,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function copyShareCapsule() {
-        if (!el.shareCapsuleCanvas || !navigator.clipboard?.write || !window.ClipboardItem) {
+        if (!el.shareCapsuleCanvas) return;
+        if (!navigator.clipboard?.write || !window.ClipboardItem) {
             await downloadShareCapsule();
             return;
         }
         await state.capsuleShareRenderPromise;
-        const blob = await canvasToBlob(el.shareCapsuleCanvas);
-        if (!blob) return showToast('Failed to create image', 'error');
         try {
+            const blob = await canvasToBlob(el.shareCapsuleCanvas);
+            if (!blob) {
+                await downloadShareCapsule();
+                return;
+            }
             await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
             showToast('Focus card copied to clipboard!', 'success');
         } catch (err) {
+            console.warn('Clipboard write failed, downloading instead:', err);
             await downloadShareCapsule();
         }
     }

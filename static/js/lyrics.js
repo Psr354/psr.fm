@@ -977,17 +977,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function copyShareLyrics() {
-        if (!el.shareLyricsCanvas || !navigator.clipboard?.write || !window.ClipboardItem) {
+        if (!el.shareLyricsCanvas) return;
+        if (!navigator.clipboard?.write || !window.ClipboardItem) {
             await downloadShareLyrics();
             return;
         }
         await state.shareRenderPromise;
-        const blob = await canvasToBlob(el.shareLyricsCanvas);
-        if (!blob) return showToast('Failed to create image', 'error');
         try {
+            const blob = await canvasToBlob(el.shareLyricsCanvas);
+            if (!blob) return showToast('Failed to create image', 'error');
             await navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
             showToast('Lyrics card copied', 'success');
         } catch (err) {
+            console.warn('Clipboard write failed, downloading instead:', err);
             await downloadShareLyrics();
         }
     }

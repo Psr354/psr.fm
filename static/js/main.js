@@ -320,6 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.showView = showView;
     window.drawRoundRect = drawRoundRect;
     window.loadCanvasImage = loadCanvasImage;
+    window.canvasToBlob = canvasToBlob;
     window.drawRoundedImage = drawRoundedImage;
     window.drawCoverFallback = drawCoverFallback;
     window.drawStar = drawStar;
@@ -660,6 +661,10 @@ document.addEventListener('DOMContentLoaded', () => {
             img.onerror = () => resolve(null);
             img.src = src;
         });
+    }
+
+    function canvasToBlob(canvas) {
+        return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
     }
 
     function drawCoverFallback(ctx, x, y, size, radius = 18) {

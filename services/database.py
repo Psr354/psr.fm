@@ -303,14 +303,17 @@ def _init_songs_fts(cursor):
         END
     ''')
     try:
-        cursor.execute("SELECT COUNT(*) FROM songs_fts")
-        fts_cnt = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM songs_fts_docsize")
+        fts_doc_cnt = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM songs")
         songs_cnt = cursor.fetchone()[0]
-        if fts_cnt != songs_cnt:
+        if fts_doc_cnt != songs_cnt:
             cursor.execute("INSERT INTO songs_fts(songs_fts) VALUES('rebuild')")
     except Exception:
-        pass
+        try:
+            cursor.execute("INSERT INTO songs_fts(songs_fts) VALUES('rebuild')")
+        except Exception:
+            pass
 
 
 def _init_tracks_table(cursor):
