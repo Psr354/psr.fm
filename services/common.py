@@ -1,4 +1,5 @@
 import io
+import logging
 import os
 import queue
 import re
@@ -13,6 +14,8 @@ from flask_login import UserMixin, current_user
 from PIL import Image
 from werkzeug.utils import secure_filename
 from services.database import get_db_connection, get_user_theme
+
+logger = logging.getLogger(__name__)
 
 AUDIO_MIME_TYPES = {
     '.mp3': 'audio/mpeg',
@@ -63,7 +66,7 @@ def _file_cleanup_worker():
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)
         except Exception as e:
-            print(f"[WARN] Failed to delete {file_path}: {e}")
+            logger.warning("Failed to delete %s: %s", file_path, e)
         finally:
             _file_cleanup_queue.task_done()
 
@@ -223,7 +226,7 @@ def cleanup_unreferenced_media(db, filenames=(), art_files=(), library_dir='', a
                 if os.path.exists(file_path):
                     os.remove(file_path)
             except Exception as exc:
-                print(f"[WARN] Failed to delete {file_path}: {exc}")
+                logger.warning("Failed to delete %s: %s", file_path, exc)
     return paths
 
 
@@ -305,15 +308,16 @@ def add_global_song_to_playlists(db, source_song, playlist_ids):
         )
         copied_status = 'found' if copy_public_lyrics else 'none'
         copied_updated_at = source_song['lyrics_updated_at'] if copy_public_lyrics else None
+        file_size_bytes = source_song['file_size_bytes'] if 'file_size_bytes' in source_song.keys() and source_song['file_size_bytes'] else 0
         try:
             cursor = db.execute(
                 '''
                 INSERT INTO songs (
                     title, artist, filename, album_art, duration_seconds,
                     source_url, source_id, lyrics, synced_lyrics, word_synced_lyrics,
-                    lyrics_status, lyrics_updated_at, user_id
+                    lyrics_status, lyrics_updated_at, user_id, file_size_bytes
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
                 (
                     source_song['title'],
@@ -329,6 +333,7 @@ def add_global_song_to_playlists(db, source_song, playlist_ids):
                     copied_status,
                     copied_updated_at,
                     current_user.id,
+                    file_size_bytes,
                 )
             )
             song_id = cursor.lastrowid

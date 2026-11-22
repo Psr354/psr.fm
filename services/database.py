@@ -1,7 +1,10 @@
+import logging
 import secrets
 import sqlite3
 from urllib.parse import parse_qs, urlparse
 from werkzeug.security import generate_password_hash
+
+logger = logging.getLogger(__name__)
 
 
 def extract_youtube_video_id(url):
@@ -129,6 +132,7 @@ def _init_playlists_and_songs_tables(cursor):
             filename TEXT NOT NULL,
             album_art TEXT,
             duration_seconds INTEGER,
+            file_size_bytes INTEGER DEFAULT 0,
             source_url TEXT,
             source_id TEXT,
             play_count INTEGER DEFAULT 0,
@@ -218,8 +222,13 @@ def _init_playlists_and_songs_tables(cursor):
             cursor.execute("UPDATE songs SET user_id = 1 WHERE user_id IS NULL")
 
     cursor.execute("PRAGMA table_info(songs)")
-    if 'word_synced_lyrics' not in [col[1] for col in cursor.fetchall()]:
+    existing_cols = [col[1] for col in cursor.fetchall()]
+    if 'word_synced_lyrics' not in existing_cols:
         cursor.execute("ALTER TABLE songs ADD COLUMN word_synced_lyrics TEXT")
+    if 'file_size_bytes' not in existing_cols:
+        cursor.execute("ALTER TABLE songs ADD COLUMN file_size_bytes INTEGER DEFAULT 0")
+
+    _init_songs_fts(cursor)
 
     cursor.execute('''
         SELECT id, source_url FROM songs
@@ -264,6 +273,43 @@ def _init_playlists_and_songs_tables(cursor):
                     'UPDATE playlist_songs SET position = ? WHERE playlist_id = ? AND song_id = ?',
                     (index, playlist_id, row['song_id'])
                 )
+
+
+def _init_songs_fts(cursor):
+    """Initialize SQLite FTS5 table and sync triggers for fast full-text song searches."""
+    cursor.execute('''
+        CREATE VIRTUAL TABLE IF NOT EXISTS songs_fts USING fts5(
+            title,
+            artist,
+            content='songs',
+            content_rowid='id'
+        )
+    ''')
+    cursor.execute('''
+        CREATE TRIGGER IF NOT EXISTS songs_ai AFTER INSERT ON songs BEGIN
+            INSERT INTO songs_fts(rowid, title, artist) VALUES (new.id, new.title, new.artist);
+        END
+    ''')
+    cursor.execute('''
+        CREATE TRIGGER IF NOT EXISTS songs_ad AFTER DELETE ON songs BEGIN
+            INSERT INTO songs_fts(songs_fts, rowid, title, artist) VALUES('delete', old.id, old.title, old.artist);
+        END
+    ''')
+    cursor.execute('''
+        CREATE TRIGGER IF NOT EXISTS songs_au AFTER UPDATE OF title, artist ON songs BEGIN
+            INSERT INTO songs_fts(songs_fts, rowid, title, artist) VALUES('delete', old.id, old.title, old.artist);
+            INSERT INTO songs_fts(rowid, title, artist) VALUES (new.id, new.title, new.artist);
+        END
+    ''')
+    try:
+        cursor.execute("SELECT COUNT(*) FROM songs_fts")
+        fts_cnt = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM songs")
+        songs_cnt = cursor.fetchone()[0]
+        if fts_cnt != songs_cnt:
+            cursor.execute("INSERT INTO songs_fts(songs_fts) VALUES('rebuild')")
+    except Exception:
+        pass
 
 
 def _table_needs_song_set_null_migration(cursor, table_name):
@@ -648,7 +694,7 @@ def delete_user_cascade(database_path, user_id):
         return 'deleted'
     except Exception as e:
         conn.rollback()
-        print(f"[ERROR] delete_user_cascade: {e}")
+        logger.error("delete_user_cascade: %s", e)
         return 'error'
     finally:
         conn.close()
@@ -868,3 +914,19 @@ def save_user_theme(database_path, user_id, theme_dict):
         return True
     finally:
         conn.close()
+
+
+def run_database_maintenance(db_path):
+    """Run periodic WAL checkpointing and query optimization."""
+    if not db_path:
+        return
+    conn = None
+    try:
+        conn = get_db_connection(db_path)
+        conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        conn.execute("PRAGMA optimize")
+    except Exception as e:
+        logger.warning("Database maintenance failed: %s", e)
+    finally:
+        if conn is not None:
+            conn.close()

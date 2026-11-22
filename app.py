@@ -101,13 +101,15 @@ login_manager.login_message = None
 
 def _parse_socketio_origins(raw_value):
     cleaned = (raw_value or '').strip()
-    if not cleaned or cleaned == '*':
+    if not cleaned:
+        return None
+    if cleaned == '*':
         return '*'
     origins = [origin.strip() for origin in cleaned.split(',') if origin.strip()]
-    return origins or '*'
+    return origins or None
 
 
-socketio_origins = _parse_socketio_origins(os.environ.get('PSR_FM_SOCKETIO_ORIGINS', ''))
+socketio_origins = _parse_socketio_origins(os.environ.get('PSR_FM_SOCKETIO_ORIGINS', '')) or '*'
 socketio = SocketIO(app, cors_allowed_origins=socketio_origins, async_mode='threading')
 app.socketio = socketio
 
@@ -293,15 +295,22 @@ def close_connection(exception):
         db.close()
 
 
+_asset_version_cache = {}
+
+
 def get_asset_version(filename):
     """Generate cache-busting version based on file modification timestamp."""
+    cached = _asset_version_cache.get(filename)
+    if cached is not None:
+        return cached
     static_folder = app.static_folder or os.path.join(BASE_DIR, 'static')
     filepath = os.path.join(static_folder, filename)
     try:
-        mtime = int(os.path.getmtime(filepath))
-        return str(mtime)
+        mtime = str(int(os.path.getmtime(filepath)))
     except OSError:
-        return '1'
+        mtime = '1'
+    _asset_version_cache[filename] = mtime
+    return mtime
 
 
 @app.context_processor
@@ -313,8 +322,15 @@ def inject_asset_version():
 def healthz():
     try:
         get_db().execute('SELECT 1').fetchone()
-        return jsonify({'status': 'ok'}), 200
-    except Exception:
+        payload = {'status': 'ok', 'database': 'ok'}
+        download_dir = app.config.get('DOWNLOAD_DIR') or DOWNLOAD_DIR
+        if download_dir and os.path.exists(download_dir):
+            import shutil
+            usage = shutil.disk_usage(download_dir)
+            payload['disk'] = {'free_bytes': usage.free, 'total_bytes': usage.total}
+        return jsonify(payload), 200
+    except Exception as e:
+        app.logger.warning('Health check failed: %s', e)
         return jsonify({'status': 'error'}), 503
 
 

@@ -383,7 +383,7 @@ def _populate_song_lyrics(db_path, song_id, title, artist, duration_seconds):
                 status='not_found',
             )
     except Exception as exc:
-        print(f"[WARN] lyrics lookup failed for {song_id}: {exc}")
+        logger.warning("lyrics lookup failed for %s: %s", song_id, exc)
 
 
 def _dispatch_lyrics_lookup(db_path, song_id, title, artist, duration_seconds):
@@ -470,13 +470,15 @@ def _reuse_existing_song_by_source_id(db_path, library_dir, user_id, source_id, 
             )
             copied_status = 'found' if copy_public_lyrics else 'none'
             copied_updated_at = global_song['lyrics_updated_at'] if copy_public_lyrics else None
+            file_size_bytes = global_song['file_size_bytes'] if 'file_size_bytes' in global_song.keys() and global_song['file_size_bytes'] else 0
             cursor.execute(
                 '''
                 INSERT INTO songs (
                     title, artist, filename, album_art, duration_seconds, source_url, source_id,
-                    lyrics, synced_lyrics, word_synced_lyrics, lyrics_status, lyrics_updated_at, user_id
+                    lyrics, synced_lyrics, word_synced_lyrics, lyrics_status, lyrics_updated_at, user_id,
+                    file_size_bytes
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
                 (
                     global_song['title'],
@@ -492,6 +494,7 @@ def _reuse_existing_song_by_source_id(db_path, library_dir, user_id, source_id, 
                     copied_status,
                     copied_updated_at,
                     user_id,
+                    file_size_bytes,
                 ),
             )
             cloned_id = cursor.lastrowid
@@ -631,6 +634,14 @@ def process_download(task, db_path, download_dir, album_art_dir):
                 (user_id, source_id),
             ).fetchone()
 
+        file_size_bytes = 0
+        audio_full_path = os.path.join(library_dir, expected_file)
+        if os.path.exists(audio_full_path):
+            try:
+                file_size_bytes = os.path.getsize(audio_full_path)
+            except OSError:
+                file_size_bytes = 0
+
         cursor = conn.cursor()
         if existing_song:
             song_id = existing_song['id']
@@ -642,18 +653,19 @@ def process_download(task, db_path, download_dir, album_art_dir):
                     UPDATE songs
                     SET filename = ?,
                         album_art = COALESCE(NULLIF(album_art, ''), ?),
-                        duration_seconds = ?
+                        duration_seconds = ?,
+                        file_size_bytes = ?
                     WHERE id = ? AND user_id = ?
                     ''',
-                    (expected_file, album_art_filename, duration_seconds, song_id, user_id),
+                    (expected_file, album_art_filename, duration_seconds, file_size_bytes, song_id, user_id),
                 )
         else:
             cursor.execute(
                 '''
-                INSERT INTO songs (title, artist, filename, album_art, duration_seconds, source_url, source_id, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO songs (title, artist, filename, album_art, duration_seconds, source_url, source_id, user_id, file_size_bytes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
-                (title, artist, expected_file, album_art_filename, duration_seconds, source_url, source_id, user_id)
+                (title, artist, expected_file, album_art_filename, duration_seconds, source_url, source_id, user_id, file_size_bytes)
             )
             song_id = cursor.lastrowid
 

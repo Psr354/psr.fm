@@ -178,20 +178,58 @@ def _get_user_storage_used(db, user_id, library_dir, album_art_dir, ttl_seconds=
 
     total_size = 0
     if library_dir and os.path.exists(library_dir):
-        song_files = {
-            row['filename']
-            for row in db.execute(
-                "SELECT DISTINCT filename FROM songs WHERE user_id = ? AND filename IS NOT NULL AND filename != ''",
+        try:
+            row = db.execute(
+                """
+                SELECT COALESCE(SUM(file_size_bytes), 0) AS total,
+                       COUNT(CASE WHEN file_size_bytes = 0 OR file_size_bytes IS NULL THEN 1 END) AS missing_count
+                FROM (
+                    SELECT DISTINCT filename, file_size_bytes
+                    FROM songs
+                    WHERE user_id = ? AND filename IS NOT NULL AND filename != ''
+                )
+                """,
                 (user_id,),
-            ).fetchall()
-        }
-        for fname in song_files:
-            safe_name = secure_filename(fname)
-            if not safe_name:
-                continue
-            fpath = os.path.join(library_dir, safe_name)
-            if os.path.isfile(fpath):
-                total_size += os.path.getsize(fpath)
+            ).fetchone()
+            if row and row['missing_count'] == 0 and row['total'] > 0:
+                total_size += row['total']
+            else:
+                song_files = db.execute(
+                    "SELECT DISTINCT filename, file_size_bytes FROM songs WHERE user_id = ? AND filename IS NOT NULL AND filename != ''",
+                    (user_id,),
+                ).fetchall()
+                for srow in song_files:
+                    safe_name = secure_filename(srow['filename'])
+                    if not safe_name:
+                        continue
+                    sz = srow['file_size_bytes'] if 'file_size_bytes' in srow.keys() and srow['file_size_bytes'] else 0
+                    if sz > 0:
+                        total_size += sz
+                    else:
+                        fpath = os.path.join(library_dir, safe_name)
+                        if os.path.isfile(fpath):
+                            fsz = os.path.getsize(fpath)
+                            total_size += fsz
+                            try:
+                                db.execute("UPDATE songs SET file_size_bytes = ? WHERE filename = ?", (fsz, srow['filename']))
+                                db.commit()
+                            except Exception:
+                                pass
+        except Exception:
+            song_files = {
+                row['filename']
+                for row in db.execute(
+                    "SELECT DISTINCT filename FROM songs WHERE user_id = ? AND filename IS NOT NULL AND filename != ''",
+                    (user_id,),
+                ).fetchall()
+            }
+            for fname in song_files:
+                safe_name = secure_filename(fname)
+                if not safe_name:
+                    continue
+                fpath = os.path.join(library_dir, safe_name)
+                if os.path.isfile(fpath):
+                    total_size += os.path.getsize(fpath)
 
     if album_art_dir and os.path.exists(album_art_dir):
         art_files = {

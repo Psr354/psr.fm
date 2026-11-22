@@ -45,18 +45,50 @@ def _user_storage_quota_bytes():
 def _calculate_user_audio_usage_bytes(db, user_id, library_dir):
     if not library_dir or not os.path.exists(library_dir):
         return 0
+    try:
+        row = db.execute(
+            """
+            SELECT COALESCE(SUM(file_size_bytes), 0) AS total,
+                   COUNT(CASE WHEN file_size_bytes = 0 OR file_size_bytes IS NULL THEN 1 END) AS missing_count
+            FROM (
+                SELECT DISTINCT filename, file_size_bytes
+                FROM songs
+                WHERE user_id = ? AND filename IS NOT NULL AND filename != ''
+            )
+            """,
+            (user_id,),
+        ).fetchone()
+        if row and row['missing_count'] == 0 and row['total'] > 0:
+            return row['total']
+    except Exception:
+        pass
+
     total = 0
     rows = db.execute(
-        "SELECT DISTINCT filename FROM songs WHERE user_id = ? AND filename IS NOT NULL AND filename != ''",
+        "SELECT DISTINCT filename, file_size_bytes FROM songs WHERE user_id = ? AND filename IS NOT NULL AND filename != ''",
         (user_id,),
     ).fetchall()
+    to_update = []
     for row in rows:
         safe_name = secure_filename(row['filename'])
         if not safe_name:
             continue
-        fpath = os.path.join(library_dir, safe_name)
-        if os.path.isfile(fpath):
-            total += os.path.getsize(fpath)
+        sz = row['file_size_bytes'] if 'file_size_bytes' in row.keys() and row['file_size_bytes'] else 0
+        if sz > 0:
+            total += sz
+        else:
+            fpath = os.path.join(library_dir, safe_name)
+            if os.path.isfile(fpath):
+                file_sz = os.path.getsize(fpath)
+                total += file_sz
+                to_update.append((file_sz, row['filename']))
+    if to_update:
+        try:
+            for file_sz, fname in to_update:
+                db.execute("UPDATE songs SET file_size_bytes = ? WHERE filename = ?", (file_sz, fname))
+            db.commit()
+        except Exception:
+            pass
     return total
 
 
@@ -269,11 +301,12 @@ def upload_song():
             '''
             INSERT INTO songs (
                 title, artist, filename, album_art, duration_seconds,
-                source_url, source_id, lyrics, synced_lyrics, lyrics_status, lyrics_updated_at, user_id
+                source_url, source_id, lyrics, synced_lyrics, lyrics_status, lyrics_updated_at, user_id,
+                file_size_bytes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
-            (title, artist, unique_filename, album_art_filename, duration, None, None, '', '', 'none', None, current_user.id)
+            (title, artist, unique_filename, album_art_filename, duration, None, None, '', '', 'none', None, current_user.id, file_size)
         )
         song_id = cursor.lastrowid
 
@@ -747,8 +780,24 @@ def search_songs():
     if not 1 <= limit <= 500 or offset < 0:
         return jsonify({'error': 'limit must be between 1 and 500 and offset cannot be negative'}), 400
     db = get_db()
-    search_param = f"%{query}%"
     cursor = db.cursor()
+
+    tokens = re.findall(r'\w+', query, re.UNICODE)
+    if tokens:
+        fts_query = ' '.join(f'"{t}"*' for t in tokens)
+        try:
+            cursor.execute(f'''
+                SELECT {SONG_LIST_COLUMNS_ALIASED} FROM songs s
+                JOIN songs_fts f ON s.id = f.rowid
+                WHERE s.user_id = ? AND songs_fts MATCH ?
+                ORDER BY s.created_at DESC
+                LIMIT ? OFFSET ?
+            ''', (current_user.id, fts_query, limit, offset))
+            return jsonify([dict(row) for row in cursor.fetchall()])
+        except sqlite3.OperationalError:
+            pass
+
+    search_param = f"%{query}%"
     cursor.execute(f'''
         SELECT {SONG_LIST_COLUMNS} FROM songs
         WHERE user_id = ? AND (title LIKE ? OR artist LIKE ?)
