@@ -111,6 +111,7 @@ def _init_playlists_and_songs_tables(cursor):
             folder_name TEXT NOT NULL,
             cover_art TEXT DEFAULT '',
             user_id INTEGER NOT NULL DEFAULT 1,
+            position INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
         )
@@ -123,6 +124,16 @@ def _init_playlists_and_songs_tables(cursor):
     if 'user_id' not in playlist_cols:
         cursor.execute("ALTER TABLE playlists ADD COLUMN user_id INTEGER DEFAULT 1")
         cursor.execute("UPDATE playlists SET user_id = 1 WHERE user_id IS NULL")
+    if 'position' not in playlist_cols:
+        cursor.execute("ALTER TABLE playlists ADD COLUMN position INTEGER DEFAULT 0")
+        user_rows = cursor.execute("SELECT DISTINCT user_id FROM playlists").fetchall()
+        for user_row in user_rows:
+            pl_rows = cursor.execute(
+                "SELECT id FROM playlists WHERE user_id = ? ORDER BY created_at DESC, id DESC",
+                (user_row[0],),
+            ).fetchall()
+            for idx, pl_row in enumerate(pl_rows):
+                cursor.execute("UPDATE playlists SET position = ? WHERE id = ?", (idx, pl_row[0]))
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS songs (

@@ -53,7 +53,7 @@
                     </button>
                     <div id="music-tools-menu" class="nav-dropdown-menu" hidden>
                         <button id="library-btn" class="nav-item nav-dropdown-item"><i class="fas fa-record-vinyl"></i> Library Songs</button>
-                        <button id="global-download-btn" class="nav-item nav-dropdown-item"><i class="fas fa-download"></i> Download Song</button>
+                        <button id="import-playlist-btn" class="nav-item nav-dropdown-item"><i class="fas fa-file-import"></i> Import Playlist</button>
                         <button id="upload-song-btn" class="nav-item nav-dropdown-item"><i class="fas fa-cloud-upload-alt"></i> Upload Song</button>
                     </div>
                 </div>
@@ -373,6 +373,20 @@
             <p class="field-hint">Add to playlists:</p>
             <div id="playlist-checkboxes" class="checkbox-list"></div>
             <div class="modal-actions"><button id="cancel-global-download-btn" class="btn-secondary">Cancel</button><button id="save-global-download-btn" class="btn-primary">Download</button></div>
+        </div>
+    </div>
+
+    <div id="import-playlist-modal" class="modal">
+        <div class="modal-content">
+            <h3>Import Playlist</h3>
+            <p class="field-hint">Paste a public Spotify or YouTube / YouTube Music playlist URL (up to 100 tracks).</p>
+            <input type="text" id="import-playlist-url-input" placeholder="https://open.spotify.com/playlist/... or https://music.youtube.com/playlist?list=...">
+            <p class="field-hint">Target playlist:</p>
+            <select id="import-playlist-target-select" class="modal-select">
+                <option value="">Create new playlist automatically</option>
+            </select>
+            <input type="text" id="import-playlist-name-input" placeholder="Custom new playlist name (optional)">
+            <div class="modal-actions"><button id="cancel-import-playlist-btn" class="btn-secondary">Cancel</button><button id="submit-import-playlist-btn" class="btn-primary">Import</button></div>
         </div>
     </div>
 

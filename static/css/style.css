@@ -51,6 +51,7 @@ button { touch-action: manipulation; }
 .playlist-item:hover { color: var(--text-primary); background: var(--bg-highlight); }
 .playlist-item:active { color: var(--text-primary); background: rgba(var(--accent-rgb), 0.12); }
 .playlist-item.active { color: var(--text-primary); background: var(--bg-highlight); font-weight: 600; }
+.playlist-item.dragging { opacity: 0.45; background: rgba(var(--accent-rgb), 0.16); }
 .playlist-item img { width: 28px; height: 28px; border-radius: 4px; object-fit: cover; background: #333; }
 .add-user-btn, .logout-btn { border: 1px solid var(--border-subtle); padding: 12px; border-radius: 8px; font-size: 14px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s; }
 .add-user-btn { margin-top: auto; margin-bottom: 12px; background: rgba(var(--accent-rgb), 0.1); color: var(--accent-color); border-color: rgba(var(--accent-rgb), 0.22); }
@@ -774,8 +775,8 @@ button { touch-action: manipulation; }
 
 .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(5px); z-index: 900; align-items: center; justify-content: center; padding: 20px; }
 .modal-content { background: #181818; padding: 32px; border-radius: 8px; width: 400px; max-height: calc(100dvh - 40px); overflow-y: auto; display: flex; flex-direction: column; gap: 22px; border: 1px solid var(--border-subtle); box-shadow: 0 24px 48px rgba(0,0,0,0.5); }
-.modal-content input { padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 6px; color: var(--text-primary); font-size: 15px; }
-.modal-content input:focus { outline: none; border-color: var(--accent-color); }
+.modal-content input, .modal-content select { padding: 14px; background: #0a0a0a; border: 1px solid #333; border-radius: 6px; color: var(--text-primary); font-size: 15px; width: 100%; }
+.modal-content input:focus, .modal-content select:focus { outline: none; border-color: var(--accent-color); }
 .modal-actions { display: flex; justify-content: flex-end; gap: 12px; }
 .form-group { display: flex; flex-direction: column; gap: 8px; }
 .form-group label, .field-hint { font-size: 13px; color: var(--text-secondary); font-weight: 600; }

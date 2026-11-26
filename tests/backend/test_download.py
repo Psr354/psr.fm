@@ -874,6 +874,73 @@ class DownloadAndLibraryTests(PsrFmTestCase):
         self.assertEqual(sum(len(body['playlist_ids']) for _, body in results2), 1)
         self.assertEqual(sum(len(body['skipped_playlist_ids']) for _, body in results2), 3)
 
+    def test_import_playlist_validates_urls_and_queues_or_reuses_tracks(self):
+        from services.downloader import validate_playlist_url
+
+        self.assertTrue(validate_playlist_url('https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M')[0])
+        self.assertTrue(validate_playlist_url('https://music.youtube.com/playlist?list=PL1234567890abcdef')[0])
+        self.assertFalse(validate_playlist_url('https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT')[0])
+        self.assertFalse(validate_playlist_url('https://example.com/playlist?list=123')[0])
+
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+
+        existing_file = os.path.join(self.app_module.LIBRARY_DIR, 'reused-import.mp3')
+        with open(existing_file, 'wb') as f:
+            f.write(b'ID3-existing')
+        self._create_song(
+            user_id=2,
+            title='Existing Track',
+            artist='Existing Artist',
+            filename='reused-import.mp3',
+            source_url='https://open.spotify.com/track/existing123',
+            source_id='spotify:existing123',
+        )
+
+        # Drain any queued jobs
+        while not self.app_module.download_queue.empty():
+            self.app_module.download_queue.get_nowait()
+
+        extracted_payload = {
+            'title': 'My Imported Mix',
+            'provider': 'spotify',
+            'tracks': [
+                {
+                    'url': 'https://open.spotify.com/track/existing123',
+                    'source_id': 'spotify:existing123',
+                    'title': 'Existing Track',
+                    'artist': 'Existing Artist',
+                },
+                {
+                    'url': 'https://open.spotify.com/track/newtrack456',
+                    'source_id': 'spotify:newtrack456',
+                    'title': 'New Track',
+                    'artist': 'New Artist',
+                },
+            ],
+        }
+        with patch('routes.songs.extract_playlist_tracks', return_value=extracted_payload):
+            import_res = client.post(
+                '/api/import-playlist',
+                headers={'X-CSRF-Token': csrf},
+                json={'url': 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M'},
+            )
+        self.assertEqual(import_res.status_code, 200)
+        body = import_res.get_json()
+        self.assertTrue(body['created_playlist'])
+        self.assertEqual(body['playlist_name'], 'My Imported Mix')
+        self.assertEqual(body['total_tracks'], 2)
+        self.assertEqual(body['reused_count'], 1)
+        self.assertEqual(body['queued_count'], 1)
+
+        # Queued job targets the newly created playlist
+        queued_job = self.app_module.download_queue.get_nowait()
+        self.assertEqual(queued_job['url'], 'https://open.spotify.com/track/newtrack456')
+        self.assertEqual(queued_job['playlist_ids'], [body['playlist_id']])
+
 
 if __name__ == '__main__':
     unittest.main()

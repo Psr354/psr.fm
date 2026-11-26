@@ -410,6 +410,40 @@ class PlaylistTests(PsrFmTestCase):
         self.assertEqual(res.status_code, 500)
         self.assertTrue(os.path.exists(old_path), 'Old cover must remain intact when DB commit fails')
 
+    def test_playlists_can_be_reordered(self):
+        client = self.app_module.app.test_client()
+        setup_response = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin',
+            'password': 'secret123',
+        })
+        csrf = self._csrf_token_from_response(setup_response)
+
+        p1 = client.post('/api/playlists', headers={'X-CSRF-Token': csrf}, json={'name': 'First'}).get_json()['id']
+        p2 = client.post('/api/playlists', headers={'X-CSRF-Token': csrf}, json={'name': 'Second'}).get_json()['id']
+        p3 = client.post('/api/playlists', headers={'X-CSRF-Token': csrf}, json={'name': 'Third'}).get_json()['id']
+
+        # Newly created playlists appear at the top (Third, Second, First)
+        initial_ids = [p['id'] for p in client.get('/api/playlists').get_json()]
+        self.assertEqual(initial_ids, [p3, p2, p1])
+
+        # Reorder to First, Third, Second
+        reorder_res = client.put(
+            '/api/playlists/reorder',
+            headers={'X-CSRF-Token': csrf},
+            json={'playlist_ids': [p1, p3, p2]},
+        )
+        self.assertEqual(reorder_res.status_code, 200)
+        reordered_ids = [p['id'] for p in client.get('/api/playlists').get_json()]
+        self.assertEqual(reordered_ids, [p1, p3, p2])
+
+        # Reject incomplete or duplicate playlist list
+        bad_res = client.put(
+            '/api/playlists/reorder',
+            headers={'X-CSRF-Token': csrf},
+            json={'playlist_ids': [p1, p3]},
+        )
+        self.assertEqual(bad_res.status_code, 400)
+
 
 if __name__ == '__main__':
     unittest.main()

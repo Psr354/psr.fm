@@ -29,14 +29,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const loadPlaylists = () => window.loadPlaylists?.();
 
     // ==========================================
-    // 1. DOWNLOAD MODAL
+    // 1. DOWNLOAD MODAL & IMPORT PLAYLIST MODAL
     // ==========================================
-    const globalDownloadBtn = document.getElementById('global-download-btn');
     const globalDownloadModal = document.getElementById('global-download-modal');
     const globalUrlInput = document.getElementById('global-url-input');
     const libraryWarning = document.getElementById('download-library-warning');
     const downloadModalTitle = globalDownloadModal?.querySelector('h3');
     const downloadSubmitBtn = document.getElementById('save-global-download-btn');
+
+    const importPlaylistBtn = document.getElementById('import-playlist-btn');
+    const importPlaylistModal = document.getElementById('import-playlist-modal');
+    const importPlaylistUrlInput = document.getElementById('import-playlist-url-input');
+    const importPlaylistTargetSelect = document.getElementById('import-playlist-target-select');
+    const importPlaylistNameInput = document.getElementById('import-playlist-name-input');
+    const importPlaylistSubmitBtn = document.getElementById('submit-import-playlist-btn');
 
     function setLibraryWarning(song) {
         state.matchedLibrarySong = song || null;
@@ -91,10 +97,100 @@ document.addEventListener('DOMContentLoaded', () => {
         if (globalUrlInput) globalUrlInput.focus();
     }
 
-    globalDownloadBtn?.addEventListener('click', () => openDownloadModal());
     document.getElementById('dashboard-download-btn')?.addEventListener('click', () => openDownloadModal());
     document.addEventListener('click', (e) => {
         if (e.target.closest('[data-open-download]')) openDownloadModal();
+    });
+
+    async function openImportPlaylistModal() {
+        let playlists = [];
+        try {
+            const response = await fetch('/api/playlists');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            playlists = await response.json();
+        } catch (_) {
+            showToast('Could not load playlists. Check your connection.', 'error');
+            return;
+        }
+        if (importPlaylistTargetSelect) {
+            importPlaylistTargetSelect.innerHTML = '<option value="">Create new playlist automatically</option>';
+            playlists.forEach(p => {
+                const option = document.createElement('option');
+                option.value = String(p.id);
+                option.textContent = p.name;
+                importPlaylistTargetSelect.appendChild(option);
+            });
+            importPlaylistTargetSelect.value = '';
+        }
+        if (importPlaylistUrlInput) importPlaylistUrlInput.value = '';
+        if (importPlaylistNameInput) {
+            importPlaylistNameInput.value = '';
+            importPlaylistNameInput.style.display = '';
+        }
+        if (importPlaylistModal) importPlaylistModal.style.display = 'flex';
+        importPlaylistUrlInput?.focus();
+    }
+
+    function closeImportPlaylistModal() {
+        if (importPlaylistModal) importPlaylistModal.style.display = 'none';
+    }
+
+    importPlaylistBtn?.addEventListener('click', openImportPlaylistModal);
+    document.getElementById('cancel-import-playlist-btn')?.addEventListener('click', closeImportPlaylistModal);
+    importPlaylistTargetSelect?.addEventListener('change', () => {
+        if (!importPlaylistNameInput) return;
+        importPlaylistNameInput.style.display = importPlaylistTargetSelect.value ? 'none' : '';
+    });
+
+    async function submitImportPlaylist() {
+        const url = importPlaylistUrlInput?.value.trim() || '';
+        if (!url) return showToast('Playlist URL is required', 'error');
+        const playlistId = importPlaylistTargetSelect?.value || '';
+        const playlistName = importPlaylistNameInput?.value.trim() || '';
+
+        if (importPlaylistSubmitBtn) {
+            importPlaylistSubmitBtn.disabled = true;
+            importPlaylistSubmitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Importing...';
+        }
+        try {
+            const res = await fetch('/api/import-playlist', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    url,
+                    playlist_id: playlistId ? Number.parseInt(playlistId, 10) : null,
+                    playlist_name: playlistId ? '' : playlistName,
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Playlist import failed');
+
+            closeImportPlaylistModal();
+            const updatedPlaylists = await loadPlaylists();
+            const importedPlaylist = Array.isArray(updatedPlaylists)
+                ? updatedPlaylists.find(p => p.id === data.playlist_id)
+                : null;
+            if (importedPlaylist) openPlaylist(importedPlaylist);
+            if (data.queued_count > 0 && window.showDownloadProgress) {
+                window.showDownloadProgress(0, `Importing ${data.queued_count} track(s) into "${data.playlist_name}"...`, 'is-queued');
+            }
+            showToast(
+                `Imported ${data.total_tracks} tracks (${data.reused_count} from library, ${data.queued_count} queued)`,
+                'success'
+            );
+        } catch (err) {
+            showToast(err.message || 'Playlist import failed', 'error');
+        } finally {
+            if (importPlaylistSubmitBtn) {
+                importPlaylistSubmitBtn.disabled = false;
+                importPlaylistSubmitBtn.innerText = 'Import';
+            }
+        }
+    }
+
+    importPlaylistSubmitBtn?.addEventListener('click', submitImportPlaylist);
+    importPlaylistUrlInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submitImportPlaylist();
     });
 
     document.getElementById('cancel-global-download-btn')?.addEventListener('click', () => {

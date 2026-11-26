@@ -27,7 +27,8 @@ def create_playlist():
     folder_name = secure_filename(name) or str(uuid.uuid4())
     db = get_db()
     cursor = db.cursor()
-    cursor.execute('INSERT INTO playlists (name, folder_name, user_id) VALUES (?, ?, ?)', (name, folder_name, current_user.id))
+    cursor.execute('UPDATE playlists SET position = position + 1 WHERE user_id = ?', (current_user.id,))
+    cursor.execute('INSERT INTO playlists (name, folder_name, user_id, position) VALUES (?, ?, ?, 0)', (name, folder_name, current_user.id))
     db.commit()
     return jsonify({'status': 'success', 'id': cursor.lastrowid, 'folder_name': folder_name})
 
@@ -37,8 +38,45 @@ def create_playlist():
 def get_playlists():
     db = get_db()
     cursor = db.cursor()
-    cursor.execute('SELECT * FROM playlists WHERE user_id = ? ORDER BY created_at DESC', (current_user.id,))
+    cursor.execute('SELECT * FROM playlists WHERE user_id = ? ORDER BY position ASC, created_at DESC, id DESC', (current_user.id,))
     return jsonify([dict(row) for row in cursor.fetchall()])
+
+
+@playlists_bp.route('/api/playlists/reorder', methods=['PUT'])
+@login_required
+def reorder_playlists():
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
+    playlist_ids = data.get('playlist_ids', [])
+    if not isinstance(playlist_ids, list):
+        return jsonify({'error': 'playlist_ids must be a list'}), 400
+
+    try:
+        ordered_ids = [int(pid) for pid in playlist_ids]
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Invalid playlist order'}), 400
+
+    if len(ordered_ids) != len(set(ordered_ids)):
+        return jsonify({'error': 'Duplicate playlist ids are not allowed'}), 400
+
+    db = get_db()
+    existing_ids = {
+        row['id'] for row in db.execute(
+            'SELECT id FROM playlists WHERE user_id = ?',
+            (current_user.id,)
+        ).fetchall()
+    }
+    if set(ordered_ids) != existing_ids:
+        return jsonify({'error': 'Playlist order must include every playlist you own'}), 400
+
+    for position, pid in enumerate(ordered_ids):
+        db.execute(
+            'UPDATE playlists SET position = ? WHERE id = ? AND user_id = ?',
+            (position, pid, current_user.id)
+        )
+    db.commit()
+    return jsonify({'status': 'success'})
 
 
 @playlists_bp.route('/api/playlists/<int:playlist_id>', methods=['PUT'])

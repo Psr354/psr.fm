@@ -96,7 +96,7 @@ window.createPlaylistViewModule = function createPlaylistViewModule(app) {
         if (nextButton) nextButton.disabled = songs.length < pageSize;
         if (pageLabel) pageLabel.textContent = `Page ${page}`;
 
-        songs.forEach((song) => {
+        songs.forEach((song, index) => {
             const div = document.createElement('div');
             div.className = 'song-item library-song-item';
             div.setAttribute('data-id', String(song.id));
@@ -121,16 +121,16 @@ window.createPlaylistViewModule = function createPlaylistViewModule(app) {
             });
             div.querySelector('.play-library-song')?.addEventListener('click', (e) => {
                 e.stopPropagation();
-                playLibrarySong(song);
+                playLibrarySong(song, songs, index);
             });
             div.querySelector('.download-song')?.addEventListener('click', (e) => {
                 e.stopPropagation();
                 triggerLibraryDownload(song.id, song.title, song.artist);
             });
             div.addEventListener('contextmenu', (event) => {
-                openSongContextMenu(song, event, {isLibrary: true, play: () => playLibrarySong(song)});
+                openSongContextMenu(song, event, {isLibrary: true, play: () => playLibrarySong(song, songs, index)});
             });
-            addSongLongPress(div, song, {isLibrary: true, play: () => playLibrarySong(song)});
+            addSongLongPress(div, song, {isLibrary: true, play: () => playLibrarySong(song, songs, index)});
             container.appendChild(div);
         });
     }
@@ -170,11 +170,13 @@ window.createPlaylistViewModule = function createPlaylistViewModule(app) {
         const list = document.getElementById('playlist-list');
         if (!list) return;
         list.innerHTML = '';
+        const canReorderPlaylists = !isOfflineMode();
         playlists.forEach(p => {
             const li = document.createElement('li');
             li.className = 'playlist-item';
             if (p.id === state.currentPlaylistId) li.classList.add('active');
             li.setAttribute('data-id', p.id);
+            li.draggable = canReorderPlaylists;
             const coverSrc = p.cover_art
                 ? `/static/album_art/${mediaUrlName(p.cover_art)}`
                 : "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24' fill='%23555'><path d='M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'/></svg>";
@@ -182,7 +184,87 @@ window.createPlaylistViewModule = function createPlaylistViewModule(app) {
             li.addEventListener('click', () => openPlaylist(p));
             list.appendChild(li);
         });
+        if (canReorderPlaylists && playlists.length > 1) {
+            attachSidebarPlaylistReorder(list);
+        }
         return playlists;
+    }
+
+    function attachSidebarPlaylistReorder(list) {
+        if (list.dataset.reorderBound === 'true') return;
+        list.dataset.reorderBound = 'true';
+
+        let draggedEl = null;
+        let initialOrder = [];
+
+        const getCurrentOrder = () => Array.from(list.querySelectorAll('.playlist-item'))
+            .map(el => Number.parseInt(el.getAttribute('data-id'), 10))
+            .filter(id => Number.isInteger(id));
+
+        const getAfterItem = (y) => {
+            const candidates = [...list.querySelectorAll('.playlist-item:not(.dragging)')];
+            return candidates.reduce((closest, child) => {
+                const box = child.getBoundingClientRect();
+                const offset = y - box.top - box.height / 2;
+                if (offset < 0 && offset > closest.offset) {
+                    return {offset, element: child};
+                }
+                return closest;
+            }, {offset: Number.NEGATIVE_INFINITY, element: null}).element;
+        };
+
+        list.addEventListener('dragstart', (e) => {
+            const item = e.target.closest('.playlist-item');
+            if (!item || isOfflineMode()) {
+                e.preventDefault();
+                return;
+            }
+            draggedEl = item;
+            initialOrder = getCurrentOrder();
+            item.classList.add('dragging');
+            if (e.dataTransfer) {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', item.getAttribute('data-id') || '');
+            }
+        });
+
+        list.addEventListener('dragover', (e) => {
+            if (!draggedEl) return;
+            e.preventDefault();
+            const afterElement = getAfterItem(e.clientY);
+            if (afterElement == null) list.appendChild(draggedEl);
+            else list.insertBefore(draggedEl, afterElement);
+        });
+
+        const finishDrag = async () => {
+            if (!draggedEl) return;
+            draggedEl.classList.remove('dragging');
+            draggedEl = null;
+            const nextOrder = getCurrentOrder();
+            if (nextOrder.length === initialOrder.length && nextOrder.every((id, idx) => id === initialOrder[idx])) {
+                return;
+            }
+            try {
+                const res = await fetch('/api/playlists/reorder', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({playlist_ids: nextOrder}),
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    throw new Error(data.error || 'Failed to reorder playlists');
+                }
+            } catch (err) {
+                showToast(err.message || 'Failed to reorder playlists', 'error');
+                loadPlaylists();
+            }
+        };
+
+        list.addEventListener('dragend', finishDrag);
+        list.addEventListener('drop', (e) => {
+            e.preventDefault();
+            finishDrag();
+        });
     }
 
     async function openPlaylist(playlist) {

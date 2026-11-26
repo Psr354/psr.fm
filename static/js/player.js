@@ -668,8 +668,8 @@ window.createPlayerModule = function createPlayerModule(app) {
         resumeCurrentSong(requestId);
     }
 
-    function playLibrarySong(song) {
-        const previewSong = {
+    function toLibraryPreviewSong(song) {
+        return {
             ...song,
             id: Number(song.id),
             filename: song.filename,
@@ -677,12 +677,21 @@ window.createPlayerModule = function createPlayerModule(app) {
             artist: song.artist || 'Unknown',
             album_art: song.album_art || '',
             duration_seconds: song.duration_seconds || 0,
+            isLibraryPreview: true,
         };
+    }
+
+    function playLibrarySong(song, librarySongs = null, index = -1) {
+        const hasLibraryList = Array.isArray(librarySongs) && librarySongs.length > 0 && index >= 0 && index < librarySongs.length;
+        const playlistSongs = hasLibraryList ? librarySongs.map(toLibraryPreviewSong) : [toLibraryPreviewSong(song)];
+        const activeIndex = hasLibraryList ? index : 0;
+        const previewSong = playlistSongs[activeIndex];
 
         flushListenLog();
         state.isPrimarySyncLeader = true;
-        state.currentPlaylistSongs = [previewSong];
-        state.currentSongIndex = 0;
+        state.currentPlaylistSongs = playlistSongs;
+        state.currentSongIndex = activeIndex;
+        if (hasLibraryList) state.currentPlaylistId = 'library';
         state.currentSongMeta = previewSong;
         state.currentPlayingSongId = String(previewSong.id);
         state.playbackStatisticsSongId = Object.hasOwn(song, 'in_my_library')
@@ -719,11 +728,16 @@ window.createPlayerModule = function createPlayerModule(app) {
     }
 
     function playSong(songs, index) {
+        const song = songs[index];
+        if (!song) return;
+        if (song.isLibraryPreview) {
+            playLibrarySong(song, songs, index);
+            return;
+        }
         flushListenLog();
         state.isPrimarySyncLeader = true;
         state.currentPlaylistSongs = songs;
         state.currentSongIndex = index;
-        const song = songs[index];
         state.currentSongMeta = song;
 
         state.currentPlayingSongId = String(song.id);

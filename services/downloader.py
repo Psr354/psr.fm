@@ -6,7 +6,7 @@ import threading
 import html
 import json
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 import yt_dlp
 import requests
 from services.metadata import extract_duration
@@ -156,6 +156,127 @@ def validate_song_url(url):
 
 # Backward-compatible import for older integrations.
 validate_youtube_url = validate_song_url
+
+MAX_PLAYLIST_IMPORT_TRACKS = 100
+
+
+def extract_spotify_playlist_id(url):
+    if not url or not isinstance(url, str):
+        return None
+    parsed = urlparse(url.strip())
+    host = parsed.netloc.lower()
+    if host.startswith('www.'):
+        host = host[4:]
+    if host != 'open.spotify.com':
+        return None
+    match = re.match(r'^/(?:intl-[a-z-]+/)?playlist/([A-Za-z0-9]+)$', parsed.path.rstrip('/'))
+    return match.group(1) if match else None
+
+
+def extract_youtube_playlist_id(url):
+    if not url or not isinstance(url, str):
+        return None
+    parsed = urlparse(url.strip())
+    host = parsed.netloc.lower()
+    if host.startswith('www.'):
+        host = host[4:]
+    if host not in {'youtube.com', 'm.youtube.com', 'music.youtube.com'}:
+        return None
+    list_id = parse_qs(parsed.query).get('list', [''])[0].strip()
+    if not list_id or not re.match(r'^[A-Za-z0-9_-]{8,128}$', list_id):
+        return None
+    return list_id
+
+
+def validate_playlist_url(url):
+    if not url or not isinstance(url, str):
+        return False, 'Playlist URL is required'
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in ('http', 'https'):
+        return False, 'Only YouTube, YouTube Music, and Spotify playlist URLs are allowed'
+    if extract_spotify_playlist_id(url) or extract_youtube_playlist_id(url):
+        return True, ''
+    return False, 'Only public YouTube, YouTube Music, and Spotify playlist URLs are supported'
+
+
+def _extract_spotify_playlist_tracks(playlist_id, max_tracks=MAX_PLAYLIST_IMPORT_TRACKS):
+    embed_url = f'https://open.spotify.com/embed/playlist/{playlist_id}'
+    response = requests.get(embed_url, timeout=15, headers=YOUTUBE_HTTP_HEADERS)
+    response.raise_for_status()
+
+    match = re.search(
+        r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
+        response.text,
+        re.DOTALL,
+    )
+    if not match:
+        raise DownloadUserError('Could not read Spotify playlist. Make sure the playlist is public.')
+
+    payload = json.loads(html.unescape(match.group(1)))
+    entity = payload.get('props', {}).get('pageProps', {}).get('state', {}).get('data', {}).get('entity', {})
+    title = (entity.get('name') or entity.get('title') or '').strip() or 'Imported Spotify Playlist'
+    raw_tracks = entity.get('trackList') or []
+    tracks = []
+    for item in raw_tracks[:max_tracks]:
+        uri = item.get('uri') or ''
+        track_match = re.match(r'^spotify:track:([A-Za-z0-9]+)$', uri)
+        if not track_match:
+            continue
+        track_id = track_match.group(1)
+        tracks.append({
+            'url': f'https://open.spotify.com/track/{track_id}',
+            'source_id': f'spotify:{track_id}',
+            'title': item.get('title') or 'Unknown',
+            'artist': item.get('subtitle') or 'Unknown',
+        })
+
+    if not tracks:
+        raise DownloadUserError('No tracks found in this Spotify playlist. Make sure it is public and not empty.')
+    return {'title': title, 'tracks': tracks, 'provider': 'spotify'}
+
+
+def _extract_youtube_playlist_tracks(list_id, max_tracks=MAX_PLAYLIST_IMPORT_TRACKS):
+    playlist_url = f'https://www.youtube.com/playlist?list={list_id}'
+    ydl_opts = build_ytdlp_options({
+        'noplaylist': False,
+        'extract_flat': 'in_playlist',
+        'quiet': True,
+        'no_warnings': True,
+        'playlistend': max_tracks,
+    })
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(playlist_url, download=False)
+    if not info:
+        raise DownloadUserError('Could not read YouTube playlist. Make sure it is public or unlisted.')
+
+    title = (info.get('title') or '').strip() or 'Imported YouTube Playlist'
+    tracks = []
+    for entry in (info.get('entries') or [])[:max_tracks]:
+        if not entry:
+            continue
+        video_id = (entry.get('id') or '').strip()
+        if not video_id or not re.match(r'^[A-Za-z0-9_-]{11}$', video_id):
+            continue
+        tracks.append({
+            'url': f'https://www.youtube.com/watch?v={video_id}',
+            'source_id': video_id,
+            'title': entry.get('title') or video_id,
+            'artist': entry.get('uploader') or entry.get('channel') or 'Unknown',
+        })
+
+    if not tracks:
+        raise DownloadUserError('No playable tracks found in this YouTube playlist.')
+    return {'title': title, 'tracks': tracks, 'provider': 'youtube'}
+
+
+def extract_playlist_tracks(url, max_tracks=MAX_PLAYLIST_IMPORT_TRACKS):
+    spotify_id = extract_spotify_playlist_id(url)
+    if spotify_id:
+        return _extract_spotify_playlist_tracks(spotify_id, max_tracks=max_tracks)
+    youtube_list_id = extract_youtube_playlist_id(url)
+    if youtube_list_id:
+        return _extract_youtube_playlist_tracks(youtube_list_id, max_tracks=max_tracks)
+    raise DownloadUserError('Only public YouTube, YouTube Music, and Spotify playlist URLs are supported')
 
 
 def _spotify_track_metadata(url):

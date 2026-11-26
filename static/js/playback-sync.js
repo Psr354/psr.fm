@@ -331,7 +331,8 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         state.currentSongIndex = typeof saved.songIndex === 'number' ? saved.songIndex : 0;
         state.currentSongMeta = saved.songMeta;
         state.currentPlayingSongId = targetSongId;
-        state.playbackStatisticsSongId = saved.songMeta.id;
+        state.playbackStatisticsSongId = Object.hasOwn(saved.songMeta, 'in_my_library')
+            ? saved.songMeta.owned_song_id : saved.songMeta.id;
         state.repeatMode = typeof saved.repeatMode === 'number' ? saved.repeatMode : 0;
         state.isShuffle = Boolean(saved.isShuffle);
 
@@ -381,7 +382,7 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
         loadLyrics(saved.songMeta.id);
         highlightPlayingSong();
 
-        const audioSrc = saved.songMeta.filename
+        const audioSrc = (!saved.songMeta.isLibraryPreview && saved.songMeta.filename)
             ? '/audio/' + mediaUrlName(saved.songMeta.filename)
             : '/api/library-songs/' + saved.songMeta.id + '/stream';
 

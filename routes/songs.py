@@ -12,7 +12,11 @@ from services.common import (
     queue_file_deletion, save_validated_image, resolve_owned_playlists,
     collect_unreferenced_media_paths, check_download_rate_limit
 )
-from services.downloader import download_queue, validate_song_url, dispatch_lyrics_lookup
+from services.downloader import (
+    download_queue, validate_song_url, validate_playlist_url,
+    extract_playlist_tracks, dispatch_lyrics_lookup, DownloadUserError,
+    MAX_PLAYLIST_IMPORT_TRACKS,
+)
 from services.database import extract_song_source_id
 
 songs_bp = Blueprint('songs', __name__)
@@ -214,6 +218,121 @@ def download_song():
 
     download_queue.put({'url': url, 'playlist_ids': owned_playlist_ids, 'user_id': current_user.id})
     return jsonify({'status': 'processing', 'url': url})
+
+
+@songs_bp.route('/api/import-playlist', methods=['POST'])
+@login_required
+def import_playlist():
+    allowed, retry_after = check_download_rate_limit(current_user.id)
+    if not allowed:
+        return jsonify({'error': 'Too many import requests. Please try again later.', 'retry_after': retry_after}), 429
+
+    data = get_json_object()
+    if data is None:
+        return jsonify({'error': 'JSON object required'}), 400
+
+    url = (data.get('url') or '').strip()
+    is_valid, validation_error = validate_playlist_url(url)
+    if not is_valid:
+        return jsonify({'error': validation_error}), 400
+
+    target_playlist_id = data.get('playlist_id')
+    custom_name = data.get('playlist_name')
+    if custom_name is not None and not isinstance(custom_name, str):
+        return jsonify({'error': 'playlist_name must be a string'}), 400
+    custom_name = (custom_name or '').strip()
+    if len(custom_name) > 200:
+        return jsonify({'error': 'Playlist name is too long'}), 400
+
+    db = get_db()
+    if target_playlist_id is not None and target_playlist_id != '':
+        try:
+            target_playlist_id = int(target_playlist_id)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid playlist_id'}), 400
+        playlist = get_owned_playlist(db, target_playlist_id)
+        if not playlist:
+            return jsonify({'error': 'Playlist not found'}), 404
+        target_playlist_name = playlist['name']
+        created_playlist = False
+    else:
+        target_playlist_id = None
+        target_playlist_name = custom_name
+        created_playlist = True
+
+    try:
+        extracted = extract_playlist_tracks(url, max_tracks=MAX_PLAYLIST_IMPORT_TRACKS)
+    except DownloadUserError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception:
+        return jsonify({'error': 'Failed to read playlist. Make sure the playlist is public.'}), 400
+
+    tracks = extracted.get('tracks') or []
+    if not tracks:
+        return jsonify({'error': 'No tracks found in playlist'}), 400
+
+    if target_playlist_id is None:
+        final_name = (target_playlist_name or extracted.get('title') or 'Imported Playlist').strip()[:200]
+        folder_name = secure_filename(final_name) or str(uuid.uuid4())
+        cursor = db.cursor()
+        cursor.execute('UPDATE playlists SET position = position + 1 WHERE user_id = ?', (current_user.id,))
+        cursor.execute(
+            'INSERT INTO playlists (name, folder_name, user_id, position) VALUES (?, ?, ?, 0)',
+            (final_name, folder_name, current_user.id),
+        )
+        db.commit()
+        target_playlist_id = cursor.lastrowid
+        target_playlist_name = final_name
+
+    active_jobs = db.execute(
+        "SELECT COUNT(*) AS count FROM download_jobs WHERE user_id = ? AND status IN ('queued', 'processing')",
+        (current_user.id,),
+    ).fetchone()['count']
+    max_import_active = max(_max_active_downloads_per_user(), MAX_PLAYLIST_IMPORT_TRACKS)
+
+    reused_count = 0
+    queued_count = 0
+    skipped_limit_count = 0
+
+    for track in tracks:
+        source_id = track.get('source_id') or extract_song_source_id(track['url'])
+        source_song = None
+        if source_id:
+            candidate_songs = db.execute(
+                'SELECT * FROM songs WHERE source_id = ? ORDER BY created_at ASC, id ASC',
+                (source_id,),
+            ).fetchall()
+            source_song = next((row for row in candidate_songs if _library_audio_exists(row['filename'])), None)
+
+        if source_song:
+            song_id, created, added_ids, _ = add_global_song_to_playlists(db, source_song, [target_playlist_id])
+            db.commit()
+            _maybe_dispatch_cloned_lyrics(source_song, song_id, created)
+            reused_count += 1
+            continue
+
+        if active_jobs >= max_import_active:
+            skipped_limit_count += 1
+            continue
+
+        download_queue.put({
+            'url': track['url'],
+            'playlist_ids': [target_playlist_id],
+            'user_id': current_user.id,
+        })
+        active_jobs += 1
+        queued_count += 1
+
+    return jsonify({
+        'status': 'success',
+        'playlist_id': target_playlist_id,
+        'playlist_name': target_playlist_name,
+        'created_playlist': created_playlist,
+        'total_tracks': len(tracks),
+        'reused_count': reused_count,
+        'queued_count': queued_count,
+        'skipped_limit_count': skipped_limit_count,
+    })
 
 
 @songs_bp.route('/api/upload', methods=['POST'])
