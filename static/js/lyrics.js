@@ -538,6 +538,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function resolveLyricsSong(songId) {
+        if (state.currentSongMeta && String(state.currentSongMeta.id) === String(songId)) {
+            return state.currentSongMeta;
+        }
+        return state.currentPlaylistSongs.find(item => String(item.id) === String(songId)) || null;
+    }
+
+    function updateLyricsHeader(song, fallbackTitle = 'Lyrics', fallbackSubtitle = 'Cached lyrics') {
+        if (el.lyricsTitle) el.lyricsTitle.textContent = song?.title || fallbackTitle;
+        if (el.lyricsSubtitle) {
+            el.lyricsSubtitle.textContent = song?.artist
+                ? `${song.artist}${song.duration_seconds ? ` - ${formatTime(song.duration_seconds)}` : ''}`
+                : fallbackSubtitle;
+        }
+    }
+
     async function loadLyrics(songId, forceRefresh = false) {
         if (!songId) return;
         if (String(state.currentLyricsSongId) === String(songId) && !forceRefresh) {
@@ -548,6 +564,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const requestToken = (state.lyricsRequestToken || 0) + 1;
         state.lyricsRequestToken = requestToken;
+        const currentSong = resolveLyricsSong(songId);
 
         state.currentLyricsSongId = songId;
         state.syncedLyrics = [];
@@ -560,7 +577,7 @@ document.addEventListener('DOMContentLoaded', () => {
         resetPlayerLyric();
         setLyricsEditing(false);
 
-        if (el.lyricsTitle) el.lyricsTitle.textContent = 'Loading...';
+        updateLyricsHeader(currentSong, 'Loading...', 'Fetching lyrics cache...');
         setLyricsStatus('Fetching lyrics cache...');
         if (state.lyricsPanelOpen) {
             el.lyricsBody.innerHTML = `
@@ -607,14 +624,8 @@ document.addEventListener('DOMContentLoaded', () => {
             state.wordSyncedLyrics = parseWordSyncedLyrics(data.word_synced_lyrics);
             state.lyricsStatusValue = data.lyrics_status || 'none';
 
-            const song = state.currentSongMeta && String(state.currentSongMeta.id) === String(songId)
-                ? state.currentSongMeta
-                : state.currentPlaylistSongs.find(item => String(item.id) === String(songId)) || null;
-
-            if (el.lyricsTitle) el.lyricsTitle.textContent = song?.title || 'Lyrics';
-            if (el.lyricsSubtitle) {
-                el.lyricsSubtitle.textContent = song?.artist ? `${song.artist}${song.duration_seconds ? ` - ${formatTime(song.duration_seconds)}` : ''}` : 'Cached lyrics';
-            }
+            const song = resolveLyricsSong(songId);
+            updateLyricsHeader(song);
 
             renderLyricsPanel();
             updateSyncedLyrics(true);
@@ -629,7 +640,7 @@ document.addEventListener('DOMContentLoaded', () => {
             state.lyricsStatusValue = 'not_found';
             resetPlayerLyric();
             renderLyricsPanel();
-            if (el.lyricsTitle) el.lyricsTitle.textContent = 'Lyrics';
+            updateLyricsHeader(resolveLyricsSong(songId), 'Lyrics', 'No lyrics found');
             setLyricsStatus('No lyrics found. You can add them manually.');
             if (state.lyricsPanelOpen) {
                 el.lyricsBody.innerHTML = `

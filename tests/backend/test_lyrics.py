@@ -321,6 +321,59 @@ class LyricsAndAssetsTests(PsrFmTestCase):
         )
         self.assertEqual(res.status_code, 400)
 
+    def test_library_song_lyrics_get_and_try_again_for_unowned_song(self):
+        client = self.app_module.app.test_client()
+        setup_res = client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        csrf = self._csrf_token_from_response(setup_res)
+
+        # Create a library song owned by another user with private manual lyrics
+        other_song_id = self._create_song(
+            user_id=2,
+            title='Langit Tak Seharusnya Biru',
+            artist='The Jansen',
+            filename='the-jansen.mp3',
+            lyrics='Private manual lyrics',
+            synced_lyrics='',
+            lyrics_status='manual',
+        )
+
+        # GET must succeed (200) without leaking the other user's manual lyrics
+        get_res = client.get(f'/api/songs/{other_song_id}/lyrics')
+        self.assertEqual(get_res.status_code, 200)
+        get_data = get_res.get_json()
+        self.assertEqual(get_data['lyrics'], '')
+        self.assertEqual(get_data['lyrics_status'], 'none')
+
+        # POST (Try Again) must fetch public lyrics for the library song
+        with patch.object(self.app_module, 'search_lyrics', return_value={
+            'lyrics': 'Public LRCLIB lyrics',
+            'synced_lyrics': '[00:05.00] Public LRCLIB lyrics',
+        }):
+            post_res = client.post(
+                f'/api/songs/{other_song_id}/lyrics',
+                headers={'X-CSRF-Token': csrf},
+            )
+        self.assertEqual(post_res.status_code, 200)
+        self.assertEqual(post_res.get_json()['lyrics'], 'Public LRCLIB lyrics')
+        self.assertEqual(post_res.get_json()['lyrics_status'], 'found')
+
+        # Other user's manual lyrics must remain intact in DB
+        with self.app_module.app.app_context():
+            from services.common import get_db
+            row = get_db().execute('SELECT lyrics, lyrics_status FROM songs WHERE id = ?', (other_song_id,)).fetchone()
+            self.assertEqual(row['lyrics'], 'Private manual lyrics')
+            self.assertEqual(row['lyrics_status'], 'manual')
+
+        # PUT (manual edit) on an unowned library song must still be rejected
+        put_res = client.put(
+            f'/api/songs/{other_song_id}/lyrics',
+            headers={'X-CSRF-Token': csrf},
+            json={'lyrics': 'Attempted overwrite', 'synced_lyrics': ''},
+        )
+        self.assertEqual(put_res.status_code, 404)
+
 
 if __name__ == '__main__':
     unittest.main()

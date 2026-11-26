@@ -710,6 +710,7 @@ window.createPlayerModule = function createPlayerModule(app) {
         updatePlayPauseIcon(true);
         highlightPlayingSong();
         buildQueue();
+        loadLyrics(previewSong.id);
 
         if (state.isLooping || state.loopStart > 0 || state.loopEnd > 0) {
             resetLoop();
