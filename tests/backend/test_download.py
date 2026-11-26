@@ -941,6 +941,85 @@ class DownloadAndLibraryTests(PsrFmTestCase):
         self.assertEqual(queued_job['url'], 'https://open.spotify.com/track/newtrack456')
         self.assertEqual(queued_job['playlist_ids'], [body['playlist_id']])
 
+    def test_cross_source_spotify_reuses_youtube_audio_file(self):
+        from services import downloader
+
+        client = self.app_module.app.test_client()
+        client.post('/api/setup', headers={'X-CSRF-Token': self._csrf_token(client)}, json={
+            'username': 'admin', 'password': 'secret123'
+        })
+        playlist_id = self._create_playlist(user_id=1, name='Cross Source PL')
+
+        yt_file = os.path.join(self.app_module.LIBRARY_DIR, 'yt-existing.mp3')
+        with open(yt_file, 'wb') as f:
+            f.write(b'ID3-yt-audio')
+        self._create_song(
+            user_id=1,
+            title='YouTube Upload Title',
+            artist='Channel Name',
+            filename='yt-existing.mp3',
+            duration_seconds=200,
+            source_url='https://www.youtube.com/watch?v=ytVideo12345',
+            source_id='ytVideo12345',
+        )
+
+        download_calls = []
+
+        class FakeYDL:
+            def __init__(self, opts):
+                self.opts = opts
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def extract_info(self, url, download=False):
+                return {
+                    'id': 'ytVideo12345',
+                    'title': 'YouTube Upload Title',
+                    'uploader': 'Channel Name',
+                    'duration': 200,
+                    'webpage_url': 'https://www.youtube.com/watch?v=ytVideo12345',
+                    'thumbnail': '',
+                }
+            def download(self, urls):
+                download_calls.append(urls)
+
+        spotify_meta = {
+            'title': 'Clean Spotify Title',
+            'artist': 'Real Artist',
+            'duration': 202,
+            'thumbnail': '',
+            'source_id': 'spotify:spotTrack999',
+            'source_url': 'https://open.spotify.com/track/spotTrack999',
+        }
+        task = {
+            'url': 'https://open.spotify.com/track/spotTrack999',
+            'playlist_ids': [playlist_id],
+            'user_id': 1,
+        }
+        with patch.object(downloader, '_spotify_track_metadata', return_value=spotify_meta), \
+             patch.object(downloader.yt_dlp, 'YoutubeDL', FakeYDL), \
+             patch.object(downloader, 'search_lyrics', return_value=None):
+            downloader.process_download(
+                task,
+                self.app_module.DATABASE_PATH,
+                self.app_module.DOWNLOAD_DIR,
+                self.app_module.ALBUM_ART_DIR,
+            )
+
+        self.assertEqual(download_calls, [], 'Should reuse existing YouTube audio file without downloading again')
+        with self.app_module.app.app_context():
+            from services.common import get_db
+            row = get_db().execute(
+                'SELECT title, artist, filename, source_id, resolved_source_id FROM songs WHERE source_id = ?',
+                ('spotify:spotTrack999',),
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row['title'], 'Clean Spotify Title')
+            self.assertEqual(row['artist'], 'Real Artist')
+            self.assertEqual(row['filename'], 'yt-existing.mp3')
+            self.assertEqual(row['resolved_source_id'], 'ytVideo12345')
+
 
 if __name__ == '__main__':
     unittest.main()

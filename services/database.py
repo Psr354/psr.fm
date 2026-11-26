@@ -146,6 +146,7 @@ def _init_playlists_and_songs_tables(cursor):
             file_size_bytes INTEGER DEFAULT 0,
             source_url TEXT,
             source_id TEXT,
+            resolved_source_id TEXT DEFAULT '',
             play_count INTEGER DEFAULT 0,
             lyrics TEXT,
             synced_lyrics TEXT,
@@ -238,6 +239,9 @@ def _init_playlists_and_songs_tables(cursor):
         cursor.execute("ALTER TABLE songs ADD COLUMN word_synced_lyrics TEXT")
     if 'file_size_bytes' not in existing_cols:
         cursor.execute("ALTER TABLE songs ADD COLUMN file_size_bytes INTEGER DEFAULT 0")
+    if 'resolved_source_id' not in existing_cols:
+        cursor.execute("ALTER TABLE songs ADD COLUMN resolved_source_id TEXT DEFAULT ''")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_songs_resolved_source_id ON songs(resolved_source_id)")
 
     _init_songs_fts(cursor)
     _init_tracks_table(cursor)

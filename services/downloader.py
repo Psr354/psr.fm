@@ -710,6 +710,7 @@ def process_download(task, db_path, download_dir, album_art_dir):
         thumbnail_url = spotify_metadata['thumbnail'] if spotify_metadata else info.get('thumbnail', '')
         duration = spotify_metadata['duration'] if spotify_metadata else (info.get('duration', 0) or 0)
         source_id = requested_source_id or info.get('id') or ''
+        resolved_source_id = (info.get('id') or '').strip()
         source_url = spotify_metadata['source_url'] if spotify_metadata else (info.get('webpage_url') or url)
         download_url = info.get('webpage_url') or info.get('url') or extraction_url
 
@@ -721,28 +722,61 @@ def process_download(task, db_path, download_dir, album_art_dir):
     # and reuses audio files already downloaded by another account.
     if _reuse_existing_song_by_source_id(db_path, library_dir, user_id, source_id, source_url, playlist_ids):
         return
-        
+
+    reused_audio = None
+    if resolved_source_id:
+        conn_lookup = get_db_connection(db_path)
+        try:
+            candidates = conn_lookup.execute(
+                '''
+                SELECT filename, duration_seconds, file_size_bytes
+                FROM songs
+                WHERE (source_id = ? OR resolved_source_id = ?) AND filename != ''
+                ORDER BY id ASC
+                ''',
+                (resolved_source_id, resolved_source_id),
+            ).fetchall()
+            desired_duration = spotify_metadata['duration'] if spotify_metadata else 0
+            for candidate in candidates:
+                candidate_path = os.path.join(library_dir, candidate['filename'])
+                if not os.path.isfile(candidate_path):
+                    continue
+                cand_dur = candidate['duration_seconds'] or 0
+                if desired_duration > 0 and cand_dur > 0 and abs(cand_dur - desired_duration) > 30:
+                    continue
+                reused_audio = {
+                    'filename': candidate['filename'],
+                    'duration_seconds': cand_dur,
+                    'file_size_bytes': candidate['file_size_bytes'] or os.path.getsize(candidate_path),
+                }
+                break
+        finally:
+            conn_lookup.close()
+
     file_uuid = str(uuid.uuid4())
-    
-    ydl_opts_download = build_ytdlp_options({
-        'format': 'bestaudio/best',
-        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-        'outtmpl': os.path.join(library_dir, file_uuid),
-        'quiet': True,
-        'no_warnings': True,
-        'progress_hooks': [progress_hook],
-    })
-    
-    with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
-        ydl.download([download_url])
+    if reused_audio:
+        expected_file = reused_audio['filename']
+        duration_seconds = reused_audio['duration_seconds'] or int(duration or 0)
+    else:
+        ydl_opts_download = build_ytdlp_options({
+            'format': 'bestaudio/best',
+            'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+            'outtmpl': os.path.join(library_dir, file_uuid),
+            'quiet': True,
+            'no_warnings': True,
+            'progress_hooks': [progress_hook],
+        })
 
-    expected_file = f"{file_uuid}.mp3"
-    if not os.path.exists(os.path.join(library_dir, expected_file)):
-        raise Exception("Audio missing")
+        with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
+            ydl.download([download_url])
 
-    duration_seconds = extract_duration(os.path.join(library_dir, expected_file))
-    if duration_seconds == 0 and duration > 0:
-        duration_seconds = int(duration)
+        expected_file = f"{file_uuid}.mp3"
+        if not os.path.exists(os.path.join(library_dir, expected_file)):
+            raise Exception("Audio missing")
+
+        duration_seconds = extract_duration(os.path.join(library_dir, expected_file))
+        if duration_seconds == 0 and duration > 0:
+            duration_seconds = int(duration)
 
     album_art_filename = _download_and_save_thumbnail(thumbnail_url, album_art_dir, file_uuid)
             
@@ -790,10 +824,10 @@ def process_download(task, db_path, download_dir, album_art_dir):
         else:
             cursor.execute(
                 '''
-                INSERT INTO songs (title, artist, filename, album_art, duration_seconds, source_url, source_id, user_id, file_size_bytes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO songs (title, artist, filename, album_art, duration_seconds, source_url, source_id, resolved_source_id, user_id, file_size_bytes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''',
-                (title, artist, expected_file, album_art_filename, duration_seconds, source_url, source_id, user_id, file_size_bytes)
+                (title, artist, expected_file, album_art_filename, duration_seconds, source_url, source_id, resolved_source_id, user_id, file_size_bytes)
             )
             song_id = cursor.lastrowid
 
@@ -801,12 +835,13 @@ def process_download(task, db_path, download_dir, album_art_dir):
         conn.commit()
     except Exception:
         conn.rollback()
-        audio_path = os.path.join(library_dir, expected_file)
-        if os.path.exists(audio_path):
-            try:
-                os.remove(audio_path)
-            except OSError:
-                pass
+        if not reused_audio:
+            audio_path = os.path.join(library_dir, expected_file)
+            if os.path.exists(audio_path):
+                try:
+                    os.remove(audio_path)
+                except OSError:
+                    pass
         if album_art_filename:
             album_art_path = os.path.join(album_art_dir, album_art_filename)
             if os.path.exists(album_art_path):
