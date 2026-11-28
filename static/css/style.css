@@ -986,13 +986,12 @@ body, .app-container {
     .volume-control { display: flex; position: absolute; top: 12px; right: 10px; width: auto; min-width: 0; gap: 8px; }
     .volume-slider { display: none; }
 
-    .playlist-header-main { flex-direction: column; align-items: flex-start; gap: 12px; }
+    .playlist-header-main { flex-direction: column; align-items: stretch; gap: 12px; }
     .playlist-identity { gap: 12px; align-items: center; }
     .playlist-title-row h2 { font-size: 20px; max-width: calc(100vw - 144px); }
     .playlist-cover-wrapper { width: 84px; height: 84px; flex-shrink: 0; }
     .playlist-action-buttons { width: 100%; margin-top: 2px; gap: 6px; }
-    .playlist-action-buttons button { padding: 8px 11px; font-size: 12px; flex: 0 0 auto; justify-content: center; }
-    .playlist-action-buttons #open-poster-btn { flex: 1 1 auto; }
+    .playlist-action-buttons button { padding: 8px 11px; font-size: 12px; flex: 1 1 auto; justify-content: center; }
     .song-item { gap: 12px; padding: 10px 8px; }
     .song-art { width: 44px; height: 44px; }
     .song-duration { display: none; }
