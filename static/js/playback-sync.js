@@ -23,6 +23,7 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
 
     const playbackUserId = String(document.body?.dataset?.userId || '').trim();
     const PLAYBACK_STATE_KEY = playbackUserId ? `psr_playback_state_${playbackUserId}` : 'psr_playback_state';
+    const SYNC_FOLLOW_KEY = playbackUserId ? `psr_sync_follow_${playbackUserId}` : 'psr_sync_follow';
     let lastSavePlaybackTime = 0;
     let cachedPlaybackPayload = null;
     let lastServerSyncTime = 0;
@@ -34,6 +35,57 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
     let serverClockOffset = 0;
     let lastAppliedRemoteVolume = null;
     let lastAppliedRemoteMuted = null;
+    let pendingRemoteSyncState = null;
+
+    function getFollowSyncMode() {
+        try {
+            const val = sessionStorage.getItem(SYNC_FOLLOW_KEY);
+            if (val === 'join' || val === 'decline') return val;
+        } catch (_) {}
+        return 'ask';
+    }
+
+    function setFollowSyncMode(mode) {
+        try {
+            sessionStorage.setItem(SYNC_FOLLOW_KEY, mode);
+        } catch (_) {}
+    }
+
+    function hideSyncInviteBanner() {
+        const banner = document.getElementById('sync-invite-banner');
+        if (banner) banner.style.display = 'none';
+    }
+
+    function showSyncInviteBanner(remoteState) {
+        if (!remoteState || !remoteState.songMeta) return;
+        pendingRemoteSyncState = remoteState;
+        const banner = document.getElementById('sync-invite-banner');
+        const songEl = document.getElementById('sync-invite-song');
+        if (!banner) return;
+        if (songEl) {
+            const title = remoteState.songMeta.title || 'Unknown';
+            const artist = remoteState.songMeta.artist || '';
+            songEl.textContent = artist ? `${title} — ${artist}` : title;
+        }
+        banner.style.display = 'flex';
+    }
+
+    document.getElementById('sync-invite-join-btn')?.addEventListener('click', () => {
+        setFollowSyncMode('join');
+        hideSyncInviteBanner();
+        if (pendingRemoteSyncState) {
+            const target = pendingRemoteSyncState;
+            pendingRemoteSyncState = null;
+            applySavedPlaybackState(target, Boolean(target.isPlaying), true);
+            try { localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(target)); } catch (_) {}
+        }
+    });
+
+    document.getElementById('sync-invite-decline-btn')?.addEventListener('click', () => {
+        setFollowSyncMode('decline');
+        pendingRemoteSyncState = null;
+        hideSyncInviteBanner();
+    });
 
     function showSyncAutoplayPrompt(targetTime, isRemote = true) {
         if (syncPromptActive) return;
@@ -546,6 +598,14 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
                 if (isSameDevice && isActivelyPlaying) {
                     state.isPrimarySyncLeader = true;
                 }
+                if (isDifferentDevicePlaying) {
+                    const mode = getFollowSyncMode();
+                    if (mode === 'decline') return;
+                    if (mode === 'ask') {
+                        showSyncInviteBanner(serverState);
+                        return;
+                    }
+                }
                 console.log('[Sync] Restoring state from server: song =', serverState.songMeta?.title, 'playing =', isActivelyPlaying, 'differentDevice =', isDifferentDevicePlaying);
                 applySavedPlaybackState(serverState, isActivelyPlaying, isActivelyPlaying && !isSameDevice);
                 localStorage.setItem(PLAYBACK_STATE_KEY, JSON.stringify(serverState));
@@ -634,13 +694,22 @@ window.createPlaybackSyncModule = function createPlaybackSyncModule(app) {
             console.log('[Sync] Remote event ignored: same deviceId (' + CLIENT_DEVICE_ID + ')');
             return;
         }
+        const mode = getFollowSyncMode();
+        if (mode === 'decline') return;
         if (remoteState.syncAction === 'volume') {
+            if (mode !== 'join') return;
             if (typeof remoteState.volume === 'number') {
                 setAppVolume(remoteState.volume, Boolean(remoteState.isMuted), false);
             }
             return;
         }
         if (!remoteState.songMeta) return;
+        if (mode === 'ask') {
+            if (remoteState.isPlaying) {
+                showSyncInviteBanner(remoteState);
+            }
+            return;
+        }
         console.log('[Sync] Remote state received from another device:', remoteState.deviceId, 'song:', remoteState.songMeta?.title, 'isPlaying:', remoteState.isPlaying);
         applySavedPlaybackState(remoteState, remoteState.isPlaying, true);
         try {

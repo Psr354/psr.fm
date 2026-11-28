@@ -1412,3 +1412,57 @@ body, .app-container {
     gap: 8px;
     flex-shrink: 0;
 }
+
+.sync-invite-banner {
+    position: fixed;
+    right: 16px;
+    bottom: 108px;
+    z-index: 150;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    max-width: min(420px, calc(100vw - 32px));
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(15, 23, 28, 0.96);
+    border: 1px solid rgba(var(--accent-rgb), 0.38);
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(12px);
+}
+.sync-invite-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--text-primary);
+}
+.sync-invite-badge {
+    font-size: 11px;
+    font-weight: 800;
+    color: var(--accent-color);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+#sync-invite-song {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-secondary);
+}
+.sync-invite-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+}
+@media (max-width: 768px) {
+    .sync-invite-banner {
+        left: 12px;
+        right: 12px;
+        bottom: 154px;
+        max-width: none;
+    }
+}
