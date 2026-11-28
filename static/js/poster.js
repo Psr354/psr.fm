@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const cardScaleInput = document.getElementById('poster-card-scale');
     const cardTiltInput = document.getElementById('poster-card-tilt');
     const cardYawInput = document.getElementById('poster-card-yaw');
+    const cardPitchInput = document.getElementById('poster-card-pitch');
     const photoScaleInput = document.getElementById('poster-photo-scale');
     const photoXInput = document.getElementById('poster-photo-x');
     const photoYInput = document.getElementById('poster-photo-y');
@@ -59,6 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const activeCardScaleInput = document.getElementById('poster-active-card-scale');
     const activeCardAngleInput = document.getElementById('poster-active-card-angle');
     const activeCardYawInput = document.getElementById('poster-active-card-yaw');
+    const activeCardPitchInput = document.getElementById('poster-active-card-pitch');
     const cardChipsEl = document.getElementById('poster-card-chips');
     const posterTabs = document.querySelectorAll('.poster-tab');
     const posterPanels = document.querySelectorAll('.poster-tab-panel');
@@ -262,6 +264,91 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     let cardBuffer = null;
+    let pitchBuffer = null;
+
+    function projectHorizontalStrips(srcCanvas, dstCtx, pitchDeg) {
+        const rad = (pitchDeg * Math.PI) / 180;
+        const cosP = Math.cos(rad);
+        const sinP = Math.sin(rad);
+        const totalW = srcCanvas.width;
+        const totalH = srcCanvas.height;
+        const focal = Math.max(totalH * 2.1, 600);
+        const strips = 36;
+        const srcStripH = totalH / strips;
+
+        for (let i = 0; i < strips; i++) {
+            const v0 = (i / strips - 0.5) * totalH;
+            const v1 = ((i + 1) / strips - 0.5) * totalH;
+            const vMid = (v0 + v1) * 0.5;
+            const z0 = v0 * sinP;
+            const z1 = v1 * sinP;
+            const zMid = vMid * sinP;
+            const s0 = focal / Math.max(120, focal + z0);
+            const s1 = focal / Math.max(120, focal + z1);
+            const sMid = focal / Math.max(120, focal + zMid);
+
+            const dy0 = v0 * cosP * s0;
+            const dy1 = v1 * cosP * s1;
+            const dh = Math.max(0.8, Math.abs(dy1 - dy0) + 0.6);
+            const dw = totalW * sMid;
+            const dx = -dw / 2;
+            const dy = Math.min(dy0, dy1);
+
+            dstCtx.drawImage(
+                srcCanvas,
+                0,
+                i * srcStripH,
+                totalW,
+                srcStripH,
+                dx,
+                dy,
+                dw,
+                dh
+            );
+        }
+    }
+
+    function projectVerticalStrips(srcCanvas, dstCtx, yawDeg) {
+        const rad = (yawDeg * Math.PI) / 180;
+        const cosY = Math.cos(rad);
+        const sinY = Math.sin(rad);
+        const totalW = srcCanvas.width;
+        const totalH = srcCanvas.height;
+        const focal = Math.max(totalW * 2.1, 500);
+        const strips = 36;
+        const srcStripW = totalW / strips;
+
+        for (let i = 0; i < strips; i++) {
+            const u0 = (i / strips - 0.5) * totalW;
+            const u1 = ((i + 1) / strips - 0.5) * totalW;
+            const uMid = (u0 + u1) * 0.5;
+            const z0 = u0 * sinY;
+            const z1 = u1 * sinY;
+            const zMid = uMid * sinY;
+            const s0 = focal / Math.max(120, focal + z0);
+            const s1 = focal / Math.max(120, focal + z1);
+            const sMid = focal / Math.max(120, focal + zMid);
+
+            const dx0 = u0 * cosY * s0;
+            const dx1 = u1 * cosY * s1;
+            const dw = Math.max(0.8, Math.abs(dx1 - dx0) + 0.6);
+            const dh = totalH * sMid;
+            const dx = Math.min(dx0, dx1);
+            const dy = -dh / 2;
+
+            dstCtx.drawImage(
+                srcCanvas,
+                i * srcStripW,
+                0,
+                srcStripW,
+                totalH,
+                dx,
+                dy,
+                dw,
+                dh
+            );
+        }
+    }
 
     function paintCardContent(ctx, song, coverImg, w, h) {
         const radius = Math.round(w * 0.085);
@@ -359,19 +446,20 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.fillText('⏭', cx + w * 0.16, cursorY);
     }
 
-    function drawMiniPlayerCard(ctx, song, coverImg, x, y, w, h, angleDeg, yawDeg = 0) {
+    function drawMiniPlayerCard(ctx, song, coverImg, x, y, w, h, angleDeg, yawDeg = 0, pitchDeg = 0) {
         ctx.save();
         ctx.translate(x + w / 2, y + h / 2);
         ctx.rotate((angleDeg * Math.PI) / 180);
 
-        if (Math.abs(yawDeg) < 0.5) {
+        const hasYaw = Math.abs(yawDeg) >= 0.5;
+        const hasPitch = Math.abs(pitchDeg) >= 0.5;
+        if (!hasYaw && !hasPitch) {
             ctx.translate(-w / 2, -h / 2);
             paintCardContent(ctx, song, coverImg, w, h);
             ctx.restore();
             return;
         }
 
-        // Render card to offscreen buffer then project 3D perspective strips
         const margin = 44;
         if (!cardBuffer) cardBuffer = document.createElement('canvas');
         cardBuffer.width = w + margin * 2;
@@ -383,50 +471,30 @@ document.addEventListener('DOMContentLoaded', () => {
         paintCardContent(bctx, song, coverImg, w, h);
         bctx.restore();
 
-        const rad = (yawDeg * Math.PI) / 180;
-        const cosY = Math.cos(rad);
-        const sinY = Math.sin(rad);
-        const focal = Math.max(w * 2.1, 500);
-        const strips = 36;
-        const totalW = cardBuffer.width;
-        const totalH = cardBuffer.height;
-        const srcStripW = totalW / strips;
+        let sourceForYaw = cardBuffer;
+        if (hasPitch) {
+            if (!pitchBuffer) pitchBuffer = document.createElement('canvas');
+            pitchBuffer.width = cardBuffer.width;
+            pitchBuffer.height = cardBuffer.height;
+            const pctx = pitchBuffer.getContext('2d');
+            pctx.clearRect(0, 0, pitchBuffer.width, pitchBuffer.height);
+            pctx.save();
+            pctx.translate(pitchBuffer.width / 2, pitchBuffer.height / 2);
+            projectHorizontalStrips(cardBuffer, pctx, pitchDeg);
+            pctx.restore();
+            sourceForYaw = pitchBuffer;
+        }
 
-        for (let i = 0; i < strips; i++) {
-            const u0 = (i / strips - 0.5) * totalW;
-            const u1 = ((i + 1) / strips - 0.5) * totalW;
-            const uMid = (u0 + u1) * 0.5;
-            const z0 = u0 * sinY;
-            const z1 = u1 * sinY;
-            const zMid = uMid * sinY;
-            const s0 = focal / Math.max(120, focal + z0);
-            const s1 = focal / Math.max(120, focal + z1);
-            const sMid = focal / Math.max(120, focal + zMid);
-
-            const dx0 = u0 * cosY * s0;
-            const dx1 = u1 * cosY * s1;
-            const dw = Math.max(0.8, Math.abs(dx1 - dx0) + 0.6);
-            const dh = totalH * sMid;
-            const dx = Math.min(dx0, dx1);
-            const dy = -dh / 2;
-
-            ctx.drawImage(
-                cardBuffer,
-                i * srcStripW,
-                0,
-                srcStripW,
-                totalH,
-                dx,
-                dy,
-                dw,
-                dh
-            );
+        if (hasYaw) {
+            projectVerticalStrips(sourceForYaw, ctx, yawDeg);
+        } else {
+            ctx.drawImage(sourceForYaw, -sourceForYaw.width / 2, -sourceForYaw.height / 2);
         }
 
         ctx.restore();
     }
 
-    function getCardPlacements(count, layout, W, H, scalePct, baseTilt, baseYaw = 0) {
+    function getCardPlacements(count, layout, W, H, scalePct, baseTilt, baseYaw = 0, basePitch = 0) {
         const s = scalePct / 100;
         const cardW = Math.round(350 * s);
         const cardH = Math.round(cardW * 1.42);
@@ -434,11 +502,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Orbit (4-5 cards framing center photo subject with subtle 3D side tilt)
         const orbitCoords = [
-            { x: 28, y: 64, a: -6, yaw: 16 },
-            { x: W - cardW - 28, y: 54, a: 6, yaw: -16 },
-            { x: 24, y: H - cardH - 96, a: -5, yaw: 14 },
-            { x: W - cardW - 24, y: H - cardH - 108, a: 5, yaw: -14 },
-            { x: (W - cardW) / 2, y: 40, a: 0, yaw: 0 },
+            { x: 28, y: 64, a: -6, yaw: 16, pitch: -8 },
+            { x: W - cardW - 28, y: 54, a: 6, yaw: -16, pitch: -8 },
+            { x: 24, y: H - cardH - 96, a: -5, yaw: 14, pitch: 8 },
+            { x: W - cardW - 24, y: H - cardH - 108, a: 5, yaw: -14, pitch: 8 },
+            { x: (W - cardW) / 2, y: 40, a: 0, yaw: 0, pitch: -10 },
         ];
         for (let i = 0; i < count; i++) {
             const p = orbitCoords[i % orbitCoords.length];
@@ -449,6 +517,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 h: cardH,
                 angle: p.a + baseTilt,
                 yaw: (layout === 'custom' ? 0 : p.yaw) + baseYaw,
+                pitch: (layout === 'custom' ? 0 : p.pitch) + basePitch,
             });
         }
         return slots;
@@ -515,7 +584,8 @@ document.addEventListener('DOMContentLoaded', () => {
             H,
             Number(cardScaleInput?.value || 92),
             Number(cardTiltInput?.value || 0),
-            Number(cardYawInput?.value || 0)
+            Number(cardYawInput?.value || 0),
+            Number(cardPitchInput?.value || 0)
         );
         const cardsToDraw = songs.map((song, idx) => {
             const sid = String(song.id);
@@ -529,8 +599,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const y = typeof ov.y === 'number' ? ov.y : base.y;
             const angle = base.angle + (typeof ov.angleOffset === 'number' ? ov.angleOffset : 0);
             const yaw = (typeof ov.yawOffset === 'number' ? ov.yawOffset : 0) + base.yaw;
+            const pitch = (typeof ov.pitchOffset === 'number' ? ov.pitchOffset : 0) + base.pitch;
             const behindSubject = ov.behindSubject !== undefined ? ov.behindSubject : true;
-            return { songId: sid, song, bitmap: bitmaps[idx], x, y, w, h, angle, yaw, behindSubject };
+            return { songId: sid, song, bitmap: bitmaps[idx], x, y, w, h, angle, yaw, pitch, behindSubject };
         }).filter(Boolean);
 
         renderedCards = cardsToDraw;
@@ -542,7 +613,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Layer 2: Cards behind subject
         cardsToDraw.filter((c) => c.behindSubject).forEach((c) => {
-            drawMiniPlayerCard(ctx, c.song, c.bitmap, c.x, c.y, c.w, c.h, c.angle, c.yaw);
+            drawMiniPlayerCard(ctx, c.song, c.bitmap, c.x, c.y, c.w, c.h, c.angle, c.yaw, c.pitch);
         });
 
         // Layer 3: Foreground subject cutout overlapping behind-cards
@@ -565,7 +636,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Layer 4: Cards in front of subject
         cardsToDraw.filter((c) => !c.behindSubject).forEach((c) => {
-            drawMiniPlayerCard(ctx, c.song, c.bitmap, c.x, c.y, c.w, c.h, c.angle, c.yaw);
+            drawMiniPlayerCard(ctx, c.song, c.bitmap, c.x, c.y, c.w, c.h, c.angle, c.yaw, c.pitch);
         });
 
         // Bottom watermark pill
@@ -604,6 +675,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (activeCardYawInput) {
             activeCardYawInput.value = Math.round(typeof ov.yawOffset === 'number' ? ov.yawOffset : 0);
             syncSliderReadout(activeCardYawInput);
+        }
+        if (activeCardPitchInput) {
+            activeCardPitchInput.value = Math.round(typeof ov.pitchOffset === 'number' ? ov.pitchOffset : 0);
+            syncSliderReadout(activeCardPitchInput);
         }
     }
 
@@ -704,6 +779,14 @@ document.addEventListener('DOMContentLoaded', () => {
         renderPoster();
     });
 
+    activeCardPitchInput?.addEventListener('input', () => {
+        if (!activeCardId) return;
+        const ov = cardOverrides.get(activeCardId) || {};
+        ov.pitchOffset = Number(activeCardPitchInput.value);
+        cardOverrides.set(activeCardId, ov);
+        renderPoster();
+    });
+
     resetCardsBtn?.addEventListener('click', () => {
         cardOverrides.clear();
         activeCardId = null;
@@ -783,7 +866,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderPoster();
     });
 
-    [layoutSelect, effectSelect, cardScaleInput, cardTiltInput, cardYawInput, photoScaleInput, photoXInput, photoYInput, bgDimInput, fgToggle].forEach((ctrl) => {
+    [layoutSelect, effectSelect, cardScaleInput, cardTiltInput, cardYawInput, cardPitchInput, photoScaleInput, photoXInput, photoYInput, bgDimInput, fgToggle].forEach((ctrl) => {
         syncSliderReadout(ctrl);
         ctrl?.addEventListener('input', () => {
             syncSliderReadout(ctrl);
@@ -794,7 +877,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderPoster();
         });
     });
-    [activeCardScaleInput, activeCardAngleInput, activeCardYawInput].forEach((ctrl) => {
+    [activeCardScaleInput, activeCardAngleInput, activeCardYawInput, activeCardPitchInput].forEach((ctrl) => {
         ctrl?.addEventListener('input', () => syncSliderReadout(ctrl));
     });
 
