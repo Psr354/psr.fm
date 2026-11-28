@@ -993,6 +993,10 @@ body, .app-container {
     .playlist-cover-wrapper { width: 84px; height: 84px; flex-shrink: 0; }
     .playlist-action-buttons { width: 100%; margin-top: 2px; gap: 6px; }
     .playlist-action-buttons button { padding: 8px 11px; font-size: 12px; flex: 1 1 auto; justify-content: center; }
+    #playlist-add-songs-btn { order: 1; }
+    #save-playlist-offline-btn { order: 2; }
+    #delete-playlist-btn { order: 3; }
+    #open-poster-btn { order: 4; }
     .song-item { gap: 12px; padding: 10px 8px; }
     .song-art { width: 44px; height: 44px; }
     .song-duration { display: none; }
