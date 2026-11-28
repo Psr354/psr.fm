@@ -7,6 +7,39 @@ from tests.backend.base import PsrFmTestCase
 
 
 class LyricsAndAssetsTests(PsrFmTestCase):
+    def test_cutout_limit_is_independent_from_lyrics_limit(self):
+        from services.common import (
+            check_lyrics_rate_limit,
+            check_poster_cutout_rate_limit,
+        )
+
+        user_id = 987654
+        for _ in range(10):
+            allowed, _ = check_lyrics_rate_limit(user_id)
+            self.assertTrue(allowed)
+
+        allowed, retry_after = check_lyrics_rate_limit(user_id)
+        self.assertFalse(allowed)
+
+        allowed, retry_after = check_poster_cutout_rate_limit(user_id)
+        self.assertTrue(allowed)
+        self.assertIsNone(retry_after)
+
+    def test_cutout_fills_enclosed_interior_holes_only(self):
+        from PIL import Image
+        from routes.playlists import _fill_cutout_interior_holes
+
+        orig = Image.new('RGBA', (10, 10), (200, 100, 50, 255))
+        cutout = Image.new('RGBA', (10, 10), (0, 0, 0, 0))
+        # Solid 6x6 subject block at [2..7, 2..7] with an enclosed hole at (4,4)
+        for y in range(2, 8):
+            for x in range(2, 8):
+                if (x, y) != (4, 4):
+                    cutout.putpixel((x, y), (200, 100, 50, 255))
+
+        filled = _fill_cutout_interior_holes(orig, cutout)
+        self.assertEqual(filled.getpixel((4, 4)), (200, 100, 50, 255))
+        self.assertEqual(filled.getpixel((0, 0))[3], 0)
     def test_lyrics_helpers_parse_and_clean(self):
         self.assertEqual(clean_text('Song Title (Official Video) feat. Guest'), 'Song Title')
         parsed = parse_lrc('[00:01.00][00:03.00] Hello\n[00:05.50] World')

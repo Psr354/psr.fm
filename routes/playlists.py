@@ -308,6 +308,46 @@ def _get_cutout_session(u2net_dir):
         return _cutout_session
 
 
+def warm_poster_cutout_session(u2net_dir):
+    import os
+    import logging
+    import importlib.util
+    os.makedirs(u2net_dir, exist_ok=True)
+    if importlib.util.find_spec('onnxruntime') is None or importlib.util.find_spec('rembg') is None:
+        logging.getLogger(__name__).info('Poster cutout warm-up skipped: optional model dependencies are not installed')
+        return False
+    try:
+        _get_cutout_session(u2net_dir)
+        logging.getLogger(__name__).info('Poster cutout model is ready')
+        return True
+    except Exception:
+        logging.getLogger(__name__).exception('Poster cutout model warm-up failed')
+        return False
+
+
+def _fill_cutout_interior_holes(original_img, cutout_img):
+    """Restore enclosed transparent holes inside a cutout subject using original pixels."""
+    from PIL import Image, ImageDraw
+
+    if cutout_img.mode != 'RGBA':
+        cutout_img = cutout_img.convert('RGBA')
+    if original_img.mode != 'RGBA':
+        original_img = original_img.convert('RGBA')
+
+    w, h = cutout_img.size
+    alpha = cutout_img.getchannel('A')
+    binary = alpha.point(lambda p: 255 if p >= 128 else 0)
+
+    padded = Image.new('L', (w + 2, h + 2), 0)
+    padded.paste(binary, (1, 1))
+    ImageDraw.floodfill(padded, (0, 0), 128)
+
+    hole_mask = padded.crop((1, 1, w + 1, h + 1)).point(lambda p: 255 if p == 0 else 0)
+    if hole_mask.getbbox() is None:
+        return cutout_img
+    return Image.composite(original_img, cutout_img, hole_mask)
+
+
 @playlists_bp.route('/api/poster/cutout', methods=['POST'])
 @login_required
 def poster_subject_cutout():
@@ -315,9 +355,9 @@ def poster_subject_cutout():
     import os
     from flask import current_app, request, send_file
     from PIL import Image, ImageOps
-    from services.common import check_lyrics_rate_limit
+    from services.common import check_poster_cutout_rate_limit
 
-    allowed, retry_after = check_lyrics_rate_limit(current_user.id)
+    allowed, retry_after = check_poster_cutout_rate_limit(current_user.id)
     if not allowed:
         return jsonify({'error': 'Too many cutout requests', 'retry_after': retry_after}), 429
 
@@ -347,6 +387,7 @@ def poster_subject_cutout():
         from rembg import remove
         session = _get_cutout_session(u2net_dir)
         cutout = remove(img, session=session)
+        cutout = _fill_cutout_interior_holes(img, cutout)
     except Exception as exc:
         current_app.logger.exception('Poster cutout failed')
         return jsonify({'error': f'Cutout failed: {exc}'}), 500
