@@ -87,7 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function normalizeHex(val) {
         const cleaned = String(val || '').trim();
-        return /^#[0-9a-fA-F]{6}$/.test(cleaned) ? cleaned : null;
+        return /^#[0-9a-fA-F]{6}$/.test(cleaned) ? cleaned.toUpperCase() : null;
     }
 
     function hexToRgba(hex, alpha) {
@@ -200,7 +200,26 @@ document.addEventListener('DOMContentLoaded', () => {
     let foregroundCanvas = null;
     let photoUrl = null;
     const coverCache = new Map();
-    const cardOverrides = new Map(); // songId -> { x, y, scaleMul, angleOffset, behindSubject }
+    const cardOverrides = new Map(); // songId -> { x, y, scaleMul, angleOffset, behindSubject, startColor, endColor, textColor }
+
+    function getCardColors(songId) {
+        const override = cardOverrides.get(String(songId)) || {};
+        return {
+            startColor: override.startColor || posterCardStart,
+            endColor: override.endColor || posterCardEnd,
+            textColor: override.textColor || posterCardText,
+        };
+    }
+
+    function resetCardColors(songId) {
+        const override = cardOverrides.get(String(songId));
+        if (!override) return;
+        delete override.startColor;
+        delete override.endColor;
+        delete override.textColor;
+        if (Object.keys(override).length === 0) cardOverrides.delete(String(songId));
+    }
+
     let renderedCards = [];
     let activeCardId = null;
     let dragState = null;
@@ -435,7 +454,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function paintCardContent(ctx, song, coverImg, w, h) {
+    function paintCardContent(ctx, song, coverImg, w, h, colors) {
         const radius = Math.round(w * 0.085);
         ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
         ctx.shadowBlur = 32;
@@ -443,8 +462,8 @@ document.addEventListener('DOMContentLoaded', () => {
         drawRoundRect(ctx, 0, 0, w, h, radius);
         const cardAlpha = Math.max(0.3, Math.min(1, Number(cardOpacityInput?.value || 84) / 100));
         const cardGrad = ctx.createLinearGradient(0, 0, w, h);
-        cardGrad.addColorStop(0, hexToRgba(posterCardStart, cardAlpha));
-        cardGrad.addColorStop(1, hexToRgba(posterCardEnd, cardAlpha));
+        cardGrad.addColorStop(0, hexToRgba(colors.startColor, cardAlpha));
+        cardGrad.addColorStop(1, hexToRgba(colors.endColor, cardAlpha));
         ctx.fillStyle = cardGrad;
         ctx.fill();
         ctx.shadowColor = 'transparent';
@@ -489,7 +508,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Brand tag
         let cursorY = pad + artSize + Math.round(w * 0.06);
-        ctx.fillStyle = hexToRgba(posterCardText, 0.65);
+        ctx.fillStyle = hexToRgba(colors.textColor, 0.65);
         ctx.font = `600 ${Math.round(w * 0.042)}px Manrope, sans-serif`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
@@ -497,10 +516,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Title + heart
         cursorY += Math.round(w * 0.058);
-        ctx.fillStyle = posterCardText;
+        ctx.fillStyle = colors.textColor;
         ctx.font = `700 ${Math.round(w * 0.068)}px Manrope, sans-serif`;
         ctx.fillText(fitText(ctx, song.title || 'Unknown', artSize - 26), pad, cursorY);
-        ctx.fillStyle = hexToRgba(posterCardText, 0.85);
+        ctx.fillStyle = hexToRgba(colors.textColor, 0.85);
         ctx.font = `600 ${Math.round(w * 0.065)}px sans-serif`;
         ctx.textAlign = 'right';
         ctx.fillText('♡', pad + artSize, cursorY);
@@ -508,16 +527,16 @@ document.addEventListener('DOMContentLoaded', () => {
         // Artist
         cursorY += Math.round(w * 0.082);
         ctx.textAlign = 'left';
-        ctx.fillStyle = hexToRgba(posterCardText, 0.72);
+        ctx.fillStyle = hexToRgba(colors.textColor, 0.72);
         ctx.font = `500 ${Math.round(w * 0.052)}px Manrope, sans-serif`;
         ctx.fillText(fitText(ctx, song.artist || 'Unknown', artSize), pad, cursorY);
 
         // Progress bar
         cursorY += Math.round(w * 0.088);
-        ctx.fillStyle = hexToRgba(posterCardText, 0.22);
+        ctx.fillStyle = hexToRgba(colors.textColor, 0.22);
         drawRoundRect(ctx, pad, cursorY, artSize, 4, 2);
         ctx.fill();
-        ctx.fillStyle = posterCardText;
+        ctx.fillStyle = colors.textColor;
         drawRoundRect(ctx, pad, cursorY, Math.round(artSize * 0.58), 4, 2);
         ctx.fill();
         ctx.beginPath();
@@ -526,7 +545,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Controls row
         cursorY += Math.round(w * 0.075);
-        ctx.fillStyle = posterCardText;
+        ctx.fillStyle = colors.textColor;
         ctx.font = `700 ${Math.round(w * 0.07)}px sans-serif`;
         ctx.textAlign = 'center';
         const cx = w / 2;
@@ -535,7 +554,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.fillText('⏭', cx + w * 0.16, cursorY);
     }
 
-    function drawMiniPlayerCard(ctx, song, coverImg, x, y, w, h, angleDeg, yawDeg = 0, pitchDeg = 0) {
+    function drawMiniPlayerCard(ctx, song, coverImg, x, y, w, h, angleDeg, yawDeg = 0, pitchDeg = 0, colors) {
         ctx.save();
         ctx.translate(x + w / 2, y + h / 2);
         ctx.rotate((angleDeg * Math.PI) / 180);
@@ -544,7 +563,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasPitch = Math.abs(pitchDeg) >= 0.5;
         if (!hasYaw && !hasPitch) {
             ctx.translate(-w / 2, -h / 2);
-            paintCardContent(ctx, song, coverImg, w, h);
+            paintCardContent(ctx, song, coverImg, w, h, colors);
             ctx.restore();
             return;
         }
@@ -557,7 +576,7 @@ document.addEventListener('DOMContentLoaded', () => {
         bctx.clearRect(0, 0, cardBuffer.width, cardBuffer.height);
         bctx.save();
         bctx.translate(margin, margin);
-        paintCardContent(bctx, song, coverImg, w, h);
+        paintCardContent(bctx, song, coverImg, w, h, colors);
         bctx.restore();
 
         let sourceForYaw = cardBuffer;
@@ -689,7 +708,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const yaw = (typeof ov.yawOffset === 'number' ? ov.yawOffset : 0) + base.yaw;
             const pitch = (typeof ov.pitchOffset === 'number' ? ov.pitchOffset : 0) + base.pitch;
             const behindSubject = ov.behindSubject !== undefined ? ov.behindSubject : true;
-            return { songId: sid, song, bitmap: bitmaps[idx], x, y, w, h, angle, yaw, pitch, behindSubject };
+            return { songId: sid, song, bitmap: bitmaps[idx], x, y, w, h, angle, yaw, pitch, behindSubject, colors: getCardColors(sid) };
         }).filter(Boolean);
 
         renderedCards = cardsToDraw;
@@ -701,7 +720,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Layer 2: Cards behind subject
         cardsToDraw.filter((c) => c.behindSubject).forEach((c) => {
-            drawMiniPlayerCard(ctx, c.song, c.bitmap, c.x, c.y, c.w, c.h, c.angle, c.yaw, c.pitch);
+            drawMiniPlayerCard(ctx, c.song, c.bitmap, c.x, c.y, c.w, c.h, c.angle, c.yaw, c.pitch, c.colors);
         });
 
         // Layer 3: Foreground subject cutout overlapping behind-cards
@@ -724,7 +743,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Layer 4: Cards in front of subject
         cardsToDraw.filter((c) => !c.behindSubject).forEach((c) => {
-            drawMiniPlayerCard(ctx, c.song, c.bitmap, c.x, c.y, c.w, c.h, c.angle, c.yaw, c.pitch);
+            drawMiniPlayerCard(ctx, c.song, c.bitmap, c.x, c.y, c.w, c.h, c.angle, c.yaw, c.pitch, c.colors);
         });
 
         // Bottom watermark pill
