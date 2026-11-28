@@ -219,14 +219,15 @@ button { touch-action: manipulation; }
 
 .lyrics-panel {
     position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 90px;
-    width: min(460px, 100vw);
+    top: 12px;
+    right: 12px;
+    bottom: 108px;
+    width: min(460px, calc(100vw - 24px));
     background:
         linear-gradient(180deg, rgba(15, 23, 28, 0.98), rgba(8, 9, 10, 0.99)),
         #0b0f12;
-    border-left: 1px solid rgba(var(--accent-rgb), 0.24);
+    border: 1px solid rgba(var(--accent-rgb), 0.24);
+    border-radius: 14px;
     box-shadow: -28px 0 54px rgba(0, 0, 0, 0.58);
     z-index: 120;
     transform: translateX(100%);
