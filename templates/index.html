@@ -828,6 +828,26 @@
                             <label><span>Geser X <b data-poster-val="poster-photo-x">0px</b></span> <input id="poster-photo-x" type="range" min="-400" max="400" value="0"></label>
                             <label><span>Geser Y <b data-poster-val="poster-photo-y">0px</b></span> <input id="poster-photo-y" type="range" min="-400" max="400" value="0"></label>
                         </div>
+                        <div class="share-section poster-theme-section">
+                            <label>Tema & Warna Kustom</label>
+                            <div class="share-theme-grid" id="poster-theme-grid" role="listbox" aria-label="Poster color theme">
+                                <button class="share-theme active" type="button" data-poster-theme="obsidian" aria-label="Obsidian theme" style="background: linear-gradient(135deg, #0f172a, #09090b);"></button>
+                                <button class="share-theme" type="button" data-poster-theme="verde" aria-label="Verde theme" style="background: linear-gradient(135deg, #073b25, #30d66b);"></button>
+                                <button class="share-theme" type="button" data-poster-theme="dusk" aria-label="Dusk theme" style="background: linear-gradient(135deg, #182848, #4b6cb7);"></button>
+                                <button class="share-theme" type="button" data-poster-theme="rose" aria-label="Rose theme" style="background: linear-gradient(135deg, #7f1d1d, #fb7185);"></button>
+                                <button class="share-theme" type="button" data-poster-theme="amber" aria-label="Amber theme" style="background: linear-gradient(135deg, #78350f, #fbbf24);"></button>
+                                <button class="share-theme" type="button" data-poster-theme="cyan" aria-label="Cyan theme" style="background: linear-gradient(135deg, #164e63, #38bdf8);"></button>
+                            </div>
+                            <div class="share-custom-theme" aria-label="Custom poster colors">
+                                <span>Custom</span>
+                                <label class="share-color-control" title="Background start color">Start <input id="poster-theme-start" type="color" value="#0f172a" aria-label="Poster start color"><input id="poster-theme-start-hex" class="share-hex-input" type="text" value="#0F172A" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Poster start HEX"></label>
+                                <label class="share-color-control" title="Background end color">End <input id="poster-theme-end" type="color" value="#09090b" aria-label="Poster end color"><input id="poster-theme-end-hex" class="share-hex-input" type="text" value="#09090B" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Poster end HEX"></label>
+                            </div>
+                            <label class="poster-fg-row">
+                                <span>Warnai kartu sesuai tema</span>
+                                <input id="poster-tint-cards-toggle" type="checkbox">
+                            </label>
+                        </div>
                     </div>
 
                     <div class="poster-section poster-tab-panel" data-poster-panel="cards">

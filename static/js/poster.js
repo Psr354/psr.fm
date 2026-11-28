@@ -65,6 +65,78 @@ document.addEventListener('DOMContentLoaded', () => {
     const cardChipsEl = document.getElementById('poster-card-chips');
     const posterTabs = document.querySelectorAll('.poster-tab');
     const posterPanels = document.querySelectorAll('.poster-tab-panel');
+    const themeStartInput = document.getElementById('poster-theme-start');
+    const themeStartHex = document.getElementById('poster-theme-start-hex');
+    const themeEndInput = document.getElementById('poster-theme-end');
+    const themeEndHex = document.getElementById('poster-theme-end-hex');
+    const tintCardsToggle = document.getElementById('poster-tint-cards-toggle');
+    const themeSwatches = document.querySelectorAll('[data-poster-theme]');
+
+    const POSTER_THEMES = {
+        obsidian: ['#0f172a', '#09090b'],
+        verde: ['#073b25', '#30d66b'],
+        dusk: ['#182848', '#4b6cb7'],
+        rose: ['#7f1d1d', '#fb7185'],
+        amber: ['#78350f', '#fbbf24'],
+        cyan: ['#164e63', '#38bdf8'],
+    };
+    let posterThemeStart = '#0f172a';
+    let posterThemeEnd = '#09090b';
+
+    function normalizeHex(val) {
+        const cleaned = String(val || '').trim();
+        return /^#[0-9a-fA-F]{6}$/.test(cleaned) ? cleaned : null;
+    }
+
+    function hexToRgba(hex, alpha) {
+        const norm = normalizeHex(hex) || '#14161c';
+        const r = parseInt(norm.slice(1, 3), 16);
+        const g = parseInt(norm.slice(3, 5), 16);
+        const b = parseInt(norm.slice(5, 7), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    function syncThemeInputs(start, end) {
+        posterThemeStart = start;
+        posterThemeEnd = end;
+        if (themeStartInput) themeStartInput.value = start;
+        if (themeStartHex) themeStartHex.value = start.toUpperCase();
+        if (themeEndInput) themeEndInput.value = end;
+        if (themeEndHex) themeEndHex.value = end.toUpperCase();
+    }
+
+    themeSwatches.forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const pair = POSTER_THEMES[btn.dataset.posterTheme];
+            if (!pair) return;
+            themeSwatches.forEach((b) => b.classList.remove('active'));
+            btn.classList.add('active');
+            syncThemeInputs(pair[0], pair[1]);
+            renderPoster();
+        });
+    });
+
+    [
+        [themeStartInput, themeStartHex, (v) => { posterThemeStart = v; }],
+        [themeEndInput, themeEndHex, (v) => { posterThemeEnd = v; }],
+    ].forEach(([picker, hexInput, setter]) => {
+        picker?.addEventListener('input', () => {
+            themeSwatches.forEach((b) => b.classList.remove('active'));
+            setter(picker.value);
+            if (hexInput) hexInput.value = picker.value.toUpperCase();
+            renderPoster();
+        });
+        hexInput?.addEventListener('input', () => {
+            const valid = normalizeHex(hexInput.value);
+            if (!valid) return;
+            themeSwatches.forEach((b) => b.classList.remove('active'));
+            setter(valid);
+            if (picker) picker.value = valid;
+            renderPoster();
+        });
+    });
+
+    tintCardsToggle?.addEventListener('change', renderPoster);
 
     function setActivePosterTab(tabName) {
         posterTabs.forEach((btn) => {
@@ -360,7 +432,14 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.shadowBlur = 32;
         ctx.shadowOffsetY = 14;
         drawRoundRect(ctx, 0, 0, w, h, radius);
-        ctx.fillStyle = 'rgba(20, 22, 28, 0.78)';
+        if (tintCardsToggle && tintCardsToggle.checked) {
+            const cardGrad = ctx.createLinearGradient(0, 0, w, h);
+            cardGrad.addColorStop(0, hexToRgba(posterThemeStart, 0.86));
+            cardGrad.addColorStop(1, hexToRgba(posterThemeEnd, 0.86));
+            ctx.fillStyle = cardGrad;
+        } else {
+            ctx.fillStyle = 'rgba(20, 22, 28, 0.78)';
+        }
         ctx.fill();
         ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;
@@ -534,11 +613,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const H = canvas.height;
         ctx.clearRect(0, 0, W, H);
 
-        // Background gradient base
+        // Background gradient base (uses selected theme or custom colors)
         const bgGrad = ctx.createLinearGradient(0, 0, W, H);
-        bgGrad.addColorStop(0, '#0f172a');
-        bgGrad.addColorStop(0.5, '#111827');
-        bgGrad.addColorStop(1, '#09090b');
+        bgGrad.addColorStop(0, posterThemeStart);
+        bgGrad.addColorStop(1, posterThemeEnd);
         ctx.fillStyle = bgGrad;
         ctx.fillRect(0, 0, W, H);
 
