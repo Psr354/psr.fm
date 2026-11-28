@@ -114,6 +114,11 @@ socketio = SocketIO(app, cors_allowed_origins=socketio_origins, async_mode='thre
 app.socketio = socketio
 
 init_db(DATABASE_PATH)
+try:
+    from routes.playlists import warm_poster_cutout_session
+    warm_poster_cutout_session(os.path.join(DATABASE_DIR, 'u2net'))
+except Exception as exc:
+    app.logger.exception('Could not start poster cutout warm-up: %s', exc)
 if os.environ.get('PSR_FM_DISABLE_WORKER') != '1':
     start_worker(DATABASE_PATH, DOWNLOAD_DIR, ALBUM_ART_DIR, socketio)
 

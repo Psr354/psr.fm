@@ -33,6 +33,11 @@ LYRICS_RATE_LIMIT_MAX_REQUESTS = 10
 _lyrics_rate_limit_lock = Lock()
 _lyrics_rate_limit_state = {}
 
+POSTER_CUTOUT_RATE_LIMIT_WINDOW_SECONDS = 60
+POSTER_CUTOUT_RATE_LIMIT_MAX_REQUESTS = 10
+_poster_cutout_rate_limit_lock = Lock()
+_poster_cutout_rate_limit_state = {}
+
 LOGIN_RATE_LIMIT_WINDOW_SECONDS = 300
 LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5
 _login_rate_limit_lock = Lock()
@@ -402,6 +407,19 @@ def check_lyrics_rate_limit(user_id):
         return True, None
 
 
+def check_poster_cutout_rate_limit(user_id):
+    now = time.monotonic()
+    with _poster_cutout_rate_limit_lock:
+        timestamps = _poster_cutout_rate_limit_state.get(user_id, [])
+        timestamps = [ts for ts in timestamps if now - ts < POSTER_CUTOUT_RATE_LIMIT_WINDOW_SECONDS]
+        if len(timestamps) >= POSTER_CUTOUT_RATE_LIMIT_MAX_REQUESTS:
+            _poster_cutout_rate_limit_state[user_id] = timestamps
+            return False, int(POSTER_CUTOUT_RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0]))
+        timestamps.append(now)
+        _poster_cutout_rate_limit_state[user_id] = timestamps
+        return True, None
+
+
 LOGIN_IP_RATE_LIMIT_MAX_ATTEMPTS = 25
 
 
@@ -514,6 +532,8 @@ def reset_rate_limits():
         _password_change_rate_limit_state.clear()
     with _download_rate_limit_lock:
         _download_rate_limit_state.clear()
+    with _poster_cutout_rate_limit_lock:
+        _poster_cutout_rate_limit_state.clear()
 
 
 
