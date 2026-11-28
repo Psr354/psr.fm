@@ -551,11 +551,8 @@ document.addEventListener('DOMContentLoaded', () => {
         cursorY += Math.round(w * 0.058);
         ctx.fillStyle = colors.textColor;
         ctx.font = `700 ${Math.round(w * 0.068)}px Manrope, sans-serif`;
-        ctx.fillText(fitText(ctx, song.title || 'Unknown', artSize - 26), pad, cursorY);
-        ctx.fillStyle = hexToRgba(colors.textColor, 0.85);
-        ctx.font = `600 ${Math.round(w * 0.065)}px sans-serif`;
-        ctx.textAlign = 'right';
-        ctx.fillText('♡', pad + artSize, cursorY);
+        ctx.fillText(fitText(ctx, song.title || 'Unknown', artSize - Math.round(w * 0.09)), pad, cursorY);
+        drawVectorHeart(ctx, pad + artSize - Math.round(w * 0.035), cursorY + Math.round(w * 0.036), Math.round(w * 0.055), hexToRgba(colors.textColor, 0.85));
 
         // Artist
         cursorY += Math.round(w * 0.082);
@@ -576,15 +573,65 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.arc(pad + Math.round(artSize * 0.58), cursorY + 2, 5, 0, Math.PI * 2);
         ctx.fill();
 
-        // Controls row
+        // Controls row (vector icons so mobile emoji fonts never tint them)
         cursorY += Math.round(w * 0.075);
-        ctx.fillStyle = colors.textColor;
-        ctx.font = `700 ${Math.round(w * 0.07)}px sans-serif`;
-        ctx.textAlign = 'center';
-        const cx = w / 2;
-        ctx.fillText('⏮', cx - w * 0.16, cursorY);
-        ctx.fillText('⏸', cx, cursorY);
-        ctx.fillText('⏭', cx + w * 0.16, cursorY);
+        drawVectorControls(ctx, w / 2, cursorY + Math.round(w * 0.038), w, colors.textColor);
+    }
+
+    function drawVectorHeart(ctx, cx, cy, size, strokeColor) {
+        const s = size * 0.5;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = Math.max(1.5, size * 0.11);
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(0, s * 0.82);
+        ctx.bezierCurveTo(-s * 1.25, s * 0.05, -s * 1.15, -s * 0.9, 0, -s * 0.28);
+        ctx.bezierCurveTo(s * 1.15, -s * 0.9, s * 1.25, s * 0.05, 0, s * 0.82);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawVectorControls(ctx, cx, cy, cardW, fillColor) {
+        const iconH = Math.round(cardW * 0.054);
+        const halfH = iconH / 2;
+        const gap = cardW * 0.16;
+
+        ctx.save();
+        ctx.fillStyle = fillColor;
+
+        // Previous track (bar + left triangle)
+        const px = cx - gap;
+        const triW = iconH * 0.72;
+        const barW = Math.max(2, iconH * 0.18);
+        ctx.fillRect(px - triW * 0.65 - barW, cy - halfH, barW, iconH);
+        ctx.beginPath();
+        ctx.moveTo(px - triW * 0.65, cy);
+        ctx.lineTo(px + triW * 0.55, cy - halfH);
+        ctx.lineTo(px + triW * 0.55, cy + halfH);
+        ctx.closePath();
+        ctx.fill();
+
+        // Pause (two crisp vertical bars)
+        const pauseBarW = Math.max(3, iconH * 0.28);
+        const pauseGap = Math.max(3, iconH * 0.24);
+        drawRoundRect(ctx, cx - pauseGap / 2 - pauseBarW, cy - halfH, pauseBarW, iconH, 1.5);
+        ctx.fill();
+        drawRoundRect(ctx, cx + pauseGap / 2, cy - halfH, pauseBarW, iconH, 1.5);
+        ctx.fill();
+
+        // Next track (right triangle + bar)
+        const nx = cx + gap;
+        ctx.beginPath();
+        ctx.moveTo(nx + triW * 0.65, cy);
+        ctx.lineTo(nx - triW * 0.55, cy - halfH);
+        ctx.lineTo(nx - triW * 0.55, cy + halfH);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillRect(nx + triW * 0.65, cy - halfH, barW, iconH);
+
+        ctx.restore();
     }
 
     function drawMiniPlayerCard(ctx, song, coverImg, x, y, w, h, angleDeg, yawDeg = 0, pitchDeg = 0, colors) {
