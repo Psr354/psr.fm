@@ -209,11 +209,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderLyricWords(text, timedWords = []) {
         if (timedWords.length) {
-            return timedWords.map((word, index) => (
-                `<span class="lyric-word" data-word-index="${index}" data-start="${word.start}" data-end="${word.end}">${[...(word.text || '')].map((character, characterIndex) => (
+            const hasExplicitSpaces = timedWords.some((w) => /\s$/.test(String(w.text || '')));
+            return timedWords.map((word, index) => {
+                const rawText = String(word.text || '');
+                const trailingSpace = /\s$/.test(rawText) ? ' ' : '';
+                const visibleText = rawText.trimEnd();
+                const charsHtml = [...visibleText].map((character, characterIndex) => (
                     `<span class="lyric-char" data-char-index="${characterIndex}">${escapeHtml(character)}</span>`
-                )).join('')}</span>`
-            )).join(' ');
+                )).join('');
+                return `<span class="lyric-word" data-word-index="${index}" data-start="${word.start}" data-end="${word.end}">${charsHtml}</span>${trailingSpace}`;
+            }).join(hasExplicitSpaces ? '' : ' ');
         }
         const words = String(text || '').trim().split(/\s+/).filter(Boolean);
         if (!words.length) return '&nbsp;';

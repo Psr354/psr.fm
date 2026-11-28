@@ -284,3 +284,65 @@ def reorder_playlist_songs(playlist_id):
         )
     db.commit()
     return jsonify({'status': 'success'})
+
+
+_cutout_session = None
+_cutout_lock = None
+
+
+def _get_cutout_session(u2net_dir):
+    global _cutout_session, _cutout_lock
+    import threading
+    if _cutout_lock is None:
+        _cutout_lock = threading.Lock()
+    with _cutout_lock:
+        if _cutout_session is None:
+            import os
+            os.environ.setdefault('U2NET_HOME', u2net_dir)
+            from rembg import new_session
+            _cutout_session = new_session('u2netp')
+        return _cutout_session
+
+
+@playlists_bp.route('/api/poster/cutout', methods=['POST'])
+@login_required
+def poster_subject_cutout():
+    import io
+    import os
+    from flask import current_app, request, send_file
+    from PIL import Image, ImageOps
+
+    image_file = request.files.get('image')
+    if not image_file:
+        return jsonify({'error': 'Image file is required'}), 400
+
+    raw_bytes = image_file.read(16 * 1024 * 1024 + 1)
+    if len(raw_bytes) > 16 * 1024 * 1024:
+        return jsonify({'error': 'Image exceeds 16 MB limit'}), 400
+
+    try:
+        img = Image.open(io.BytesIO(raw_bytes))
+        img = ImageOps.exif_transpose(img).convert('RGBA')
+    except Exception:
+        return jsonify({'error': 'Invalid image file'}), 400
+
+    max_dim = 1080
+    if max(img.width, img.height) > max_dim:
+        img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+
+    db_dir = os.path.dirname(current_app.config.get('DATABASE_PATH', 'data/psr_fm.sqlite3')) or 'data'
+    u2net_dir = os.path.join(db_dir, 'u2net')
+    os.makedirs(u2net_dir, exist_ok=True)
+
+    try:
+        from rembg import remove
+        session = _get_cutout_session(u2net_dir)
+        cutout = remove(img, session=session)
+    except Exception as exc:
+        current_app.logger.exception('Poster cutout failed')
+        return jsonify({'error': f'Cutout failed: {exc}'}), 500
+
+    out_buf = io.BytesIO()
+    cutout.save(out_buf, format='PNG')
+    out_buf.seek(0)
+    return send_file(out_buf, mimetype='image/png')

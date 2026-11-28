@@ -11,9 +11,9 @@ psr.fm adalah aplikasi musik self-hosted untuk menyimpan koleksi audio, membuat 
 ## ✨ Fitur Utama
 
 - **Koleksi musik:** download dari YouTube/YouTube Music, pencarian audio lewat tautan track Spotify, dan upload file lokal.
-- **Playlist pribadi:** cover, pengaturan urutan lagu, serta penambahan dari koleksi server tanpa download ulang.
-- **Player:** queue, shuffle, repeat, A–B loop, dan equalizer 16-band.
-- **Lirik:** lirik tersinkron jika tersedia, editor manual, dan gambar potongan lirik untuk dibagikan.
+- **Playlist pribadi & Poster Lagu:** cover, pengaturan urutan lagu, penambahan dari koleksi server tanpa download ulang, serta **Buat Poster** (pilih hingga 5 lagu, unggah foto latar dengan pemotongan subjek otomatis, atur posisi bebas/Orbit, efek miring 3D, dan simpan PNG).
+- **Player:** queue, shuffle, repeat, A–B loop, equalizer 16-band, **AutoEQ** (impor profil Parametric EQ), dan **Volume Normalization**.
+- **Lirik:** dukungan multi-sumber (**LRCLIB**, **BetterLyrics TTML perkata**, **LyricsPlus**, **KuGou**), editor manual, dan gambar potongan lirik untuk dibagikan.
 - **Offline:** simpan playlist di browser dan putar tanpa koneksi ke server.
 - **Statistik:** lagu paling sering diputar, total waktu dengar, dan recap bulanan/tahunan melalui Frequency Focus.
 - **Multi-user:** akun admin dan pengguna, dengan playlist serta riwayat dengar masing-masing.
@@ -25,9 +25,10 @@ psr.fm adalah aplikasi musik self-hosted untuk menyimpan koleksi audio, membuat 
 | --- | --- |
 | Backend | Python 3.12, Flask, Flask-Login, Flask-SocketIO |
 | Database | SQLite |
-| Frontend | HTML, CSS, JavaScript, Web Audio API |
+| Frontend | HTML, CSS, JavaScript, Web Audio API, HTML5 Canvas |
 | Offline | Service Worker, Cache API, IndexedDB |
 | Audio | yt-dlp, FFmpeg, Mutagen |
+| Gambar & Poster | Pillow, rembg (`u2netp`), onnxruntime |
 | Deployment | Docker, Docker Compose |
 
 ## Prasyarat

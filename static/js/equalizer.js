@@ -23,18 +23,66 @@ document.addEventListener('DOMContentLoaded', () => {
     const eqUserId = String(document.body?.dataset?.userId || '').trim();
     const EQ_STORAGE_KEY = eqUserId ? `psr_eq_state_v1_${eqUserId}` : 'psr_eq_state_v1';
 
-    // Extend state for EQ
+    // Extend state for EQ, Volume Normalization, and AutoEQ
     state.eqEnabled = false;
     state.eqGains = [...EQ_PRESETS.flat];
     state.eqPreamp = 0;
     state.eqPreset = 'flat';
+    state.normEnabled = false;
+    state.autoEqEnabled = false;
+    state.autoEqPreamp = 0;
+    state.autoEqFilters = [];
+    state.autoEqRawText = '';
 
     let eqAudioContext = null;
     let eqSource = null;
     let eqFilters = [];
+    let autoEqFilterNodes = [];
     let eqPreampNode = null;
+    let eqFilterTail = null;
+    let normCompressorNode = null;
+    let normMakeupGainNode = null;
     let eqAnalyser = null;
     let masterGainNode = null;
+
+    function parseAutoEqText(rawText) {
+        const lines = String(rawText || '').split(/\r?\n/);
+        let preamp = 0;
+        const filters = [];
+        const typeMap = {
+            PK: 'peaking',
+            PEQ: 'peaking',
+            LSC: 'lowshelf',
+            LS: 'lowshelf',
+            HSC: 'highshelf',
+            HS: 'highshelf',
+            LP: 'lowpass',
+            LPQ: 'lowpass',
+            HP: 'highpass',
+            HPQ: 'highpass',
+        };
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+            const preampMatch = trimmed.match(/^Preamp:\s*([+-]?\d+(?:\.\d+)?)\s*dB/i);
+            if (preampMatch) {
+                preamp = Math.max(-24, Math.min(24, parseFloat(preampMatch[1]) || 0));
+                continue;
+            }
+            const filterMatch = trimmed.match(
+                /^Filter\s+\d+:\s*(ON|OFF)\s+([A-Z]+)\s+Fc\s+(\d+(?:\.\d+)?)\s*Hz(?:\s+Gain\s+([+-]?\d+(?:\.\d+)?)\s*dB)?(?:\s+Q\s+(\d+(?:\.\d+)?))?/i
+            );
+            if (!filterMatch) continue;
+            if (filterMatch[1].toUpperCase() !== 'ON') continue;
+            const mappedType = typeMap[filterMatch[2].toUpperCase()];
+            if (!mappedType) continue;
+            const frequency = Math.max(20, Math.min(20000, parseFloat(filterMatch[3]) || 1000));
+            const gain = filterMatch[4] !== undefined ? Math.max(-24, Math.min(24, parseFloat(filterMatch[4]) || 0)) : 0;
+            const q = filterMatch[5] !== undefined ? Math.max(0.1, Math.min(20, parseFloat(filterMatch[5]) || 1.0)) : 0.71;
+            filters.push({ type: mappedType, frequency, gain, q });
+        }
+        return { preamp, filters };
+    }
 
     function loadEqState() {
         try {
@@ -46,13 +94,84 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (typeof s.enabled === 'boolean') state.eqEnabled = s.enabled;
                 if (typeof s.preset === 'string' && EQ_PRESETS[s.preset]) state.eqPreset = s.preset;
                 else if (s.preset === 'custom') state.eqPreset = 'custom';
+                if (typeof s.normEnabled === 'boolean') state.normEnabled = s.normEnabled;
+                if (typeof s.autoEqEnabled === 'boolean') state.autoEqEnabled = s.autoEqEnabled;
+                if (typeof s.autoEqRawText === 'string') {
+                    state.autoEqRawText = s.autoEqRawText;
+                    const parsed = parseAutoEqText(s.autoEqRawText);
+                    state.autoEqPreamp = parsed.preamp;
+                    state.autoEqFilters = parsed.filters;
+                }
             }
         } catch {}
     }
     function saveEqState() {
-        try { localStorage.setItem(EQ_STORAGE_KEY, JSON.stringify({ gains: state.eqGains, preamp: state.eqPreamp, enabled: state.eqEnabled, preset: state.eqPreset })); } catch {}
+        try {
+            localStorage.setItem(EQ_STORAGE_KEY, JSON.stringify({
+                gains: state.eqGains,
+                preamp: state.eqPreamp,
+                enabled: state.eqEnabled,
+                preset: state.eqPreset,
+                normEnabled: state.normEnabled,
+                autoEqEnabled: state.autoEqEnabled,
+                autoEqRawText: state.autoEqRawText,
+            }));
+        } catch {}
     }
     loadEqState();
+
+    function applyNormalizationState() {
+        if (!normCompressorNode || !normMakeupGainNode || !eqAudioContext) return;
+        const t = eqAudioContext.currentTime;
+        if (state.normEnabled) {
+            try {
+                normCompressorNode.threshold.setTargetAtTime(-18, t, 0.02);
+                normCompressorNode.knee.setTargetAtTime(12, t, 0.02);
+                normCompressorNode.ratio.setTargetAtTime(4, t, 0.02);
+                normCompressorNode.attack.setTargetAtTime(0.005, t, 0.02);
+                normCompressorNode.release.setTargetAtTime(0.15, t, 0.02);
+                normMakeupGainNode.gain.setTargetAtTime(1.35, t, 0.02);
+            } catch {
+                normCompressorNode.threshold.value = -18;
+                normCompressorNode.ratio.value = 4;
+                normMakeupGainNode.gain.value = 1.35;
+            }
+        } else {
+            try {
+                normCompressorNode.threshold.setTargetAtTime(0, t, 0.02);
+                normCompressorNode.knee.setTargetAtTime(0, t, 0.02);
+                normCompressorNode.ratio.setTargetAtTime(1, t, 0.02);
+                normMakeupGainNode.gain.setTargetAtTime(1, t, 0.02);
+            } catch {
+                normCompressorNode.threshold.value = 0;
+                normCompressorNode.ratio.value = 1;
+                normMakeupGainNode.gain.value = 1;
+            }
+        }
+    }
+
+    function rebuildAutoEqNodes() {
+        if (!eqAudioContext || !eqFilterTail || !normCompressorNode) return;
+        try { eqFilterTail.disconnect(); } catch {}
+        autoEqFilterNodes.forEach(node => { try { node.disconnect(); } catch {} });
+        autoEqFilterNodes = [];
+
+        let last = eqFilterTail;
+        if (state.autoEqEnabled && state.autoEqFilters.length > 0) {
+            state.autoEqFilters.forEach(spec => {
+                const f = eqAudioContext.createBiquadFilter();
+                f.type = spec.type;
+                f.frequency.value = spec.frequency;
+                f.Q.value = spec.q;
+                f.gain.value = spec.gain;
+                last.connect(f);
+                last = f;
+                autoEqFilterNodes.push(f);
+            });
+        }
+        last.connect(normCompressorNode);
+        applyEqGains();
+    }
 
     function ensureEqContext() {
         if (eqAudioContext) return eqAudioContext;
@@ -61,7 +180,8 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             eqAudioContext = new AudioCtx();
             eqPreampNode = eqAudioContext.createGain();
-            eqPreampNode.gain.value = Math.pow(10, (state.eqEnabled ? state.eqPreamp : 0) / 20);
+            const totalPreampDb = (state.eqEnabled ? state.eqPreamp : 0) + (state.autoEqEnabled && state.autoEqFilters.length ? state.autoEqPreamp : 0);
+            eqPreampNode.gain.value = Math.pow(10, totalPreampDb / 20);
             eqFilters = EQ_FREQUENCIES.map((freq, i) => {
                 const f = eqAudioContext.createBiquadFilter();
                 if (i === 0) { f.type = 'lowshelf'; f.frequency.value = freq; }
@@ -70,6 +190,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 f.gain.value = state.eqEnabled ? state.eqGains[i] : 0;
                 return f;
             });
+            normCompressorNode = eqAudioContext.createDynamicsCompressor();
+            normMakeupGainNode = eqAudioContext.createGain();
             eqAnalyser = eqAudioContext.createAnalyser();
             eqAnalyser.fftSize = 256;
             masterGainNode = eqAudioContext.createGain();
@@ -77,12 +199,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const currentMuted = Boolean(state.userMuted !== undefined ? state.userMuted : (el.audio ? el.audio.muted : false));
             masterGainNode.gain.value = currentMuted ? 0 : currentVol;
 
-            // Chain: source -> preamp -> filters... -> analyser -> masterGainNode -> destination
+            // Chain: source -> preamp -> 16-band filters -> [autoEq filters] -> normCompressor -> normMakeupGain -> analyser -> masterGainNode -> destination
             let last = eqPreampNode;
             eqFilters.forEach(f => { last.connect(f); last = f; });
-            last.connect(eqAnalyser);
+            eqFilterTail = last;
+            normCompressorNode.connect(normMakeupGainNode);
+            normMakeupGainNode.connect(eqAnalyser);
             eqAnalyser.connect(masterGainNode);
             masterGainNode.connect(eqAudioContext.destination);
+            applyNormalizationState();
+            rebuildAutoEqNodes();
             return eqAudioContext;
         } catch (e) {
             console.warn('Web Audio init failed:', e);
@@ -138,7 +264,8 @@ document.addEventListener('DOMContentLoaded', () => {
             try { f.gain.setTargetAtTime(target, eqAudioContext.currentTime, 0.02); } catch { f.gain.value = target; }
         });
         if (eqPreampNode) {
-            const g = Math.pow(10, (state.eqEnabled ? state.eqPreamp : 0) / 20);
+            const totalPreampDb = (state.eqEnabled ? state.eqPreamp : 0) + (state.autoEqEnabled && state.autoEqFilters.length ? state.autoEqPreamp : 0);
+            const g = Math.pow(10, totalPreampDb / 20);
             try { eqPreampNode.gain.setTargetAtTime(g, eqAudioContext.currentTime, 0.02); } catch { eqPreampNode.gain.value = g; }
         }
         drawEqCanvas();
@@ -311,14 +438,83 @@ document.addEventListener('DOMContentLoaded', () => {
     if (eqPresetSelect) eqPresetSelect.value = EQ_PRESETS[state.eqPreset] ? state.eqPreset : 'custom';
     if (eqPreamp) { eqPreamp.value = state.eqPreamp; eqPreamp.disabled = !state.eqEnabled; }
     if (eqPreampValue) eqPreampValue.textContent = `${state.eqPreamp > 0 ? '+' : ''}${state.eqPreamp} dB`;
-    if (eqBtn) eqBtn.classList.toggle('active', state.eqEnabled);
+    if (eqBtn) eqBtn.classList.toggle('active', state.eqEnabled || state.normEnabled || (state.autoEqEnabled && state.autoEqFilters.length > 0));
     const eqStatus = document.getElementById('eq-status');
     if (eqStatus) { eqStatus.textContent = state.eqEnabled ? 'On' : 'Off'; eqStatus.classList.toggle('active', state.eqEnabled); }
     document.querySelectorAll('.eq-band-slider').forEach(sl => sl.disabled = !state.eqEnabled);
     drawEqCanvas();
 
-    // If EQ was enabled before, prepare context on next user gesture (autoplay policy)
-    if (state.eqEnabled) {
+    // Restore Volume Normalization & AutoEQ UI
+    const normToggle = document.getElementById('norm-enable-toggle');
+    const autoEqToggle = document.getElementById('autoeq-enable-toggle');
+    const autoEqInput = document.getElementById('autoeq-input');
+    const autoEqStatus = document.getElementById('autoeq-status');
+
+    function updateAudioExtrasUI() {
+        if (normToggle) normToggle.checked = state.normEnabled;
+        if (autoEqToggle) autoEqToggle.checked = state.autoEqEnabled;
+        if (autoEqStatus) {
+            autoEqStatus.textContent = state.autoEqFilters.length
+                ? `${state.autoEqFilters.length} filter (${state.autoEqPreamp > 0 ? '+' : ''}${state.autoEqPreamp} dB)`
+                : 'Belum ada profil';
+        }
+        if (eqBtn) {
+            eqBtn.classList.toggle('active', state.eqEnabled || state.normEnabled || (state.autoEqEnabled && state.autoEqFilters.length > 0));
+        }
+    }
+    if (autoEqInput && state.autoEqRawText) autoEqInput.value = state.autoEqRawText;
+    updateAudioExtrasUI();
+
+    normToggle?.addEventListener('change', (e) => {
+        state.normEnabled = e.target.checked;
+        if (state.normEnabled) initAudioGraph();
+        applyNormalizationState();
+        updateAudioExtrasUI();
+        saveEqState();
+        showToast(state.normEnabled ? 'Volume Normalization ON' : 'Volume Normalization OFF', 'success');
+    });
+
+    autoEqToggle?.addEventListener('change', (e) => {
+        state.autoEqEnabled = e.target.checked;
+        if (state.autoEqEnabled) initAudioGraph();
+        rebuildAutoEqNodes();
+        updateAudioExtrasUI();
+        saveEqState();
+        showToast(state.autoEqEnabled ? 'AutoEQ ON' : 'AutoEQ OFF', 'success');
+    });
+
+    document.getElementById('autoeq-apply-btn')?.addEventListener('click', () => {
+        const rawText = autoEqInput ? autoEqInput.value : '';
+        const parsed = parseAutoEqText(rawText);
+        if (!parsed.filters.length) {
+            showToast('Format AutoEQ tidak valid (tidak ada Filter ON ditemukan)', 'error');
+            return;
+        }
+        state.autoEqRawText = rawText;
+        state.autoEqPreamp = parsed.preamp;
+        state.autoEqFilters = parsed.filters;
+        state.autoEqEnabled = true;
+        initAudioGraph();
+        rebuildAutoEqNodes();
+        updateAudioExtrasUI();
+        saveEqState();
+        showToast(`AutoEQ diterapkan (${parsed.filters.length} filter)`, 'success');
+    });
+
+    document.getElementById('autoeq-clear-btn')?.addEventListener('click', () => {
+        state.autoEqRawText = '';
+        state.autoEqPreamp = 0;
+        state.autoEqFilters = [];
+        state.autoEqEnabled = false;
+        if (autoEqInput) autoEqInput.value = '';
+        rebuildAutoEqNodes();
+        updateAudioExtrasUI();
+        saveEqState();
+        showToast('Profil AutoEQ dihapus', 'success');
+    });
+
+    // If EQ/Normalization/AutoEQ was enabled before, prepare context on next user gesture (autoplay policy)
+    if (state.eqEnabled || state.normEnabled || (state.autoEqEnabled && state.autoEqFilters.length > 0)) {
         const resumeOnGesture = () => {
             const ctx = ensureEqContext();
             if (ctx) {

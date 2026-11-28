@@ -374,6 +374,50 @@ class LyricsAndAssetsTests(PsrFmTestCase):
         )
         self.assertEqual(put_res.status_code, 404)
 
+    def test_parse_ttml_lyrics_and_fallback(self):
+        from services.lyrics import _parse_ttml_lyrics, search_lyrics
+        import json as _json
+
+        ttml = (
+            '<tt xmlns="http://www.w3.org/ns/ttml">'
+            '<body><div>'
+            '<p begin="00:05.000" end="00:08.000">'
+            '<span begin="00:05.000" end="00:06.200">Look </span>'
+            '<span begin="00:06.200" end="00:08.000">at the stars</span>'
+            '</p>'
+            '</div></body></tt>'
+        )
+        parsed = _parse_ttml_lyrics(ttml)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed['lyrics'], 'Look at the stars')
+        self.assertIn('[00:05.00] Look at the stars', parsed['synced_lyrics'])
+        word_lines = _json.loads(parsed['word_synced_lyrics'])
+        self.assertEqual(len(word_lines[0]['words']), 2)
+        self.assertEqual(word_lines[0]['words'][0]['text'], 'Look ')
+
+        with patch('services.lyrics._search_lyrics_variant', return_value=None), \
+             patch('services.lyrics._search_better_lyrics', return_value=parsed):
+            found = search_lyrics('Yellow', 'Coldplay', 267)
+        self.assertEqual(found, parsed)
+
+    def test_search_lyrics_prefers_word_synced_ttml_over_line_lrc(self):
+        from services.lyrics import search_lyrics
+
+        line_only = {
+            'lyrics': 'Look at the stars',
+            'synced_lyrics': '[00:05.00] Look at the stars',
+            'word_synced_lyrics': '',
+        }
+        word_synced = {
+            'lyrics': 'Look at the stars',
+            'synced_lyrics': '[00:05.00] Look at the stars',
+            'word_synced_lyrics': '[{"text":"Look at the stars","start":5.0,"end":8.0,"words":[{"text":"Look ","start":5.0,"end":6.0}]}]',
+        }
+        with patch('services.lyrics._search_lyrics_variant', return_value=line_only), \
+             patch('services.lyrics._search_better_lyrics', return_value=word_synced):
+            found = search_lyrics('Yellow', 'Coldplay', 267)
+        self.assertEqual(found, word_synced)
+
 
 if __name__ == '__main__':
     unittest.main()
