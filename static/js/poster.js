@@ -62,6 +62,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const activeCardAngleInput = document.getElementById('poster-active-card-angle');
     const activeCardYawInput = document.getElementById('poster-active-card-yaw');
     const activeCardPitchInput = document.getElementById('poster-active-card-pitch');
+    const activeCardStartInput = document.getElementById('poster-active-card-start');
+    const activeCardStartHex = document.getElementById('poster-active-card-start-hex');
+    const activeCardEndInput = document.getElementById('poster-active-card-end');
+    const activeCardEndHex = document.getElementById('poster-active-card-end-hex');
+    const activeCardTextInput = document.getElementById('poster-active-card-text');
+    const resetCardColorsBtn = document.getElementById('poster-reset-card-colors-btn');
     const cardChipsEl = document.getElementById('poster-card-chips');
     const posterTabs = document.querySelectorAll('.poster-tab');
     const posterPanels = document.querySelectorAll('.poster-tab-panel');
@@ -114,6 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
             themeSwatches.forEach((b) => b.classList.remove('active'));
             btn.classList.add('active');
             syncThemeInputs(pair[0], pair[1]);
+            updateCardInspector();
             renderPoster();
         });
     });
@@ -126,6 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
             themeSwatches.forEach((b) => b.classList.remove('active'));
             setter(picker.value);
             if (hexInput) hexInput.value = picker.value.toUpperCase();
+            updateCardInspector();
             renderPoster();
         });
         hexInput?.addEventListener('input', () => {
@@ -134,12 +142,14 @@ document.addEventListener('DOMContentLoaded', () => {
             themeSwatches.forEach((b) => b.classList.remove('active'));
             setter(valid);
             if (picker) picker.value = valid;
+            updateCardInspector();
             renderPoster();
         });
     });
 
     cardTextInput?.addEventListener('input', () => {
         posterCardText = normalizeHex(cardTextInput.value) || '#ffffff';
+        updateCardInspector();
         renderPoster();
     });
     cardOpacityInput?.addEventListener('input', () => {
@@ -771,6 +781,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const ov = cardOverrides.get(card.songId) || {};
         if (activeCardNameEl) activeCardNameEl.textContent = card.song.title || 'Kartu dipilih';
         if (cardBehindToggle) cardBehindToggle.checked = ov.behindSubject !== undefined ? ov.behindSubject : true;
+        const colors = getCardColors(card.songId);
+        if (activeCardStartInput) activeCardStartInput.value = colors.startColor;
+        if (activeCardStartHex) {
+            activeCardStartHex.value = colors.startColor.toUpperCase();
+            activeCardStartHex.classList.remove('invalid');
+        }
+        if (activeCardEndInput) activeCardEndInput.value = colors.endColor;
+        if (activeCardEndHex) {
+            activeCardEndHex.value = colors.endColor.toUpperCase();
+            activeCardEndHex.classList.remove('invalid');
+        }
+        if (activeCardTextInput) activeCardTextInput.value = colors.textColor;
         if (activeCardScaleInput) {
             activeCardScaleInput.value = Math.round((typeof ov.scaleMul === 'number' ? ov.scaleMul : 1) * 100);
             syncSliderReadout(activeCardScaleInput);
@@ -891,6 +913,51 @@ document.addEventListener('DOMContentLoaded', () => {
         const ov = cardOverrides.get(activeCardId) || {};
         ov.pitchOffset = Number(activeCardPitchInput.value);
         cardOverrides.set(activeCardId, ov);
+        renderPoster();
+    });
+
+    [
+        [activeCardStartInput, activeCardStartHex, 'startColor'],
+        [activeCardEndInput, activeCardEndHex, 'endColor'],
+    ].forEach(([picker, hexInput, field]) => {
+        picker?.addEventListener('input', () => {
+            const color = normalizeHex(picker.value);
+            if (!activeCardId || !color) return;
+            const ov = cardOverrides.get(activeCardId) || {};
+            ov[field] = color;
+            cardOverrides.set(activeCardId, ov);
+            if (hexInput) {
+                hexInput.value = color;
+                hexInput.classList.remove('invalid');
+            }
+            renderPoster();
+        });
+        hexInput?.addEventListener('input', () => {
+            const color = normalizeHex(hexInput.value);
+            hexInput.classList.toggle('invalid', !color);
+            if (!activeCardId || !color) return;
+            const ov = cardOverrides.get(activeCardId) || {};
+            ov[field] = color;
+            cardOverrides.set(activeCardId, ov);
+            if (picker) picker.value = color;
+            hexInput.value = color;
+            renderPoster();
+        });
+    });
+
+    activeCardTextInput?.addEventListener('input', () => {
+        const color = normalizeHex(activeCardTextInput.value);
+        if (!activeCardId || !color) return;
+        const ov = cardOverrides.get(activeCardId) || {};
+        ov.textColor = color;
+        cardOverrides.set(activeCardId, ov);
+        renderPoster();
+    });
+
+    resetCardColorsBtn?.addEventListener('click', () => {
+        if (!activeCardId) return;
+        resetCardColors(activeCardId);
+        updateCardInspector();
         renderPoster();
     });
 
