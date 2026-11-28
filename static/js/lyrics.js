@@ -302,6 +302,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const hasSynced = Array.isArray(state.syncedLyrics) && state.syncedLyrics.length > 0;
         const hasPlain = Boolean(state.plainLyrics && state.plainLyrics.trim());
+        const hasWordSynced = Array.isArray(state.wordSyncedLyrics) && state.wordSyncedLyrics.some((line) => Array.isArray(line?.words) && line.words.length > 0);
+        const formatPill = document.getElementById('lyrics-format-pill') || document.querySelector('.lyrics-live-pill');
+        if (formatPill) {
+            formatPill.textContent = hasWordSynced ? 'TTML' : (hasSynced ? 'LRC' : (hasPlain ? 'PLAIN' : 'NONE'));
+        }
         if (state.lyricsEditing) {
             setLyricsEditing(true);
             return;
