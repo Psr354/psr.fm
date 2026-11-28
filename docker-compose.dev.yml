@@ -10,3 +10,6 @@ services:
       - ./templates:/app/templates
       - ./scripts:/app/scripts
       - ./tests:/app/tests
+    environment:
+      - PSR_FM_COOKIE_SECURE=0
+      - PSR_FM_TRUSTED_PROXY_COUNT=0

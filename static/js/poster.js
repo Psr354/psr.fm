@@ -52,6 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const bgDimInput = document.getElementById('poster-bg-dim');
     const fgToggle = document.getElementById('poster-fg-toggle');
     const fgStatusEl = document.getElementById('poster-fg-status');
+    const fgRetryBtn = document.getElementById('poster-fg-retry-btn');
     const cutoutLoadingEl = document.getElementById('poster-cutout-loading');
     const resetCardsBtn = document.getElementById('poster-reset-cards-btn');
     const cardInspector = document.getElementById('poster-card-inspector');
@@ -114,6 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const MAX_SONGS = 5;
     let selectedIds = new Set();
     let photoImage = null;
+    let photoFile = null;
     let foregroundCanvas = null;
     let photoUrl = null;
     const coverCache = new Map();
@@ -189,11 +191,13 @@ document.addEventListener('DOMContentLoaded', () => {
             off.getContext('2d').drawImage(cutoutImg, 0, 0);
             URL.revokeObjectURL(cutoutUrl);
             if (fgStatusEl) fgStatusEl.textContent = 'Subjek di depan kartu aktif';
+            if (fgRetryBtn) fgRetryBtn.style.display = 'none';
             return off;
         } catch (err) {
             console.warn('Segmentasi latar gagal:', err);
             const reason = err?.name === 'AbortError' ? 'timeout' : (err?.message || 'error');
             if (fgStatusEl) fgStatusEl.textContent = `Potong latar gagal (${reason})`;
+            if (fgRetryBtn) fgRetryBtn.style.display = '';
             return null;
         } finally {
             clearTimeout(timer);
@@ -837,6 +841,8 @@ document.addEventListener('DOMContentLoaded', () => {
     photoInput?.addEventListener('change', () => {
         const file = photoInput.files?.[0];
         if (!file) return;
+        photoFile = file;
+        if (fgRetryBtn) fgRetryBtn.style.display = 'none';
         if (photoUrl) URL.revokeObjectURL(photoUrl);
         photoUrl = URL.createObjectURL(file);
         foregroundCanvas = null;
@@ -854,9 +860,21 @@ document.addEventListener('DOMContentLoaded', () => {
         img.src = photoUrl;
     });
 
+    fgRetryBtn?.addEventListener('click', async () => {
+        if (!photoImage && !photoFile) return;
+        const targetImg = photoImage;
+        const cutout = await buildForegroundCutout(photoFile, targetImg);
+        if (photoImage === targetImg) {
+            foregroundCanvas = cutout;
+            renderPoster();
+        }
+    });
+
     photoClearBtn?.addEventListener('click', () => {
         photoImage = null;
+        photoFile = null;
         foregroundCanvas = null;
+        if (fgRetryBtn) fgRetryBtn.style.display = 'none';
         if (fgStatusEl) fgStatusEl.textContent = 'Subjek di depan kartu (potong latar otomatis)';
         if (photoUrl) {
             URL.revokeObjectURL(photoUrl);

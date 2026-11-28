@@ -1398,3 +1398,10 @@ body, .app-container {
         min-height: 40px;
     }
 }
+
+.poster-fg-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}

@@ -298,9 +298,13 @@ def _get_cutout_session(u2net_dir):
     with _cutout_lock:
         if _cutout_session is None:
             import os
+            import onnxruntime as ort
             os.environ.setdefault('U2NET_HOME', u2net_dir)
+            sess_opts = ort.SessionOptions()
+            sess_opts.intra_op_num_threads = 2
+            sess_opts.inter_op_num_threads = 1
             from rembg import new_session
-            _cutout_session = new_session('u2netp')
+            _cutout_session = new_session('u2netp', sess_options=sess_opts)
         return _cutout_session
 
 
@@ -311,6 +315,11 @@ def poster_subject_cutout():
     import os
     from flask import current_app, request, send_file
     from PIL import Image, ImageOps
+    from services.common import check_lyrics_rate_limit
+
+    allowed, retry_after = check_lyrics_rate_limit(current_user.id)
+    if not allowed:
+        return jsonify({'error': 'Too many cutout requests', 'retry_after': retry_after}), 429
 
     image_file = request.files.get('image')
     if not image_file:

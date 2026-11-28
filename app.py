@@ -145,6 +145,9 @@ def set_csrf_cookie(response):
     response.headers.setdefault('X-Content-Type-Options', 'nosniff')
     response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
     response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    response.headers.setdefault('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+    if COOKIE_SECURE:
+        response.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
 
     is_static_path = request.path.startswith('/static/')
     if not is_static_path:

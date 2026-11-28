@@ -86,8 +86,11 @@ Siapkan direktori data dan log (opsional, juga otomatis ditangani oleh entrypoin
 
 ```bash
 mkdir -p data logs
-docker compose up -d --build
+# Pengembangan lokal melalui HTTP
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
+
+Untuk deployment, gunakan `docker compose up -d --build` di belakang reverse proxy HTTPS. Konfigurasi default hanya mempublikasikan port ke `127.0.0.1` dan cookie sesi aman diaktifkan; jangan akses aplikasi produksi langsung melalui HTTP.
 
 Docker akan memasang dependensi Python dan FFmpeg, lalu menjalankan aplikasi. Periksa statusnya:
 
@@ -95,7 +98,7 @@ Docker akan memasang dependensi Python dan FFmpeg, lalu menjalankan aplikasi. Pe
 docker compose ps
 ```
 
-Buka **[http://localhost:5000](http://localhost:5000)**. Jika aplikasi berjalan di server lain, gunakan `http://<alamat-ip-server>:5000`.
+Buka **[http://localhost:5000](http://localhost:5000)** untuk pengembangan lokal. Untuk deployment, akses melalui domain HTTPS reverse proxy.
 
 ### 4. Buat akun admin
 
@@ -184,7 +187,7 @@ Data tersebut disimpan di folder proyek melalui bind mount (`./data:/app/data`) 
 | User Management tidak terlihat | Pastikan akun yang digunakan adalah admin. |
 | Lirik tidak ditemukan | Tambahkan lirik melalui **Edit** di panel Lyrics. |
 
-Untuk akses melalui internet, gunakan HTTPS, reverse proxy, dan atur `PSR_FM_COOKIE_SECURE=1` pada `.env`. Untuk pengembangan lokal dengan bind-mount source code, jalankan `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`.
+Untuk akses melalui internet, gunakan HTTPS melalui reverse proxy. Konfigurasi Compose default membatasi port aplikasi ke localhost dan `.env.example` mengaktifkan `PSR_FM_COOKIE_SECURE=1`. Jangan nonaktifkan pengaturan tersebut di deployment; override development mengaktifkan HTTP hanya untuk pengujian lokal.
 
 > **Catatan deployment Gunicorn:** Pertahankan `--workers 1` (seperti pada `Dockerfile`). Antrean download, rate limiter in-memory, cache storage, dan sesi Socket.IO berjalan di dalam satu proses; menaikkan jumlah worker tanpa store eksternal (seperti Redis) akan menyebabkan job download diproses ganda dan state tidak konsisten.
 

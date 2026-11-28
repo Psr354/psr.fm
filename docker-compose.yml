@@ -3,7 +3,7 @@ services:
     build: .
     container_name: psr_fm_app
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -13,6 +13,8 @@ services:
     environment:
       - FLASK_ENV=production
       - FLASK_DEBUG=0
+      - PSR_FM_COOKIE_SECURE=1
+      - PSR_FM_TRUSTED_PROXY_COUNT=1
       - PSR_FM_DATABASE_PATH=/app/data/psr_fm.sqlite3
       - PSR_FM_DOWNLOAD_DIR=/app/data/downloads
       - PSR_FM_ALBUM_ART_DIR=/app/data/album_art
