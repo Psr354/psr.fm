@@ -69,19 +69,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const themeStartHex = document.getElementById('poster-theme-start-hex');
     const themeEndInput = document.getElementById('poster-theme-end');
     const themeEndHex = document.getElementById('poster-theme-end-hex');
-    const tintCardsToggle = document.getElementById('poster-tint-cards-toggle');
+    const cardTextInput = document.getElementById('poster-card-text');
+    const cardOpacityInput = document.getElementById('poster-card-opacity');
     const themeSwatches = document.querySelectorAll('[data-poster-theme]');
 
     const POSTER_THEMES = {
-        obsidian: ['#0f172a', '#09090b'],
+        obsidian: ['#14161c', '#1c202b'],
         verde: ['#073b25', '#30d66b'],
         dusk: ['#182848', '#4b6cb7'],
         rose: ['#7f1d1d', '#fb7185'],
         amber: ['#78350f', '#fbbf24'],
         cyan: ['#164e63', '#38bdf8'],
     };
-    let posterThemeStart = '#0f172a';
-    let posterThemeEnd = '#09090b';
+    let posterCardStart = '#14161c';
+    let posterCardEnd = '#1c202b';
+    let posterCardText = '#ffffff';
 
     function normalizeHex(val) {
         const cleaned = String(val || '').trim();
@@ -97,8 +99,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function syncThemeInputs(start, end) {
-        posterThemeStart = start;
-        posterThemeEnd = end;
+        posterCardStart = start;
+        posterCardEnd = end;
         if (themeStartInput) themeStartInput.value = start;
         if (themeStartHex) themeStartHex.value = start.toUpperCase();
         if (themeEndInput) themeEndInput.value = end;
@@ -117,8 +119,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     [
-        [themeStartInput, themeStartHex, (v) => { posterThemeStart = v; }],
-        [themeEndInput, themeEndHex, (v) => { posterThemeEnd = v; }],
+        [themeStartInput, themeStartHex, (v) => { posterCardStart = v; }],
+        [themeEndInput, themeEndHex, (v) => { posterCardEnd = v; }],
     ].forEach(([picker, hexInput, setter]) => {
         picker?.addEventListener('input', () => {
             themeSwatches.forEach((b) => b.classList.remove('active'));
@@ -136,7 +138,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    tintCardsToggle?.addEventListener('change', renderPoster);
+    cardTextInput?.addEventListener('input', () => {
+        posterCardText = normalizeHex(cardTextInput.value) || '#ffffff';
+        renderPoster();
+    });
+    cardOpacityInput?.addEventListener('input', () => {
+        updateSliderReadouts();
+        renderPoster();
+    });
 
     function setActivePosterTab(tabName) {
         posterTabs.forEach((btn) => {
@@ -432,14 +441,11 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.shadowBlur = 32;
         ctx.shadowOffsetY = 14;
         drawRoundRect(ctx, 0, 0, w, h, radius);
-        if (tintCardsToggle && tintCardsToggle.checked) {
-            const cardGrad = ctx.createLinearGradient(0, 0, w, h);
-            cardGrad.addColorStop(0, hexToRgba(posterThemeStart, 0.86));
-            cardGrad.addColorStop(1, hexToRgba(posterThemeEnd, 0.86));
-            ctx.fillStyle = cardGrad;
-        } else {
-            ctx.fillStyle = 'rgba(20, 22, 28, 0.78)';
-        }
+        const cardAlpha = Math.max(0.3, Math.min(1, Number(cardOpacityInput?.value || 84) / 100));
+        const cardGrad = ctx.createLinearGradient(0, 0, w, h);
+        cardGrad.addColorStop(0, hexToRgba(posterCardStart, cardAlpha));
+        cardGrad.addColorStop(1, hexToRgba(posterCardEnd, cardAlpha));
+        ctx.fillStyle = cardGrad;
         ctx.fill();
         ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;
@@ -483,7 +489,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Brand tag
         let cursorY = pad + artSize + Math.round(w * 0.06);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+        ctx.fillStyle = hexToRgba(posterCardText, 0.65);
         ctx.font = `600 ${Math.round(w * 0.042)}px Manrope, sans-serif`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
@@ -491,10 +497,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Title + heart
         cursorY += Math.round(w * 0.058);
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = posterCardText;
         ctx.font = `700 ${Math.round(w * 0.068)}px Manrope, sans-serif`;
         ctx.fillText(fitText(ctx, song.title || 'Unknown', artSize - 26), pad, cursorY);
-        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.fillStyle = hexToRgba(posterCardText, 0.85);
         ctx.font = `600 ${Math.round(w * 0.065)}px sans-serif`;
         ctx.textAlign = 'right';
         ctx.fillText('♡', pad + artSize, cursorY);
@@ -502,16 +508,16 @@ document.addEventListener('DOMContentLoaded', () => {
         // Artist
         cursorY += Math.round(w * 0.082);
         ctx.textAlign = 'left';
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+        ctx.fillStyle = hexToRgba(posterCardText, 0.72);
         ctx.font = `500 ${Math.round(w * 0.052)}px Manrope, sans-serif`;
         ctx.fillText(fitText(ctx, song.artist || 'Unknown', artSize), pad, cursorY);
 
         // Progress bar
         cursorY += Math.round(w * 0.088);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+        ctx.fillStyle = hexToRgba(posterCardText, 0.22);
         drawRoundRect(ctx, pad, cursorY, artSize, 4, 2);
         ctx.fill();
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = posterCardText;
         drawRoundRect(ctx, pad, cursorY, Math.round(artSize * 0.58), 4, 2);
         ctx.fill();
         ctx.beginPath();
@@ -520,7 +526,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Controls row
         cursorY += Math.round(w * 0.075);
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = posterCardText;
         ctx.font = `700 ${Math.round(w * 0.07)}px sans-serif`;
         ctx.textAlign = 'center';
         const cx = w / 2;
@@ -613,10 +619,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const H = canvas.height;
         ctx.clearRect(0, 0, W, H);
 
-        // Background gradient base (uses selected theme or custom colors)
+        // Dark gradient base
         const bgGrad = ctx.createLinearGradient(0, 0, W, H);
-        bgGrad.addColorStop(0, posterThemeStart);
-        bgGrad.addColorStop(1, posterThemeEnd);
+        bgGrad.addColorStop(0, '#0d0f14');
+        bgGrad.addColorStop(1, '#151821');
         ctx.fillStyle = bgGrad;
         ctx.fillRect(0, 0, W, H);
 
