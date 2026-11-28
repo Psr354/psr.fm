@@ -138,6 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         hexInput?.addEventListener('input', () => {
             const valid = normalizeHex(hexInput.value);
+            hexInput.classList.toggle('invalid', !valid);
             if (!valid) return;
             themeSwatches.forEach((b) => b.classList.remove('active'));
             setter(valid);
@@ -153,7 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderPoster();
     });
     cardOpacityInput?.addEventListener('input', () => {
-        updateSliderReadouts();
+        syncSliderReadout(cardOpacityInput);
         renderPoster();
     });
 
@@ -177,7 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const badge = document.querySelector(`[data-poster-val="${input.id}"]`);
         if (!badge) return;
         const v = Number(input.value);
-        if (input.id.includes('scale') || input.id === 'poster-bg-dim') badge.textContent = `${v}%`;
+        if (input.id.includes('scale') || input.id === 'poster-bg-dim' || input.id === 'poster-card-opacity') badge.textContent = `${v}%`;
         else if (input.id.includes('photo-x') || input.id.includes('photo-y')) badge.textContent = `${v}px`;
         else badge.textContent = `${v > 0 ? '+' : ''}${v}°`;
     }
@@ -211,6 +212,26 @@ document.addEventListener('DOMContentLoaded', () => {
     let photoUrl = null;
     const coverCache = new Map();
     const cardOverrides = new Map(); // songId -> { x, y, scaleMul, angleOffset, behindSubject, startColor, endColor, textColor }
+    let posterPlaylistId = null;
+
+    function reconcilePosterSelection(playlistId, songs) {
+        const nextPlaylistId = String(playlistId || '');
+        const validIds = new Set(songs.map((song) => String(song.id)));
+        if (posterPlaylistId !== nextPlaylistId) {
+            posterPlaylistId = nextPlaylistId;
+            selectedIds = new Set(songs.slice(0, 4).map((song) => String(song.id)));
+            cardOverrides.clear();
+            activeCardId = null;
+            return;
+        }
+        selectedIds = new Set([...selectedIds].filter((id) => validIds.has(id)));
+        for (const key of cardOverrides.keys()) {
+            if (!validIds.has(key)) cardOverrides.delete(key);
+        }
+        if (activeCardId && !validIds.has(activeCardId)) {
+            activeCardId = null;
+        }
+    }
 
     function getCardColors(songId) {
         const override = cardOverrides.get(String(songId)) || {};
@@ -266,7 +287,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (fgStatusEl) fgStatusEl.textContent = 'Memotong latar subjek...';
         if (cutoutLoadingEl) cutoutLoadingEl.style.display = 'flex';
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 45000);
+        const timer = setTimeout(() => controller.abort(), 120000);
         try {
             const resizedBlob = img ? await resizeImageForCutout(img) : null;
             const formData = new FormData();
@@ -285,7 +306,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 signal: controller.signal,
             });
             if (!res.ok) {
-                throw new Error(`HTTP ${res.status}`);
+                const data = await res.json().catch(() => ({}));
+                const detail = data.error || `HTTP ${res.status}`;
+                throw new Error(detail);
             }
             const blob = await res.blob();
             const cutoutUrl = URL.createObjectURL(blob);
@@ -578,7 +601,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const margin = 44;
+        const margin = 56;
         if (!cardBuffer) cardBuffer = document.createElement('canvas');
         cardBuffer.width = w + margin * 2;
         cardBuffer.height = h + margin * 2;
@@ -641,8 +664,24 @@ document.addEventListener('DOMContentLoaded', () => {
         return slots;
     }
 
+    let dragRafId = null;
+    function scheduleRender() {
+        if (dragRafId !== null) return;
+        dragRafId = requestAnimationFrame(() => {
+            dragRafId = null;
+            renderPoster();
+        });
+    }
+
     async function renderPoster() {
         const token = ++renderToken;
+        const songs = (Array.isArray(state.currentPlaylistSongs) ? state.currentPlaylistSongs : [])
+            .filter((s) => selectedIds.has(String(s.id)))
+            .slice(0, MAX_SONGS);
+
+        const bitmaps = await Promise.all(songs.map(getSongBitmap));
+        if (token !== renderToken) return;
+
         const ctx = canvas.getContext('2d');
         const W = canvas.width;
         const H = canvas.height;
@@ -687,13 +726,6 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.fillRect(0, 0, W, H);
         }
 
-        const songs = (Array.isArray(state.currentPlaylistSongs) ? state.currentPlaylistSongs : [])
-            .filter((s) => selectedIds.has(String(s.id)))
-            .slice(0, MAX_SONGS);
-
-        const bitmaps = await Promise.all(songs.map(getSongBitmap));
-        if (token !== renderToken) return;
-
         const slots = getCardPlacements(
             songs.length,
             layoutSelect?.value || 'orbit',
@@ -721,8 +753,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return { songId: sid, song, bitmap: bitmaps[idx], x, y, w, h, angle, yaw, pitch, behindSubject, colors: getCardColors(sid) };
         }).filter(Boolean);
 
+        const prevIds = renderedCards.map((c) => c.songId).join(',');
         renderedCards = cardsToDraw;
-        renderCardChips();
+        const nextIds = renderedCards.map((c) => c.songId).join(',');
+        if (prevIds !== nextIds) {
+            renderCardChips();
+        }
         if (activeCardId && !renderedCards.some((c) => c.songId === activeCardId)) {
             activeCardId = null;
             updateCardInspector();
@@ -820,8 +856,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function hitTestCard(px, py) {
-        for (let i = renderedCards.length - 1; i >= 0; i--) {
-            const c = renderedCards[i];
+        const ordered = [
+            ...renderedCards.filter((c) => !c.behindSubject),
+            ...renderedCards.filter((c) => c.behindSubject),
+        ];
+        for (let i = ordered.length - 1; i >= 0; i--) {
+            const c = ordered[i];
             const cx = c.x + c.w / 2;
             const cy = c.y + c.h / 2;
             const rad = (-c.angle * Math.PI) / 180;
@@ -839,7 +879,13 @@ document.addEventListener('DOMContentLoaded', () => {
     canvas.addEventListener('pointerdown', (e) => {
         const pt = getCanvasPoint(e);
         const hit = hitTestCard(pt.x, pt.y);
-        if (!hit) return;
+        if (!hit) {
+            if (activeCardId) {
+                activeCardId = null;
+                updateCardInspector();
+            }
+            return;
+        }
         activeCardId = hit.songId;
         updateCardInspector();
         dragState = {
@@ -865,7 +911,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (layoutSelect && layoutSelect.value !== 'custom') {
             layoutSelect.value = 'custom';
         }
-        renderPoster();
+        scheduleRender();
     });
 
     const endDrag = () => {
@@ -962,8 +1008,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     resetCardsBtn?.addEventListener('click', () => {
-        cardOverrides.clear();
-        activeCardId = null;
+        for (const [sid, ov] of cardOverrides.entries()) {
+            const next = {};
+            if (ov.startColor) next.startColor = ov.startColor;
+            if (ov.endColor) next.endColor = ov.endColor;
+            if (ov.textColor) next.textColor = ov.textColor;
+            if (Object.keys(next).length > 0) cardOverrides.set(sid, next);
+            else cardOverrides.delete(sid);
+        }
         if (layoutSelect) layoutSelect.value = 'orbit';
         updateCardInspector();
         renderPoster();
@@ -981,10 +1033,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function openPosterModal() {
         const songs = Array.isArray(state.currentPlaylistSongs) ? state.currentPlaylistSongs : [];
-        if (selectedIds.size === 0 && songs.length) {
-            songs.slice(0, Math.min(4, songs.length)).forEach((s) => selectedIds.add(String(s.id)));
-        }
+        reconcilePosterSelection(state.currentPlaylistId, songs);
         renderSongList();
+        syncSliderReadout(cardOpacityInput);
+        updateCardInspector();
         modal.style.display = 'flex';
         modal.setAttribute('aria-hidden', 'false');
         renderPoster();

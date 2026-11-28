@@ -1400,10 +1400,10 @@ body, .app-container {
         gap: 8px;
     }
     .poster-canvas-wrap {
-        max-width: 220px;
+        max-width: 200px;
     }
     .poster-controls-col {
-        max-height: 38dvh;
+        max-height: 44dvh;
     }
     .poster-sliders {
         grid-template-columns: 1fr;
