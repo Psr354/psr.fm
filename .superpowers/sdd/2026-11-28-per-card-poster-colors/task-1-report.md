@@ -23,3 +23,29 @@ Implemented per-card poster color resolution and rendering.
 ## Self-review
 
 Verified all card paint paths receive `colors`, and no card content paint references the global color variables directly. Reset removes only `startColor`, `endColor`, and `textColor`; existing positioning, scale, and layering overrides remain intact. No additional concerns identified.
+
+## Reviewer Follow-up
+
+- Updated `getCardColors(songId)` to pass each `startColor`, `endColor`, and `textColor` override through `normalizeHex`. Invalid or missing values now fall back independently to their corresponding global color.
+- Added focused coverage where a card overrides only `endColor`, confirming `startColor` and `textColor` still use their separate global values. Added malformed truthy overrides for all three fields and confirmed each falls back to its corresponding global.
+- Confirmed the malformed-value regression test failed against the old implementation: it returned `red`, `#123`, and `#ffffff;` instead of the three global values.
+
+Covering test command:
+
+```text
+node --test tests/frontend/poster-colors.test.mjs
+```
+
+Output:
+
+```text
+✔ tests/frontend/poster-colors.test.mjs (67.701553ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 79.719867
+```

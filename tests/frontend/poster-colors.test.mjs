@@ -50,6 +50,22 @@ assert.deepEqual(
     JSON.parse(JSON.stringify(vm.runInContext(`getCardColors('2')`, context))),
     { startColor: '#14161c', endColor: '#1c202b', textColor: '#ffffff' }
 );
+vm.runInContext(`cardOverrides.set('4', { endColor: '#AABBCC' })`, context);
+assert.deepEqual(
+    JSON.parse(JSON.stringify(vm.runInContext(`getCardColors('4')`, context))),
+    { startColor: '#14161c', endColor: '#AABBCC', textColor: '#ffffff' }
+);
+vm.runInContext(`
+    cardOverrides.set('5', {
+        startColor: 'red',
+        endColor: '#123',
+        textColor: '#ffffff;'
+    });
+`, context);
+assert.deepEqual(
+    JSON.parse(JSON.stringify(vm.runInContext(`getCardColors('5')`, context))),
+    { startColor: '#14161c', endColor: '#1c202b', textColor: '#ffffff' }
+);
 
 vm.runInContext(`resetCardColors('1')`, context);
 assert.deepEqual(

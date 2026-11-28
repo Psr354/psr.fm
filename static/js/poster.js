@@ -205,9 +205,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function getCardColors(songId) {
         const override = cardOverrides.get(String(songId)) || {};
         return {
-            startColor: override.startColor || posterCardStart,
-            endColor: override.endColor || posterCardEnd,
-            textColor: override.textColor || posterCardText,
+            startColor: normalizeHex(override.startColor) || posterCardStart,
+            endColor: normalizeHex(override.endColor) || posterCardEnd,
+            textColor: normalizeHex(override.textColor) || posterCardText,
         };
     }
 
