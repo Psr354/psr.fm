@@ -85,8 +85,11 @@ button { touch-action: manipulation; }
 .stat-time .stat-icon { color: var(--amber-accent); }
 .stat-storage .stat-icon { color: #c084fc; }
 
-.playlist-header-main { display: flex; align-items: center; justify-content: space-between; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid var(--border-subtle); }
-.playlist-identity { display: flex; align-items: center; gap: 24px; min-width: 0; }
+.playlist-header-main { display: grid; grid-template-columns: 160px minmax(0, 1fr); column-gap: 24px; row-gap: 14px; align-items: start; margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid var(--border-subtle); }
+.playlist-identity { display: contents; }
+.playlist-identity > .playlist-cover-wrapper { grid-column: 1; grid-row: 1 / span 2; }
+.playlist-identity > div:not(.playlist-cover-wrapper) { grid-column: 2; grid-row: 1; min-width: 0; align-self: end; }
+.playlist-header-main > .playlist-action-buttons { grid-column: 2; grid-row: 2; margin-top: 0; align-self: start; }
 .playlist-title-row { display: flex; align-items: center; gap: 12px; }
 .playlist-title-row h2 { font-size: 32px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: min(560px, 60vw); }
 .playlist-meta { color: var(--text-secondary); margin-top: 8px; }
@@ -987,8 +990,8 @@ body, .app-container {
     .volume-control { display: flex; position: absolute; top: 12px; right: 10px; width: auto; min-width: 0; gap: 8px; }
     .volume-slider { display: none; }
 
-    .playlist-header-main { flex-direction: column; align-items: stretch; gap: 12px; }
-    .playlist-identity { gap: 12px; align-items: center; }
+    .playlist-header-main { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+    .playlist-identity { display: flex; gap: 12px; align-items: center; min-width: 0; }
     .playlist-title-row h2 { font-size: 20px; max-width: calc(100vw - 144px); }
     .playlist-cover-wrapper { width: 84px; height: 84px; flex-shrink: 0; }
     .playlist-action-buttons { width: 100%; margin-top: 2px; gap: 6px; }
